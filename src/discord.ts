@@ -166,7 +166,7 @@ async function handleMessage(
 
     enqueue(firstMessage.channelId, combinedText, onEvent, {
       cwd: config.claudeCwd,
-      acpxCmd: config.acpxCommand,
+      claudeCmd: config.claudeCommand,
     });
   });
 }

@@ -10,6 +10,8 @@
  * 5. 監聽 process 結束信號，優雅關閉
  */
 
+// NOTE: dotenv 必須在 config.ts 之前載入，否則 process.env 尚未填充
+import "dotenv/config";
 import { config } from "./config.js";
 import { createDiscordClient } from "./discord.js";
 

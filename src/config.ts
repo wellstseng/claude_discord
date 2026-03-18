@@ -18,10 +18,10 @@ export interface BridgeConfig {
   triggerMode: TriggerMode;
   /** 允許回應的頻道 ID 集合，空集合表示全部允許 */
   allowedChannelIds: Set<string>;
-  /** Claude session 工作目錄（acpx --cwd 參數），預設 $HOME */
+  /** Claude session 工作目錄（spawn cwd），預設 $HOME */
   claudeCwd: string;
-  /** acpx binary 路徑，預設 "acpx" */
-  acpxCommand: string;
+  /** claude CLI binary 路徑，預設 "claude" */
+  claudeCommand: string;
   /** Debounce 毫秒數，同一人連續訊息的合併等待時間，預設 500 */
   debounceMs: number;
 }
@@ -58,7 +58,7 @@ function loadConfig(): BridgeConfig {
 
   const claudeCwd = process.env.CLAUDE_CWD || process.env.HOME || "/";
 
-  const acpxCommand = process.env.ACPX_COMMAND || "acpx";
+  const claudeCommand = process.env.CLAUDE_COMMAND || "claude";
 
   // NOTE: DEBOUNCE_MS 需轉 int，非數字時 fallback 500
   const rawDebounce = parseInt(process.env.DEBOUNCE_MS ?? "500", 10);
@@ -69,7 +69,7 @@ function loadConfig(): BridgeConfig {
     triggerMode,
     allowedChannelIds,
     claudeCwd,
-    acpxCommand,
+    claudeCommand,
     debounceMs,
   };
 }

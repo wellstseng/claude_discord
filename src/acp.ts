@@ -1,12 +1,15 @@
 /**
  * @file acp.ts
- * @description ACP protocol 實作（直接 spawn acpx，不依賴 OpenClaw）
+ * @description Claude CLI 串流對話實作
  *
- * 提供兩個核心函式：
- * - ensureAcpSession：確保 ACP session 存在（首次建立或已存在均可）
- * - runAcpTurn：執行一輪對話，以 AsyncGenerator 串流 AcpEvent
+ * 直接 spawn `claude -p --output-format stream-json` 進行對話，
+ * 以 AsyncGenerator 串流 AcpEvent 給上層消費。
  *
- * ACP CLI 指令格式參考自 openclaw/extensions/acpx/src/runtime.ts。
+ * 與原始 acpx 設計的差異：
+ * - 無需 `sessions ensure`，session 由 claude CLI 內建管理
+ * - 首次對話不帶 --resume，從 system/init event 取得 session_id
+ * - 後續對話帶 --resume <session_id> 延續上下文
+ * - 使用 --include-partial-messages 實現串流（累積文字 diff 為 delta）
  */
 
 import { spawn } from "node:child_process";
@@ -19,197 +22,76 @@ export type AcpEvent =
   | { type: "tool_call"; title: string }
   | { type: "done" }
   | { type: "error"; message: string }
-  | { type: "status"; raw: unknown };
+  | { type: "status"; raw: unknown }
+  | { type: "session_init"; sessionId: string };
 
-// ── 工具函式 ────────────────────────────────────────────────────────────────
+// ── 型別守衛（解析 claude stream-json 用） ───────────────────────────────────
 
-/**
- * 解析單行 JSON 字串為 AcpEvent
- * 無法識別的格式 → 回傳 status event（靜默忽略）
- * @param line 單行 JSON 字串
- */
-function parseLine(line: string): AcpEvent | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
+/** claude stream-json 的 content block 型別 */
+interface ContentBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  id?: string;
+}
 
-  let obj: Record<string, unknown>;
-  try {
-    obj = JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    // 非 JSON 行（例如 acpx 的 debug log）直接略過
-    return null;
-  }
-
-  const type = obj["type"] as string | undefined;
-
-  if (type === "text_delta") {
-    return { type: "text_delta", text: (obj["text"] as string) ?? "" };
-  }
-  if (type === "tool_call" || type === "tool_use") {
-    // NOTE: tool title 欄位名稱在不同版本 acpx 可能不同，保守做法兩個都試
-    const title =
-      (obj["title"] as string) ??
-      (obj["name"] as string) ??
-      "unknown tool";
-    return { type: "tool_call", title };
-  }
-  if (type === "done" || type === "result") {
-    return { type: "done" };
-  }
-  if (type === "error") {
-    return { type: "error", message: (obj["message"] as string) ?? String(obj) };
-  }
-
-  return { type: "status", raw: obj };
+/** claude stream-json 的 assistant message 型別 */
+interface AssistantMessage {
+  id: string;
+  content: ContentBlock[];
 }
 
 // ── 主要 API ────────────────────────────────────────────────────────────────
 
 /**
- * 確保指定名稱的 ACP session 存在
- * 若 session 不存在則建立；已存在則直接返回
- * @param sessionName session 名稱（通常是 channelId）
- * @param cwd Claude session 工作目錄
- * @param acpxCmd acpx binary 路徑
- * @throws 若 acpx 執行失敗或輸出中找不到 session ID
- */
-export async function ensureAcpSession(
-  sessionName: string,
-  cwd: string,
-  acpxCmd: string
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "--format", "json",
-      "--json-strict",
-      "--cwd", cwd,
-      "sessions", "ensure",
-      "--name", sessionName,
-    ];
-
-    const proc = spawn(acpxCmd, args, { stdio: ["ignore", "pipe", "pipe"] });
-
-    let stdout = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    proc.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    proc.on("close", (code) => {
-      if (code !== 0) {
-        reject(
-          new Error(
-            `acpx sessions ensure 失敗（exit ${code}）: ${stderr.trim()}`
-          )
-        );
-        return;
-      }
-
-      // 驗證輸出中有 session 相關欄位，確認 session 確實建立成功
-      const lines = stdout.split("\n");
-      const hasSession = lines.some((line) => {
-        try {
-          const obj = JSON.parse(line.trim()) as Record<string, unknown>;
-          return (
-            "agentSessionId" in obj ||
-            "acpxSessionId" in obj ||
-            "sessionId" in obj ||
-            obj["type"] === "session"
-          );
-        } catch {
-          return false;
-        }
-      });
-
-      if (!hasSession) {
-        // NOTE: 部分版本 acpx 在 session 已存在時僅輸出 {"type":"ok"}，視為成功
-        const hasOk = lines.some((line) => {
-          try {
-            const obj = JSON.parse(line.trim()) as Record<string, unknown>;
-            return obj["type"] === "ok" || obj["status"] === "ok";
-          } catch {
-            return false;
-          }
-        });
-        if (!hasOk && stdout.trim() === "") {
-          reject(
-            new Error(
-              `acpx sessions ensure 輸出無法識別 session，stdout: ${stdout.trim()}`
-            )
-          );
-          return;
-        }
-      }
-
-      resolve();
-    });
-
-    proc.on("error", (err) => {
-      reject(new Error(`無法啟動 acpx：${err.message}`));
-    });
-  });
-}
-
-/**
- * 執行一輪 ACP 對話，以 AsyncGenerator 串流 AcpEvent
- * @param sessionName session 名稱
+ * 執行一輪 Claude 對話，以 AsyncGenerator 串流 AcpEvent
+ *
+ * @param sessionId 上次對話的 session ID（首次為 null）
  * @param text 使用者輸入文字
- * @param cwd Claude session 工作目錄
- * @param acpxCmd acpx binary 路徑
+ * @param cwd Claude session 工作目錄（spawn cwd）
+ * @param claudeCmd claude binary 路徑
  * @param signal AbortSignal，用於取消進行中的 turn
- * @yields AcpEvent（text_delta / tool_call / done / error / status）
+ * @yields AcpEvent（session_init / text_delta / tool_call / done / error / status）
  */
-export async function* runAcpTurn(
-  sessionName: string,
+export async function* runClaudeTurn(
+  sessionId: string | null,
   text: string,
   cwd: string,
-  acpxCmd: string,
+  claudeCmd: string,
   signal?: AbortSignal
 ): AsyncGenerator<AcpEvent> {
   const args = [
-    "--format", "json",
-    "--json-strict",
-    "--cwd", cwd,
-    "--approve-all",
-    "prompt",
-    "--session", sessionName,
-    "--file", "-",
+    "-p",
+    "--output-format", "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--dangerously-skip-permissions",
   ];
 
-  const proc = spawn(acpxCmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+  // 有上次 session → --resume 延續對話上下文
+  if (sessionId) {
+    args.push("--resume", sessionId);
+  }
 
-  // 發送 prompt 並關閉 stdin，觸發 acpx 開始處理
-  proc.stdin.write(text, "utf8");
-  proc.stdin.end();
+  // prompt 作為 positional argument
+  args.push(text);
 
-  // 處理 AbortSignal：先送 cancel 指令，再 SIGTERM，250ms 後 SIGKILL
+  const proc = spawn(claudeCmd, args, {
+    cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  // 處理 AbortSignal：SIGTERM → 250ms → SIGKILL
   const abortHandler = () => {
-    const cancelArgs = [
-      "--format", "json",
-      "--json-strict",
-      "--cwd", cwd,
-      "cancel",
-      "--session", sessionName,
-    ];
-    // 非同步發送 cancel，不等待結果
-    const cancelProc = spawn(acpxCmd, cancelArgs, { stdio: "ignore" });
-    cancelProc.on("error", () => {/* 靜默忽略 cancel 指令的錯誤 */});
-
-    // NOTE: SIGTERM → 250ms → SIGKILL，給 acpx 機會優雅關閉
     proc.kill("SIGTERM");
     setTimeout(() => {
       if (!proc.killed) proc.kill("SIGKILL");
     }, 250);
   };
-
   signal?.addEventListener("abort", abortHandler, { once: true });
 
-  // 用 Promise 收集 events，讓 generator 可以 yield
-  const eventQueue: Array<AcpEvent | null> = []; // null 代表結束
+  // 用 queue 把 stdout 的非同步事件轉成可 yield 的序列
+  const eventQueue: Array<AcpEvent | null> = []; // null = 結束信號
   let resolveNext: (() => void) | null = null;
 
   const push = (event: AcpEvent | null) => {
@@ -218,45 +100,138 @@ export async function* runAcpTurn(
     resolveNext = null;
   };
 
+  // ── 串流 diff 狀態 ──
+  // claude --include-partial-messages 輸出的 assistant 事件是累積文字，非 delta
+  // 需要 diff 前後文字長度，提取新增部分作為 text_delta
+  let lastMessageId = "";
+  let lastTextLength = 0;
+  let lastToolCount = 0;
+
   let buffer = "";
 
   proc.stdout.on("data", (chunk: Buffer) => {
     buffer += chunk.toString();
-    // 按換行切割，逐行解析
     const lines = buffer.split("\n");
     // 最後一個可能是不完整行，保留在 buffer
     buffer = lines.pop() ?? "";
+
     for (const line of lines) {
-      const event = parseLine(line);
-      if (event) push(event);
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(trimmed) as Record<string, unknown>;
+      } catch {
+        // 非 JSON 行（例如 debug log）直接略過
+        continue;
+      }
+
+      const type = obj["type"] as string | undefined;
+
+      // ── system/init：取得 session_id ──
+      if (type === "system" && obj["subtype"] === "init") {
+        const sid = obj["session_id"] as string | undefined;
+        if (sid) {
+          push({ type: "session_init", sessionId: sid });
+        }
+        continue;
+      }
+
+      // ── assistant：串流文字 + 工具呼叫 ──
+      if (type === "assistant") {
+        const msg = obj["message"] as AssistantMessage | undefined;
+        if (!msg?.content) continue;
+
+        // 新 message（不同 turn）→ 重置 diff 追蹤
+        if (msg.id !== lastMessageId) {
+          lastMessageId = msg.id;
+          lastTextLength = 0;
+          lastToolCount = 0;
+        }
+
+        // 提取所有 text block 合成完整文字
+        const fullText = msg.content
+          .filter((b) => b.type === "text")
+          .map((b) => b.text ?? "")
+          .join("");
+
+        // diff：只 yield 新增的部分
+        if (fullText.length > lastTextLength) {
+          push({
+            type: "text_delta",
+            text: fullText.slice(lastTextLength),
+          });
+          lastTextLength = fullText.length;
+        }
+
+        // 檢查新的 tool_use block
+        const toolBlocks = msg.content.filter(
+          (b) => b.type === "tool_use"
+        );
+        if (toolBlocks.length > lastToolCount) {
+          for (let i = lastToolCount; i < toolBlocks.length; i++) {
+            push({
+              type: "tool_call",
+              title: toolBlocks[i].name ?? "unknown tool",
+            });
+          }
+          lastToolCount = toolBlocks.length;
+        }
+
+        continue;
+      }
+
+      // ── result：turn 結束 ──
+      if (type === "result") {
+        if (obj["is_error"]) {
+          push({
+            type: "error",
+            message: (obj["result"] as string) ?? "Claude CLI 回傳錯誤",
+          });
+        }
+        push({ type: "done" });
+        continue;
+      }
+
+      // 其他 event（hook_started, hook_response, rate_limit_event 等）靜默忽略
     }
   });
 
-  proc.stderr.on("data", (chunk: Buffer) => {
-    // stderr 通常是 acpx 的 debug/warning log，不轉成 event，僅靜默忽略
-    // 若需要 debug 可在此 console.error
-    void chunk;
+  proc.stderr.on("data", () => {
+    // stderr 是 claude CLI 的 debug/warning log，靜默忽略
   });
 
   proc.on("close", (code) => {
-    // 沖出 buffer 中殘留的最後一行（若 acpx 未以換行結尾）
+    // 沖出 buffer 殘留的最後一行
     if (buffer.trim()) {
-      const event = parseLine(buffer);
-      if (event) push(event);
+      try {
+        const obj = JSON.parse(buffer.trim()) as Record<string, unknown>;
+        if (obj["type"] === "result") {
+          if (obj["is_error"]) {
+            push({
+              type: "error",
+              message: (obj["result"] as string) ?? "Claude CLI 回傳錯誤",
+            });
+          }
+          push({ type: "done" });
+        }
+      } catch {
+        // 非 JSON，忽略
+      }
     }
 
-    // 若 process 非正常結束（非 abort）且沒有收到 done event，補一個 error event
+    // 非正常退出（且非使用者取消）→ 補 error event
     if (code !== 0 && !signal?.aborted) {
-      push({ type: "error", message: `acpx 異常退出（exit ${code}）` });
+      push({ type: "error", message: `claude 異常退出（exit ${code}）` });
     }
 
-    // 結束信號
-    push(null);
+    push(null); // 結束信號
     signal?.removeEventListener("abort", abortHandler);
   });
 
   proc.on("error", (err) => {
-    push({ type: "error", message: `無法啟動 acpx：${err.message}` });
+    push({ type: "error", message: `無法啟動 claude：${err.message}` });
     push(null);
     signal?.removeEventListener("abort", abortHandler);
   });
@@ -264,19 +239,17 @@ export async function* runAcpTurn(
   // Generator 主迴圈：等待 eventQueue 有資料再 yield
   while (true) {
     if (eventQueue.length === 0) {
-      // 等待下一筆資料
       await new Promise<void>((resolve) => {
         resolveNext = resolve;
       });
     }
 
     const event = eventQueue.shift();
-    if (event === null) break; // 結束信號
+    if (event === null) break;
     if (event === undefined) continue;
 
     yield event;
 
-    // 收到 done 後不再等待後續 event
     if (event.type === "done") break;
   }
 }
