@@ -5,7 +5,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { resolve, dirname } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,10 +17,25 @@ const run = (cmd) => {
   }
 };
 
+/** 檢查 pm2 中 catclaw 是否正在執行 */
+function isRunning() {
+  try {
+    const out = execSync("npx pm2 jlist", { cwd: __dirname, stdio: ["pipe", "pipe", "pipe"] }).toString();
+    const list = JSON.parse(out);
+    return list.some((p) => p.name === "catclaw" && p.pm2_env?.status === "online");
+  } catch {
+    return false;
+  }
+}
+
 const cmd = process.argv[2] ?? "start";
 
 switch (cmd) {
   case "start":
+    if (isRunning()) {
+      console.log("⚠️ catclaw 已在執行中，使用 restart 重啟或 stop 停止");
+      process.exit(0);
+    }
     run("npx tsc");
     run("npx pm2 start dist/index.js --name catclaw");
     console.log("✅ catclaw 已啟動（背景執行）");
