@@ -1,4 +1,4 @@
-# claude-discord-bridge
+# catclaw
 
 輕量 Discord Bot，直接透過 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) 進行對話。
 
@@ -26,7 +26,7 @@ graph TB
         DGW[Discord Gateway]
     end
 
-    subgraph claude-discord-bridge
+    subgraph catclaw
         IDX[index.ts<br/>進入點]
         CFG[config.ts<br/>config.json 載入]
         LOG[logger.ts<br/>Log Level]
