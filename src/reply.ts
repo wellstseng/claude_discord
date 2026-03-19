@@ -193,21 +193,33 @@ export function createReplyHandler(
   const threshold = bridgeConfig.fileUploadThreshold;
   const toolMode = bridgeConfig.showToolCalls;
 
+  // ── Thinking 顯示 ──
+  // 推理文字用 Discord 引用格式（> 💭 ...）送出
+  let thinkingBuffer = "";
+
   // ── 定時 flush ──
   // 收到 text_delta 後 1.5s 無新增即自動送出 buffer，實現漸進式顯示
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   // 防止 flushTimer 與手動 flush 並行衝突
   let flushing = false;
 
-  /** 排程定時 flush：重設 timer，1.5s 後自動送出 */
+  /** 排程定時 flush：重設 timer，1.5s 後自動送出（text buffer 或 thinking buffer） */
   function scheduleFlush(): void {
     if (flushTimer) clearTimeout(flushTimer);
     flushTimer = setTimeout(() => {
       flushTimer = null;
-      if (!flushing && buffer.length > 0 && !fileMode) {
-        flushing = true;
-        void flush(true).finally(() => { flushing = false; });
-      }
+      if (flushing) return;
+      flushing = true;
+      void (async () => {
+        // 定時 flush thinking buffer（推理過程漸進顯示）
+        if (thinkingBuffer.length > 0) {
+          await flushThinking();
+        }
+        // 定時 flush text buffer
+        if (buffer.length > 0 && !fileMode) {
+          await flush(true);
+        }
+      })().finally(() => { flushing = false; });
     }, FLUSH_DELAY_MS);
   }
 
@@ -266,8 +278,54 @@ export function createReplyHandler(
     }
   }
 
+  /**
+   * 將 thinking buffer 格式化為引用並送出
+   * 每行加 > 前綴，整段加 💭 標記
+   */
+  async function flushThinking(): Promise<void> {
+    if (!thinkingBuffer.trim()) return;
+
+    // 將推理文字格式化為 Discord 引用格式
+    const formatted = thinkingBuffer
+      .trim()
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n");
+    const toSend = `> 💭 **Thinking**\n${formatted}`;
+
+    // 分段送出（可能超過 2000 字）
+    const chunks: string[] = [];
+    let remaining = toSend;
+    while (remaining.length > 0) {
+      chunks.push(remaining.slice(0, TEXT_LIMIT));
+      remaining = remaining.slice(TEXT_LIMIT);
+    }
+
+    for (const chunk of chunks) {
+      await sendChunk(chunk, originalMessage, isFirst);
+      if (isFirst) stopTyping();
+      isFirst = false;
+    }
+
+    thinkingBuffer = "";
+  }
+
   return async (event: AcpEvent): Promise<void> => {
+    if (event.type === "thinking_delta") {
+      // 推理文字：showThinking 開啟時累積，切換到 text 時 flush
+      if (bridgeConfig.showThinking) {
+        thinkingBuffer += event.text;
+        scheduleFlush();
+      }
+      return;
+    }
+
     if (event.type === "text_delta") {
+      // 收到 text 代表 thinking 結束，先 flush thinking buffer
+      if (thinkingBuffer.length > 0) {
+        cancelFlushTimer();
+        await flushThinking();
+      }
       totalText += event.text;
 
       if (fileMode) {

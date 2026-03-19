@@ -79,6 +79,8 @@ export interface BridgeConfig {
   claude: ClaudeConfig;
   /** 工具呼叫顯示模式："all" 全顯示 / "summary" 只顯示「處理中」/ "none" 全隱藏 */
   showToolCalls: "all" | "summary" | "none";
+  /** 是否顯示 Claude 的推理過程（thinking），預設 false */
+  showThinking: boolean;
   /** Debounce 毫秒數，預設 500 */
   debounceMs: number;
   /** 回覆超過此字數時上傳為 .md 檔案，0 = 停用，預設 4000 */
@@ -109,6 +111,7 @@ interface RawConfig {
     sessionTtlHours?: number;
   };
   showToolCalls?: string | boolean;
+  showThinking?: boolean;
   debounceMs?: number;
   fileUploadThreshold?: number;
   logLevel?: string;
@@ -184,6 +187,7 @@ function loadConfig(): BridgeConfig {
       sessionTtlHours: raw.claude?.sessionTtlHours ?? 168,
     },
     showToolCalls: parseShowToolCalls(raw.showToolCalls),
+    showThinking: raw.showThinking ?? false,
     debounceMs: raw.debounceMs ?? 500,
     fileUploadThreshold: raw.fileUploadThreshold ?? 4000,
     logLevel,

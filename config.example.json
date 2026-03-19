@@ -53,6 +53,7 @@
 
   // ── 全域設定 ───────────────────────────────────────────────────
   "showToolCalls": "summary",    // 工具呼叫顯示：all（完整）/ summary（僅「處理中」）/ none（隱藏）
+  "showThinking": false,         // 是否顯示 Claude 推理過程（thinking block）
   "debounceMs": 500,             // 同一人訊息合併延遲（毫秒）
   "fileUploadThreshold": 4000,   // 回覆超過此字數時上傳為 .md 檔（0 = 停用）
   "logLevel": "info"             // 日誌層級：debug / info / warn / error / silent

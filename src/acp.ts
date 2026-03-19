@@ -20,6 +20,7 @@ import { log } from "./logger.js";
 /** ACP event 類型聯集 */
 export type AcpEvent =
   | { type: "text_delta"; text: string }
+  | { type: "thinking_delta"; text: string }
   | { type: "tool_call"; title: string }
   | { type: "done" }
   | { type: "error"; message: string }
@@ -32,6 +33,8 @@ export type AcpEvent =
 interface ContentBlock {
   type: string;
   text?: string;
+  /** thinking block 的推理文字 */
+  thinking?: string;
   name?: string;
   id?: string;
 }
@@ -111,6 +114,7 @@ export async function* runClaudeTurn(
   // 需要 diff 前後文字長度，提取新增部分作為 text_delta
   let lastMessageId = "";
   let lastTextLength = 0;
+  let lastThinkingLength = 0;
   let lastToolCount = 0;
 
   let buffer = "";
@@ -155,7 +159,22 @@ export async function* runClaudeTurn(
         if (msg.id !== lastMessageId) {
           lastMessageId = msg.id;
           lastTextLength = 0;
+          lastThinkingLength = 0;
           lastToolCount = 0;
+        }
+
+        // 提取 thinking block（推理過程），用 diff 只 yield 新增部分
+        const fullThinking = msg.content
+          .filter((b) => b.type === "thinking")
+          .map((b) => b.thinking ?? "")
+          .join("");
+
+        if (fullThinking.length > lastThinkingLength) {
+          push({
+            type: "thinking_delta",
+            text: fullThinking.slice(lastThinkingLength),
+          });
+          lastThinkingLength = fullThinking.length;
         }
 
         // 提取所有 text block 合成完整文字
