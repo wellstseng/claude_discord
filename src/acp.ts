@@ -76,10 +76,15 @@ export async function* runClaudeTurn(
   // prompt 作為 positional argument
   args.push(text);
 
+  console.log(`[DEBUG:acp] spawn: ${claudeCmd} ${args.join(" ")}`);
+
+  // NOTE: stdin 設 "ignore"，prompt 已透過 positional argument 傳入，不需要 stdin
   const proc = spawn(claudeCmd, args, {
     cwd,
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
+
+  console.log(`[DEBUG:acp] process spawned, pid=${proc.pid}`);
 
   // 處理 AbortSignal：SIGTERM → 250ms → SIGKILL
   const abortHandler = () => {
@@ -110,7 +115,9 @@ export async function* runClaudeTurn(
   let buffer = "";
 
   proc.stdout.on("data", (chunk: Buffer) => {
-    buffer += chunk.toString();
+    const raw = chunk.toString();
+    console.log(`[DEBUG:acp] stdout chunk (${raw.length} bytes): ${raw.slice(0, 200)}`);
+    buffer += raw;
     const lines = buffer.split("\n");
     // 最後一個可能是不完整行，保留在 buffer
     buffer = lines.pop() ?? "";
@@ -198,11 +205,12 @@ export async function* runClaudeTurn(
     }
   });
 
-  proc.stderr.on("data", () => {
-    // stderr 是 claude CLI 的 debug/warning log，靜默忽略
+  proc.stderr.on("data", (chunk: Buffer) => {
+    console.log(`[DEBUG:acp] stderr: ${chunk.toString().slice(0, 200)}`);
   });
 
   proc.on("close", (code) => {
+    console.log(`[DEBUG:acp] process closed, code=${code}`);
     // 沖出 buffer 殘留的最後一行
     if (buffer.trim()) {
       try {

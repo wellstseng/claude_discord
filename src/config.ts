@@ -24,6 +24,8 @@ export interface BridgeConfig {
   claudeCommand: string;
   /** Debounce 毫秒數，同一人連續訊息的合併等待時間，預設 500 */
   debounceMs: number;
+  /** Claude 回應超時毫秒數，超時自動 kill process，預設 300000（5 分鐘） */
+  turnTimeoutMs: number;
 }
 
 /**
@@ -64,6 +66,10 @@ function loadConfig(): BridgeConfig {
   const rawDebounce = parseInt(process.env.DEBOUNCE_MS ?? "500", 10);
   const debounceMs = isNaN(rawDebounce) ? 500 : rawDebounce;
 
+  // NOTE: TURN_TIMEOUT_MS 需轉 int，非數字時 fallback 300000（5 分鐘）
+  const rawTimeout = parseInt(process.env.TURN_TIMEOUT_MS ?? "300000", 10);
+  const turnTimeoutMs = isNaN(rawTimeout) ? 300_000 : rawTimeout;
+
   return {
     discordToken,
     triggerMode,
@@ -71,6 +77,7 @@ function loadConfig(): BridgeConfig {
     claudeCwd,
     claudeCommand,
     debounceMs,
+    turnTimeoutMs,
   };
 }
 

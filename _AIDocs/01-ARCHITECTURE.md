@@ -1,18 +1,19 @@
 # 01 — discord-claude-bridge 架構設計
 
-> 建立日期：2026-03-18
+> 建立日期：2026-03-18 | 最近更新：2026-03-19
 
 ---
 
 ## 專案目標
 
-將 OpenClaw 的 Discord 訊息處理邏輯剝離，建立一個輕量獨立的 Discord bot，
-直接透過 ACP protocol 串接 Claude CLI（claude-agent-acp），支援：
+輕量獨立的 Discord bot，直接透過 Claude Code CLI 進行對話，支援：
 
-- Persistent session per channel（頻道級對話記憶）
+- Persistent session per channel（頻道級對話記憶，透過 `--resume` 延續）
 - 多人並行（不同 channel 完全並行，同 channel 串行）
-- 常駐互動（session 重啟後可 resume）
 - DM 直接觸發（無需 mention）
+- 串流回覆（`--include-partial-messages` 即時顯示）
+- Typing indicator（回應期間顯示「正在輸入...」）
+- Turn timeout（預設 5 分鐘，超時自動取消）
 
 ---
 
@@ -21,9 +22,10 @@
 | 套件 | 用途 |
 |------|------|
 | `discord.js` ^14 | Discord Gateway 連線、訊息收發 |
+| `dotenv` ^17 | .env 環境變數載入 |
 | `typescript` ^5 | 編譯 |
 | `@types/node` ^22 | Node.js 型別 |
-| `acpx` (PATH) | Claude ACP runtime，外部安裝，不在 package.json |
+| `claude` (PATH) | Claude Code CLI，外部安裝，不在 package.json |
 
 ---
 
@@ -45,29 +47,30 @@ debounce(channelId:authorId, DEBOUNCE_MS)
     │  同一人 500ms 內多則訊息 → 合併成一則（\n 連接）
     │
     ▼
+[reply.ts] createReplyHandler(message)
+    │  建立 event handler + 啟動 typing indicator
+    │
+    ▼
 [session.ts] enqueue(channelId, text, onEvent)
     │  per-channel Promise chain（serialize 同 channel turns）
     │  不同 channel → 完全並行
+    │  建立 AbortController + setTimeout(turnTimeoutMs)
     │
     ▼
-[session.ts] ensureSession(channelId)
-    │  有快取 sessionName → 直接用
-    │  沒有 → 呼叫 acpx sessions ensure --name <channelId>
+[acp.ts] runClaudeTurn(sessionId, text) → AsyncGenerator<AcpEvent>
+    │  spawn: claude -p --output-format stream-json --verbose
+    │         --include-partial-messages --dangerously-skip-permissions
+    │         [--resume <sessionId>] <prompt>
+    │  stdout: JSON lines → diff 累積文字 → yield text_delta
     │
     ▼
-[acp.ts] runTurn(sessionName, text) → AsyncGenerator<AcpEvent>
-    │  spawn: acpx --format json --json-strict --cwd <CLAUDE_CWD>
-    │         --approve-all prompt --session <name> --file -
-    │  stdin: text
-    │  stdout: JSON lines → parse events
-    │
-    ▼
-[reply.ts] streamReply(message, events)
+[reply.ts] onEvent handler
+    │  session_init → session.ts 快取 sessionId（不轉發）
     │  text_delta → 累積 buffer
-    │  buffer >= 2000 → chunk → Discord send
-    │  code fence 跨 chunk 自動平衡
-    │  done → flush 剩餘 buffer
-    │  error → reply 錯誤訊息
+    │  buffer >= 2000 → chunk → Discord send → stopTyping
+    │  tool_call → 🔧 使用工具：{title}
+    │  done → flush 剩餘 buffer + stopTyping
+    │  error → 錯誤訊息 + stopTyping
     │
     ▼
 Discord 回覆送出
@@ -80,14 +83,15 @@ Discord 回覆送出
 ```
 claude_discord/
 ├── src/
-│   ├── index.ts        進入點：載入 config、啟動 Discord client
+│   ├── index.ts        進入點：dotenv 載入、啟動 Discord client
 │   ├── config.ts       環境變數讀取與驗證
 │   ├── discord.ts      Discord client + 訊息事件 + debounce
-│   ├── session.ts      ACP session 管理 + per-channel queue
-│   ├── acp.ts          ACP protocol 實作（spawn acpx + event 解析）
-│   └── reply.ts        Discord 回覆（chunk + code fence 平衡）
+│   ├── session.ts      Session 管理 + per-channel queue + timeout
+│   ├── acp.ts          Claude CLI 串流對話（spawn + event 解析）
+│   └── reply.ts        Discord 回覆（chunk + code fence 平衡 + typing）
 ├── _AIDocs/            知識庫（本目錄）
 ├── .env.example        環境變數範本
+├── .env                環境變數（不上 GIT）
 ├── package.json
 └── tsconfig.json
 ```
@@ -106,60 +110,81 @@ interface BridgeConfig {
   triggerMode: "mention" | "all"  // 預設 "mention"
   allowedChannelIds: Set<string>  // 空 = 全部允許
   claudeCwd: string             // 預設 $HOME
-  acpxCommand: string           // 預設 "acpx"
+  claudeCommand: string         // 預設 "claude"
   debounceMs: number            // 預設 500
+  turnTimeoutMs: number         // 預設 300000（5 分鐘）
 }
 ```
 
 ### acp.ts
 
-直接實作 ACP 協定，不依賴 OpenClaw。兩個核心函式：
+直接 spawn Claude Code CLI，以 AsyncGenerator 串流 AcpEvent。
 
-**ensureAcpSession(sessionName, cwd, acpxCmd)**
-- spawn: `acpx --format json --json-strict --cwd <cwd> sessions ensure --name <name>`
-- 收集 stdout → 解析 JSON lines
-- 找到含 `agentSessionId` 或 `acpxSessionId` 的行 → 成功
-- 找不到 → throw Error
+#### runClaudeTurn(sessionId, text, cwd, claudeCmd, signal?)
 
-**runAcpTurn(sessionName, text, cwd, acpxCmd, signal?)**
-- spawn: `acpx --format json --json-strict --cwd <cwd> --approve-all prompt --session <name> --file -`
-- stdin: prompt text
-- stdout: JSON lines → yield AcpEvent
-- AbortSignal → `acpx cancel --session <name>` → SIGTERM(250ms) → SIGKILL
+- 首次（sessionId = null）：不帶 `--resume`，從 `system/init` event 取得 session_id
+- 後續：帶 `--resume <sessionId>` 延續上下文
+- `--include-partial-messages`：收到累積文字，diff 計算 delta 再 yield
+- AbortSignal → SIGTERM(250ms) → SIGKILL
 
-**AcpEvent 類型：**
+#### 串流 diff 機制
+
+- claude CLI 的 `assistant` event 包含累積文字（非 delta）
+- 追蹤 `lastMessageId` + `lastTextLength`，每次取新增部分作為 `text_delta`
+- 新 message ID → 重置追蹤（處理 tool 呼叫後的新 turn）
+
+#### AcpEvent 類型
+
 | type | 說明 |
 |------|------|
-| `text_delta` | 輸出文字片段（累積後送 Discord） |
+| `session_init` | 新 session 建立，攜帶 sessionId（由 session.ts 攔截） |
+| `text_delta` | 輸出文字片段（diff 後的增量） |
 | `tool_call` | Claude 使用工具（顯示 🔧 提示） |
 | `done` | turn 完成，flush buffer |
 | `error` | 錯誤，回覆錯誤訊息 |
-| `status` | 略過（usage update 等） |
+| `status` | 略過（hook / rate_limit 等） |
 
 ### session.ts
 
 管理 session 生命週期與 per-channel 串行佇列。
 
 ```
-handles: Map<channelId, sessionName>   // session 快取
-queues:  Map<channelId, Promise<void>> // per-channel Promise chain tail
+sessionCache: Map<channelId, sessionId>    // session UUID 快取
+queues:       Map<channelId, Promise<void>> // per-channel Promise chain tail
 ```
 
-`enqueue(channelId, text, onEvent)` 確保同 channel turn 串行執行。
+- `enqueue(channelId, text, onEvent, opts)`：將 turn 加入佇列
+- 每個 turn 建立 `AbortController` + `setTimeout(turnTimeoutMs)`
+- 超時自動 abort → error event「回應超時，已取消」
+- 佇列完成後自動清理 Map entry
 
 ### reply.ts
 
-Discord 回覆邏輯：
+Discord 回覆邏輯 + Typing indicator：
+
+- `createReplyHandler(message)` 回傳 event handler function
+- 建立時立即 `sendTyping()` + 每 8 秒重發（Discord typing 持續約 10 秒）
 - 2000 字硬限（Discord API 限制）
-- Code fence 平衡：奇數個 ``` → 跨 chunk 自動補開/補關
+- Code fence 平衡：奇數個 ``` → 跨 chunk 自動補關/補開
 - 第一段用 `message.reply()`，後續用 `channel.send()`
+- 第一則回覆送出 / done / error → `clearInterval` 停止 typing
 
 ### discord.ts
 
 discord.js Client 設定：
+
 - Intents: Guilds + GuildMessages + MessageContent + DirectMessages
 - Partials: Channel（DM 必要）
 - Debounce key: `${channelId}:${authorId}`
+
+### index.ts
+
+進入點：
+
+- `dotenv/config` 載入 .env（必須在 config.ts 之前 import）
+- 建立 Discord client → login
+- SIGINT / SIGTERM 優雅關閉
+- unhandledRejection 捕捉
 
 ---
 
@@ -169,30 +194,35 @@ discord.js Client 設定：
 |------|------|--------|------|
 | `DISCORD_BOT_TOKEN` | ✅ | — | Discord bot token |
 | `TRIGGER_MODE` | | `mention` | `mention` 或 `all` |
-| `ALLOWED_CHANNEL_IDS` | | 空（全部） | 逗號分隔 channel ID |
+| `ALLOWED_CHANNEL_IDS` | | 空（全部） | 逗號分隔 **頻道** ID（非伺服器 ID） |
 | `CLAUDE_CWD` | | `$HOME` | Claude session 工作目錄 |
-| `ACPX_COMMAND` | | `acpx` | acpx binary 路徑 |
+| `CLAUDE_COMMAND` | | `claude` | claude CLI binary 路徑 |
 | `DEBOUNCE_MS` | | `500` | debounce 毫秒數 |
+| `TURN_TIMEOUT_MS` | | `300000` | 回應超時毫秒數（5 分鐘） |
 
 ---
 
-## ACP CLI 指令參考
-
-（來源：openclaw/extensions/acpx/src/runtime.ts）
+## Claude CLI 指令格式
 
 ```bash
-# 確保 session 存在
-acpx --format json --json-strict --cwd <cwd> \
-     sessions ensure --name <sessionName>
+# 首次對話（無 session）
+claude -p --output-format stream-json --verbose \
+       --include-partial-messages --dangerously-skip-permissions \
+       "prompt text"
 
-# 執行 turn
-acpx --format json --json-strict --cwd <cwd> \
-     --approve-all \
-     prompt --session <sessionName> --file -
+# 後續對話（延續 session）
+claude -p --output-format stream-json --verbose \
+       --include-partial-messages --dangerously-skip-permissions \
+       --resume <session-id> \
+       "prompt text"
+```
 
-# 取消執行中的 turn
-acpx --format json --json-strict --cwd <cwd> \
-     cancel --session <sessionName>
+stream-json 事件格式（關鍵事件）：
+
+```json
+{"type":"system","subtype":"init","session_id":"uuid-here"}
+{"type":"assistant","message":{"id":"msg_xxx","content":[{"type":"text","text":"..."}]}}
+{"type":"result","subtype":"success","result":"...","session_id":"uuid-here"}
 ```
 
 ---
@@ -201,8 +231,11 @@ acpx --format json --json-strict --cwd <cwd> \
 
 | 場景 | Session Key | 行為 |
 |------|------------|------|
-| Guild 頻道 | `channelId` | 同頻道所有人共享一段對話 |
+| Guild 頻道 | `channelId` → claude session UUID | 同頻道所有人共享一段對話 |
 | DM | `channelId`（每人唯一） | 等同 per-user session |
+
+首次對話 → claude CLI 自動建立 session → 從 `system/init` event 取得 UUID → 快取。
+後續對話 → `--resume <UUID>` 延續。
 
 ---
 
@@ -213,6 +246,8 @@ acpx --format json --json-strict --cwd <cwd> \
 | TEXT_LIMIT | 2000 | Discord API 訊息字數上限 |
 | DEBOUNCE_MS | 500 | 多訊息合併等待時間 |
 | SIGTERM_GRACE | 250ms | abort 時 SIGTERM → SIGKILL 間隔 |
+| TYPING_INTERVAL | 8s | typing indicator 重發間隔 |
+| TURN_TIMEOUT_MS | 300000 | 回應超時（5 分鐘） |
 
 ---
 
@@ -221,6 +256,10 @@ acpx --format json --json-strict --cwd <cwd> \
 1. **DM 需加 `Partials.Channel`**：discord.js 預設不接收 DM 事件
 2. **Bot self-filter 必須在 debounce 前**：避免 bot 回覆訊息佔 debounce 容量
 3. **Code fence 跨 chunk 必須平衡**：否則 Discord 渲染亂掉
-4. **acpx sessions ensure 可能需要安裝**：首次使用需確認 acpx 在 PATH
-5. **同 channel 串行不是 Node.js 限制**：是 ACP session 協定要求（一次一個 turn）
-6. **DM trigger 無視 TRIGGER_MODE**：DM 永遠觸發，不需 mention
+4. **同 channel 串行不是 Node.js 限制**：是 Claude session 要求（一次一個 turn）
+5. **DM trigger 無視 TRIGGER_MODE**：DM 永遠觸發，不需 mention
+6. **ALLOWED_CHANNEL_IDS 是頻道 ID，不是伺服器 ID**：填錯會導致訊息被靜默過濾
+7. **stdin 必須設 "ignore"**：claude CLI 的 `-p` 模式若 stdin 為 pipe 且未關閉會卡住
+8. **`--verbose` 是 stream-json 必要條件**：不加會報錯
+9. **dotenv 必須在 config.ts 之前 import**：否則 process.env 尚未填充
+10. **TextBasedChannel 型別包含 PartialGroupDMChannel**：無 `send` 方法，需 cast 為 `SendableChannels`

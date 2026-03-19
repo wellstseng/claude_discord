@@ -79,6 +79,20 @@ export function createReplyHandler(
 ): (event: AcpEvent) => Promise<void> {
   let buffer = "";
   let isFirst = true;
+
+  // ── Typing indicator ──
+  // Discord typing 持續約 10 秒，每 8 秒重發一次，直到第一則回覆送出
+  const channel = originalMessage.channel;
+  if ("sendTyping" in channel) {
+    void (channel as SendableChannels).sendTyping();
+  }
+  const typingInterval = setInterval(() => {
+    if ("sendTyping" in channel) {
+      void (channel as SendableChannels).sendTyping();
+    }
+  }, 8_000);
+  // typing 清理函式，送出第一則回覆後呼叫
+  const stopTyping = () => clearInterval(typingInterval);
   // NOTE: 追蹤上一個 chunk 末尾是否有未閉合 code fence
   //       若有，下一個 chunk 開頭要補開
   let prevChunkHadOpenFence = false;
@@ -104,6 +118,7 @@ export function createReplyHandler(
       prevChunkHadOpenFence = hadOpenFence;
 
       await sendChunk(toSend, originalMessage, isFirst);
+      if (isFirst) stopTyping(); // 第一則回覆送出 → 停止 typing
       isFirst = false;
     }
   }
@@ -116,10 +131,13 @@ export function createReplyHandler(
       // 先把目前 buffer flush 出去，再傳工具提示
       await flush(true);
       await sendChunk(`🔧 使用工具：${event.title}`, originalMessage, isFirst);
+      if (isFirst) stopTyping();
       isFirst = false;
     } else if (event.type === "done") {
+      stopTyping();
       await flush(true);
     } else if (event.type === "error") {
+      stopTyping();
       await flush(true);
       await sendChunk(
         `⚠️ 發生錯誤：${event.message}`,

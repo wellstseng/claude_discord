@@ -51,6 +51,7 @@ async function runTurn(
 ): Promise<void> {
   // 取得快取的 session ID（首次為 null，claude CLI 會自動建立新 session）
   const existingSessionId = sessionCache.get(channelId) ?? null;
+  console.log(`[DEBUG] runTurn channel=${channelId} sessionId=${existingSessionId ?? "NEW"} text="${text.slice(0, 50)}"`);
 
   for await (const event of runClaudeTurn(
     existingSessionId,
@@ -59,8 +60,11 @@ async function runTurn(
     claudeCmd,
     signal
   )) {
+    console.log(`[DEBUG] event: ${event.type}`);
+
     // 攔截 session_init event：快取 session ID，不轉發給 reply handler
     if (event.type === "session_init") {
+      console.log(`[DEBUG] session_init: ${event.sessionId}`);
       sessionCache.set(channelId, event.sessionId);
       continue;
     }
@@ -77,8 +81,8 @@ export interface EnqueueOptions {
   cwd: string;
   /** claude CLI binary 路徑 */
   claudeCmd: string;
-  /** AbortSignal（可選，用於取消） */
-  signal?: AbortSignal;
+  /** 回應超時毫秒數，超時自動 abort */
+  turnTimeoutMs: number;
 }
 
 /**
@@ -99,15 +103,20 @@ export function enqueue(
 ): void {
   const tail = queues.get(channelId) ?? Promise.resolve();
 
+  // 建立帶 timeout 的 AbortController
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), opts.turnTimeoutMs);
+
   // 將新 turn 接在尾端，錯誤不向上傳播（避免 Promise chain 中斷）
   const next = tail.then(() =>
-    runTurn(channelId, text, onEvent, opts.cwd, opts.claudeCmd, opts.signal).catch(
-      (err: unknown) => {
-        const message =
-          err instanceof Error ? err.message : String(err);
+    runTurn(channelId, text, onEvent, opts.cwd, opts.claudeCmd, ac.signal)
+      .catch((err: unknown) => {
+        const message = ac.signal.aborted
+          ? `回應超時（${Math.round(opts.turnTimeoutMs / 1000)}s），已取消`
+          : err instanceof Error ? err.message : String(err);
         void onEvent({ type: "error", message });
-      }
-    )
+      })
+      .finally(() => clearTimeout(timer))
   );
 
   queues.set(channelId, next);
