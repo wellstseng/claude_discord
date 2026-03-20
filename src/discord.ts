@@ -25,7 +25,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { BridgeConfig } from "./config.js";
-import { getChannelAccess } from "./config.js";
+import { config, getChannelAccess } from "./config.js";
 import { enqueue } from "./session.js";
 import { createReplyHandler } from "./reply.js";
 import { log } from "./logger.js";
@@ -136,10 +136,11 @@ async function downloadAttachments(message: Message): Promise<string[]> {
 
 /**
  * 建立並設定 Discord Client，綁定 messageCreate 事件
- * @param config 全域設定
+ * NOTE: 不捕獲 config 在 closure 中，每次 messageCreate 都讀全域 config
+ *       這樣 hot-reload config 後，新訊息就會用新設定
  * @returns 已設定好的 Discord Client（尚未 login）
  */
-export function createDiscordClient(config: BridgeConfig): Client {
+export function createDiscordClient(): Client {
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -152,6 +153,7 @@ export function createDiscordClient(config: BridgeConfig): Client {
   });
 
   client.on("messageCreate", (message: Message) => {
+    // 每次都讀最新的全域 config，支援 hot-reload
     void handleMessage(message, config);
   });
 

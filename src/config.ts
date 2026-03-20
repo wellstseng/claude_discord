@@ -11,9 +11,10 @@
  *   Thread → channels[threadId] → channels[parentId] → Guild 預設
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, watch } from "node:fs";
 import { resolve } from "node:path";
 import type { LogLevel } from "./logger.js";
+import { setLogLevel, log } from "./logger.js";
 
 // ── 型別定義 ────────────────────────────────────────────────────────────────
 
@@ -269,5 +270,51 @@ export function getChannelAccess(
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-/** 全域設定單例，啟動時載入一次 */
-export const config: BridgeConfig = loadConfig();
+/** 全域設定（可被 hot-reload 替換） */
+export let config: BridgeConfig = loadConfig();
+
+// ── Hot-Reload ──────────────────────────────────────────────────────────────
+
+/**
+ * 重新載入 config.json，替換全域 config 物件
+ * token 變更時不套用（需要重啟 Discord Gateway）
+ */
+function reloadConfig(): void {
+  try {
+    const newConfig = loadConfig();
+
+    // token 變更需要重啟，hot-reload 無法處理
+    if (newConfig.discord.token !== config.discord.token) {
+      log.warn("[config] discord.token 變更需要重啟才會生效");
+    }
+
+    config = newConfig;
+    setLogLevel(config.logLevel);
+    log.info("[config] hot-reload 完成");
+  } catch (err) {
+    log.warn(`[config] hot-reload 失敗，維持舊設定：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * 監聽 config.json 變動，自動 hot-reload
+ * 使用 debounce 避免編輯過程中的多次觸發
+ */
+export function watchConfig(): void {
+  const configPath = resolve(process.cwd(), "config.json");
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    watch(configPath, () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        log.info("[config] 偵測到 config.json 變動，重新載入...");
+        reloadConfig();
+      }, 500);
+    });
+    log.info("[config] 已啟動 config.json 監聽（hot-reload）");
+  } catch (err) {
+    log.warn(`[config] 無法監聽 config.json：${err instanceof Error ? err.message : String(err)}`);
+  }
+}

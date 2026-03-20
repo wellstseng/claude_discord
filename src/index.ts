@@ -11,7 +11,7 @@
  * 6. 監聽 process 結束信號，優雅關閉
  */
 
-import { config } from "./config.js";
+import { config, watchConfig } from "./config.js";
 import { setLogLevel } from "./logger.js";
 import { log } from "./logger.js";
 import { createDiscordClient } from "./discord.js";
@@ -25,7 +25,10 @@ loadSessions();
 
 // ── 啟動 ─────────────────────────────────────────────────────────────────────
 
-const client = createDiscordClient(config);
+const client = createDiscordClient();
+
+// 啟動 config.json 監聽，變動時自動 hot-reload
+watchConfig();
 
 client.once("ready", (c) => {
   log.info(`[bridge] Bot 上線：${c.user.tag}`);
