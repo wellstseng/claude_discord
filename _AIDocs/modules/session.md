@@ -9,7 +9,8 @@
 3. 磁碟持久化：sessionCache 寫入 `data/sessions.json`，重啟不遺失
 4. TTL 機制：超過 `sessionTtlHours` 的 session 自動開新
 5. Resume 失敗處理：清除 session → 不帶 `--resume` 重試
-6. 對外只暴露 `enqueue()` + `loadSessions()`
+6. 傳遞 `channelId` 給 `runClaudeTurn()`（用於 `CATCLAW_CHANNEL_ID` env var）
+7. 對外暴露 `enqueue()` + `loadSessions()` + `getRecentChannelIds()`
 
 ## Session 策略
 

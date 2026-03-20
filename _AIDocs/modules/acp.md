@@ -22,6 +22,7 @@ claude -p --output-format stream-json --verbose --include-partial-messages --dan
 | `--resume <id>` | 延續既有 session（首次不帶） |
 
 stdio 配置：`["ignore", "pipe", "pipe"]`
+env 額外傳遞：`CATCLAW_CHANNEL_ID`（當前 Discord 頻道 ID，用於重啟回報）
 
 > **陷阱**：stdin 必須設 `"ignore"`。若為 `"pipe"` 且未關閉，claude 會等待 stdin 而永遠不輸出。
 
@@ -32,6 +33,7 @@ type AcpEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; title: string }
   | { type: "done" }
+  | { type: "thinking_delta"; text: string }
   | { type: "error"; message: string }
   | { type: "status"; raw: unknown }
   | { type: "session_init"; sessionId: string };
@@ -61,10 +63,25 @@ Generator 主迴圈 `await new Promise` 等待 → `eventQueue.shift()` → `yie
 
 收到 abort → `SIGTERM` → 250ms 後若未結束 → `SIGKILL`
 
+## 錯誤分類（classifyError）
+
+非正常退出時，從 stderr 內容推測錯誤原因，產生使用者可讀訊息：
+
+| 關鍵字 | 錯誤訊息 |
+|--------|---------|
+| `overloaded` / `529` | Claude API 過載（overloaded） |
+| `rate` + `limit` | Claude API 速率限制（rate limit） |
+| `502` / `bad gateway` | Claude API 連線失敗（502） |
+| `503` | Claude API 暫時無法使用（503） |
+| `timeout` / `etimedout` | Claude API 連線逾時 |
+| `econnreset` / `econnrefused` | Claude API 連線中斷 |
+| `401` / `unauthorized` | Claude API 認證失敗 |
+| 其他 | `claude 異常退出（exit N）：stderr 尾段` |
+
 ## process close 處理
 
 1. 沖出 buffer 殘留最後一行
-2. 非正常退出（且非使用者取消）→ 補 `error` event
+2. 非正常退出（且非使用者取消）→ `classifyError()` 產生可讀錯誤訊息
 3. `push(null)` 結束信號
 
 ## Log 控制
