@@ -218,35 +218,9 @@ async function runTurn(
     await onEvent(event);
   }
 
-  // timeout 不代表 session 壞掉，只是這一輪太久；保留 session 讓下次繼續
-  if (signal?.aborted) {
-    log.info(`[session] turn 逾時，保留 session channel=${channelId}`);
-    return;
-  }
-
-  // resume 失敗處理：有帶 --resume 且出錯 → 清除 session，不帶 --resume 重試
-  if (hasError && existingSessionId) {
-    log.warn(`[session] resume 可能失敗，清除 session 並重試 channel=${channelId}`);
-    sessionCache.delete(channelId);
-    sessionUpdatedAt.delete(channelId);
-    saveSessions(ttlMs);
-
-    // 不帶 --resume 重試一次
-    for await (const event of runClaudeTurn(
-      null,
-      text,
-      cwd,
-      claudeCmd,
-      channelId,
-      signal
-    )) {
-      if (event.type === "session_init") {
-        log.info(`[session] 重試成功，新 session_init: ${event.sessionId}`);
-        recordSession(channelId, event.sessionId, ttlMs);
-        continue;
-      }
-      await onEvent(event);
-    }
+  // 錯誤不清除 session：下次訊息繼續 --resume 同一 session
+  if (hasError) {
+    log.warn(`[session] turn 發生錯誤，保留 session channel=${channelId}`);
   }
 
   // turn 完成後更新 updatedAt（即使沒有 session_init，表示 resume 成功）
