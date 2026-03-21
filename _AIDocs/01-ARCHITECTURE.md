@@ -134,6 +134,7 @@ index.ts
 | **signal file** | `signal/RESTART` 檔案，PM2 監聽此目錄變更觸發重啟 |
 | **原子寫入** | 先寫 .tmp 再 rename 覆蓋，防止 crash 導致 JSON 損壞 |
 | **CATCLAW_CHANNEL_ID** | acp.ts spawn claude 時傳入的環境變數，讓 Claude 知道當前 Discord 頻道 |
+| **Event Queue Pattern** | acp.ts 用 eventQueue + resolveNext 將 callback-based stdout 轉為可 yield 的 AsyncGenerator |
 
 ## 專案結構
 

@@ -16,6 +16,39 @@
 | `error` | 3 | `console.error` | 錯誤 |
 | `silent` | 4 | — | 完全靜音 |
 
+## 內部實作
+
+### 常數
+
+```typescript
+const LEVELS: Record<LogLevel, number> = {
+  debug: 0, info: 1, warn: 2, error: 3, silent: 4,
+};
+```
+
+### 內部狀態
+
+```typescript
+let currentLevel: LogLevel = "info";  // 預設 info
+```
+
+### `shouldLog(level): boolean`（私有）
+
+`LEVELS[level] >= LEVELS[currentLevel]` — 數值比較。
+
+### `log` 物件（對外 export）
+
+```typescript
+export const log = {
+  debug: (...args) => { if (shouldLog("debug")) console.log(...args); },
+  info:  (...args) => { if (shouldLog("info"))  console.log(...args); },
+  warn:  (...args) => { if (shouldLog("warn"))  console.warn(...args); },
+  error: (...args) => { if (shouldLog("error")) console.error(...args); },
+};
+```
+
+`debug` 和 `info` 用 `console.log`，`warn` 用 `console.warn`，`error` 用 `console.error`。
+
 ## API
 
 ```typescript
@@ -32,3 +65,8 @@ log.error("...");        // debug + info + warn + error 層級顯示
 ## 設定
 
 `config.json` 的 `logLevel` 欄位，由 `index.ts` 呼叫 `setLogLevel()` 設定。
+
+## 注意事項
+
+- `silent` 層級設定後所有 log 靜默（shouldLog 永遠 false）
+- 沒有 `log.silent` 方法，`silent` 只是設定值

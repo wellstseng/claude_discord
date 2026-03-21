@@ -218,6 +218,12 @@ async function runTurn(
     await onEvent(event);
   }
 
+  // timeout 不代表 session 壞掉，只是這一輪太久；保留 session 讓下次繼續
+  if (signal?.aborted) {
+    log.info(`[session] turn 逾時，保留 session channel=${channelId}`);
+    return;
+  }
+
   // resume 失敗處理：有帶 --resume 且出錯 → 清除 session，不帶 --resume 重試
   if (hasError && existingSessionId) {
     log.warn(`[session] resume 可能失敗，清除 session 並重試 channel=${channelId}`);

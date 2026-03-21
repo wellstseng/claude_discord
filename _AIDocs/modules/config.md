@@ -75,6 +75,10 @@ export interface CronConfig {
 }
 ```
 
+### `RawConfig`（內部型別，不對外 export）
+
+config.json 原始 JSON 結構，所有欄位皆為 optional。`loadConfig()` 解析後填入預設值，轉為完整 `BridgeConfig`。
+
 ### `ChannelAccess`（`getChannelAccess` 回傳值）
 
 ```typescript
@@ -104,6 +108,30 @@ Thread → channels[threadId] → channels[parentId] → Guild 預設
 | 找到 guild → 繼承鏈查找 | 逐層 fallback | 逐層 fallback |
 
 DM：永遠 `allowBot = false`（硬擋 bot 互敲）。
+
+## 主要函式
+
+### `loadConfig(): BridgeConfig`（私有）
+
+1. 讀取 `<cwd>/config.json`
+2. Strip `//` JSONC 註解：`text.replace(/\/\/.*$/gm, "")`
+3. `JSON.parse`
+4. 驗證 `discord.token` 必填（缺少時拋出錯誤）
+5. 正規化 guilds：填入預設值
+6. 驗證 logLevel（不合法 → 回退 `"info"`）
+7. 回傳完整 `BridgeConfig`
+
+### `parseShowToolCalls(value): "all" | "summary" | "none"`（私有）
+
+相容舊格式：`true → "all"`，`false → "none"`，字串直接 pass-through（不合法回退 `"all"`）。
+
+### `reloadConfig(): void`（私有）
+
+- 呼叫 `loadConfig()` 建立新設定
+- token 變更時只 `log.warn`，不阻止替換（但 Gateway 連線需重啟才更新）
+- 替換全域 `config`（`let` 宣告）
+- 同步更新 `setLogLevel(config.logLevel)`
+- parse 失敗 → 維持舊設定，`log.warn`
 
 ## Hot-Reload
 
@@ -138,4 +166,28 @@ export function getChannelAccess(
 
 ### `watchConfig(): void`
 
-啟動 config.json 監聽，變動時自動重載（500ms debounce）。
+啟動 config.json 監聯，變動時自動重載（500ms debounce）。
+
+## 完整 Export 列表
+
+```typescript
+export let config: BridgeConfig;
+export function watchConfig(): void;
+export function getChannelAccess(...): ChannelAccess;
+export interface ChannelConfig;
+export interface GuildConfig;
+export interface DmConfig;
+export interface DiscordConfig;
+export interface ClaudeConfig;
+export interface BridgeConfig;
+export interface ChannelAccess;
+export type CronSchedule;
+export type CronAction;
+export interface CronConfig;
+```
+
+## 注意事項
+
+- `config` 是 `let`（非 `const`），hot-reload 會整體替換物件引用
+- discord.ts 不在 closure 中捕獲 config，每次 messageCreate 讀全域 `config`，確保 hot-reload 生效
+- token 變更警告但無法阻止，重啟才能套用新 token
