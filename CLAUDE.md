@@ -10,6 +10,28 @@
 
 開工前先讀 `_AIDocs/_INDEX.md`，架構細節在 `_AIDocs/01-ARCHITECTURE.md`。
 
+## 重啟機制
+
+你正在透過 CatClaw Discord bot 運行。重啟方式：
+
+1. 編譯：`npx tsc`
+2. 寫入 signal file 觸發 PM2 重啟：
+   ```bash
+   echo '{"channelId":"'$CATCLAW_CHANNEL_ID'","time":"'$(date -Iseconds)'"}' > signal/RESTART
+   ```
+3. PM2 偵測到 `signal/` 目錄變更 → 自動重啟
+4. 重啟後 CatClaw 會在觸發頻道回報 `[CatClaw] 已重啟（時間）`
+
+- `CATCLAW_CHANNEL_ID` 環境變數 = 當前 Discord 頻道 ID
+- **先編譯、確認使用者同意後再觸發重啟**，不要未經確認就寫 signal file
+- 詳細流程見 `_AIDocs/modules/pm2.md`
+
+## 排程管理
+
+排程 job 定義在 `data/cron-jobs.json`（格式見 `cron-jobs.example.json`）。
+編輯存檔即生效（hot-reload），不需重啟。
+`config.json` 的 `cron.enabled` 控制排程開關。
+
 ## 程式碼規範
 
 ### 註解要求（強制）
