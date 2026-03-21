@@ -75,3 +75,27 @@
 **原因**：Promise chain 中某個 Promise reject 後，整條 chain 中斷。
 
 **解法**：`.catch()` 攔截每個 turn 的錯誤，轉為 `error` event 回報，不讓 rejection 傳播。
+
+## 11. `ready` 事件中頻道 cache 未填充
+
+**現象**：`ready` 事件中用 `client.channels.cache.get(channelId)` 取得 `undefined`，重啟通知無法送出。
+
+**原因**：`ready` 觸發時 discord.js 的 channel cache 可能尚未完全填充，只有 bot 曾互動過的頻道才會在 cache 中。
+
+**解法**：改用 `client.channels.fetch(channelId)`，直接向 Discord API 查詢，不依賴 cache。
+
+```typescript
+// ✗ 不可靠
+const ch = client.channels.cache.get(channelId);
+
+// ✓ 正確
+const ch = await client.channels.fetch(channelId);
+```
+
+## 12. `displayName` vs `username`
+
+**現象**：prompt 顯示帳號名（英文 handle）而非使用者在伺服器設定的暱稱。
+
+**原因**：`message.author.username` 是帳號名；`message.author.displayName` 才是伺服器暱稱。
+
+**解法**：prompt 前綴使用 `firstMessage.author.displayName`（在 discord.ts debounce callback 中）。

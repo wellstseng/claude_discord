@@ -1,6 +1,6 @@
 # claude_discord _AIDocs 知識庫索引
 
-> 建立日期：2026-03-18 | 最近更新：2026-03-20 | 專案：catclaw
+> 建立日期：2026-03-18 | 最近更新：2026-03-21 | 專案：catclaw
 
 ## 專案簡介
 
@@ -26,7 +26,7 @@ Discord 收訊 → claude -p stream-json → 串流回覆 Discord。
 | [modules/acp.md](modules/acp.md) | `src/acp.ts` | Claude CLI spawn、串流 diff、AcpEvent 型別 |
 | [modules/session.md](modules/session.md) | `src/session.ts` | Session 快取、磁碟持久化、TTL、per-channel 串行佇列 |
 | [modules/reply.md](modules/reply.md) | `src/reply.ts` | Discord 回覆分段、code fence 平衡、typing |
-| [modules/discord.md](modules/discord.md) | `src/discord.ts` | Discord Client、訊息過濾、debounce |
+| [modules/discord.md](modules/discord.md) | `src/discord.ts` | Discord Client、8步訊息過濾、debounce 3 Map | 2026-03-21 |
 | [modules/logger.md](modules/logger.md) | `src/logger.ts` | Log level 控制、setLogLevel |
 | [modules/index.md](modules/index.md) | `src/index.ts` | 進入點、啟動順序、優雅關閉、重啟回報 |
 | [modules/cron.md](modules/cron.md) | `src/cron.ts` | 排程服務（cron/every/at）、croner 驅動 |

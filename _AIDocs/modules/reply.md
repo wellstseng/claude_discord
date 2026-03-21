@@ -6,11 +6,25 @@
 
 接收 `AcpEvent` 串流 → 累積文字 → 分段傳送到 Discord → 管理 typing indicator。
 
+## 重要常數
+
+| 常數 | 值 | 說明 |
+|------|-----|------|
+| `TEXT_LIMIT` | `2000` | Discord 單則訊息字元上限 |
+| `FLUSH_DELAY_MS` | `3000` | 定時 flush 延遲（毫秒），3 秒無新增自動送出 |
+
+> `FLUSH_DELAY_MS = 3000`（3 秒），收到 text_delta / thinking_delta 後排程，3 秒內有新增則重設 timer。
+
 ## API
 
 ### `createReplyHandler(originalMessage, bridgeConfig): (event: AcpEvent) => Promise<void>`
 
 Factory 函式，建立閉包封裝的 event handler。回傳的函式可直接傳給 `session.enqueue` 的 `onEvent`。
+
+呼叫後立即：
+1. `channel.sendTyping()` 開始 typing 指示
+2. `setInterval` 每 8 秒重發 typing（Discord typing 約 10 秒自動消失）
+3. 第一則回覆送出後 `clearInterval` 停止 typing
 
 ## 分段邏輯
 
@@ -18,66 +32,128 @@ Discord 訊息上限 2000 字（`TEXT_LIMIT`）。
 
 `flush(flushAll)` 切割 buffer 並傳送：
 
-- `flushAll = false`：buffer >= 2000 才傳（串流累積中）
-- `flushAll = true`：傳送所有剩餘 buffer（done / error / tool_call 時）
+- `flushAll = false`：buffer >= 2000 才傳（串流累積中，等滿再切）
+- `flushAll = true`：傳送所有剩餘 buffer（done / error / tool_call 時強制送出）
 
 傳送順序：
 
-- 第一段 → `message.reply()`（Discord 引用回覆）
+- 第一段 → `message.reply()`（Discord 引用回覆，顯示回應對象）
 - 後續 → `channel.send()`（直接傳送）
 
 ## Code Fence 平衡
 
-跨 chunk 的 `` ``` `` 必須正確開關，否則 Discord 渲染破碎。
+跨 chunk 的 ` ``` ` 必須正確開關，否則 Discord 渲染破碎。
 
 | 函式 | 邏輯 |
 |------|------|
-| `countCodeFences(text)` | 計算 `` ``` `` 出現次數 |
-| `closeFenceIfOpen(text)` | 奇數個 → 尾端補 `` ``` `` |
+| `countCodeFences(text)` | 計算 ` ``` ` 出現次數（`/\`\`\`/g`） |
+| `closeFenceIfOpen(text)` | 奇數個 → 尾端補 ` ``` ` |
 
-跨 chunk 處理：
+**跨 chunk 狀態**：`prevChunkHadOpenFence: boolean`
 
-1. chunk 有奇數個 fence → 尾端補關 → 標記 `prevChunkHadOpenFence = true`
-2. 下個 chunk 開頭補 `` ```\n `` → 恢復 code block
+```
+chunk 有奇數個 fence → closeFenceIfOpen() → prevChunkHadOpenFence = true
+下個 chunk 開頭補 "```\n" → 恢復 code block
+```
+
+**預留空間**：切割點使用 `safeLimit = TEXT_LIMIT - 8`（1992），預留 8 字元給補開/補關的 ` ```\n `，防止補完後超過 2000 字。
+
+**`flushing` flag**：防止定時 flush 與手動 flush 並行衝突（race condition）。
+
+## 定時 Flush
+
+```
+scheduleFlush() {
+  clearTimeout(flushTimer)
+  flushTimer = setTimeout(FLUSH_DELAY_MS=3000, () => {
+    if (thinkingBuffer) → flushThinking()
+    if (buffer && !fileMode) → flush(true)
+  })
+}
+```
+
+收到 text_delta / thinking_delta → `scheduleFlush()`
+手動 flush（tool_call / done / error）→ `cancelFlushTimer()` + 直接 flush
 
 ## Typing Indicator
 
-- 收到訊息後立即 `sendTyping()`
-- 每 8 秒 `setInterval` 重發（Discord typing 約 10 秒自然消失）
-- 第一則回覆送出後 `clearInterval`（`stopTyping()`）
-- `done` / `error` event 也會觸發 `stopTyping()`
+- 建立 handler 時立即 `sendTyping()`
+- `setInterval(8000)` 每 8 秒重發（Discord typing 持續約 10 秒）
+- 第一則回覆 `sendChunk()` 送出後 `stopTyping()`
+- `done` / `error` event 也會呼叫 `stopTyping()`
+- thinking 送出時**不停** typing，讓 typing 持續到正式 text 送出
 
-## 檔案上傳模式（fileUploadThreshold）
+## Thinking 顯示格式
 
-當回覆總文字超過 `fileUploadThreshold`（預設 4000 字）時，自動切換為檔案模式：
+`showThinking = true` 時，thinking_delta 累積到 `thinkingBuffer`，flush 時格式化為 Discord 引用：
 
-1. `text_delta` 只累積 `totalText`，不再 flush chunk
-2. `done` 時將完整文字上傳為 `response.md`（附前 150 字預覽）
+```typescript
+const formatted = thinkingBuffer
+  .trim()
+  .split("\n")
+  .map(line => `> ${line}`)
+  .join("\n");
+const toSend = `> 💭 **Thinking**\n${formatted}`;
+```
 
-設 0 = 停用。
+超過 2000 字時分段送出（不使用 code fence，純引用格式）。
+
+## 檔案上傳模式（fileMode）
+
+切換條件（兩個都要滿足）：
+
+```typescript
+if (threshold > 0 && totalText.length > threshold) {
+  fileMode = true;
+  cancelFlushTimer();
+  buffer = "";   // 清空已累積但未送出的 buffer
+  return;
+}
+```
+
+- `threshold > 0`：`fileUploadThreshold = 0` 完全停用 fileMode
+- `totalText.length > threshold`：累積全文超過門檻才切換
+
+切換後行為：
+1. 只累積 `totalText`，`buffer` 不再增加
+2. `done` 時統一處理（見下）
+
+**`done` 時的 fileMode 分支**：
+
+| 條件 | 行為 |
+|------|------|
+| `fileMode && mediaPaths.length === 0` | 上傳 `response.md`，附前 150 字預覽 |
+| `fileMode && mediaPaths.length > 0` | 不產生 response.md；用 cleanedText 重建 buffer → flush(true) → 再上傳 MEDIA 附件 |
+
+> 設 `fileUploadThreshold = 0` 停用此模式。
 
 ## MEDIA Token 解析
 
-Claude CLI 回覆中若包含 `MEDIA: /path/to/file`，reply.ts 會自動：
+Claude CLI 回覆中若包含 `MEDIA: /path/to/file`，自動解析並上傳為 Discord 附件。
 
-1. `extractMediaTokens(text)` — 正規表達式 `/\bMEDIA:\s*`?([^\n`]+)`?/gi` 抽取路徑
-2. 移除 MEDIA token，清理多餘空行
-3. 只接受絕對路徑（`/` 開頭），避免誤抓
-4. `uploadMediaFile(path)` — `readFile` → `AttachmentBuilder` → Discord 附件上傳
+```typescript
+const MEDIA_RE = /\bMEDIA:\s*`?([^\n`]+)`?/gi;
+```
 
-整合位置：`done` event handler 中，先 `extractMediaTokens(totalText)` 取得清理後文字 + 路徑，送出文字後逐一上傳檔案。
+`extractMediaTokens(raw)` 流程：
+1. 正規表達式抽取路徑（只接受 `/` 開頭的絕對路徑）
+2. 從文字中移除 MEDIA token
+3. 清理移除後的多餘空行（3 個以上換行 → 2 個）
+4. 回傳 `{ text: cleanedText, mediaPaths: string[] }`
+
+上傳：`done` event 時，先送出文字，再逐一 `uploadMediaFile(filePath)` → `readFile` → `AttachmentBuilder` → Discord 附件。
 
 ## Event 處理
 
 | Event | 行為 |
 |-------|------|
-| `text_delta` | 累積到 buffer + totalText；超過 threshold 進入 fileMode |
-| `thinking_delta` | `showThinking` 開啟時累積推理文字 → scheduleFlush；收到 text 時 flush thinking buffer |
-| `tool_call` | 若 `showToolCalls` 開啟 → `flush(true)` → 傳送 `🔧 使用工具：{title}` |
-| `done` | `stopTyping()` → 抽取 MEDIA token → flush 或上傳 .md → 上傳 media 檔案 |
-| `error` | `stopTyping()` → `flush(true)` → 傳送 `⚠️ 發生錯誤：{message}` |
+| `text_delta` | 先 flush thinkingBuffer（如有）；累積到 buffer + totalText；超過 threshold 進入 fileMode；≥2000 立即 flush，否則 scheduleFlush(3s) |
+| `thinking_delta` | `showThinking` 開啟時累積到 thinkingBuffer → scheduleFlush(3s) |
+| `tool_call` | `"all"` → cancelFlushTimer + flush(true) + 傳 `🔧 使用工具：{title}`；`"summary"` → 首次 tool_call 傳 `⏳ 處理中...`（後續靜默）；`"none"` → 完全不輸出 |
+| `done` | cancelFlushTimer + stopTyping → extractMediaTokens → flush 或 sendFile → uploadMediaFile |
+| `error` | cancelFlushTimer + stopTyping → flush(true) → 傳 `⚠️ 發生錯誤：{message}`（截斷至 TEXT_LIMIT） |
 | `status` | 靜默忽略 |
 
 ## 型別注意
 
-使用 `SendableChannels`（非 `TextBasedChannel`）避免 `PartialGroupDMChannel` 缺少 `send()` 的 TS 錯誤。
+使用 `SendableChannels`（非 `TextBasedChannel`）避免 `PartialGroupDMChannel` 缺少 `send()` 的 TS 編譯錯誤。

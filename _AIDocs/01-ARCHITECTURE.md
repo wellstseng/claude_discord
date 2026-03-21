@@ -61,9 +61,11 @@ catclaw/
 │   ├── discord.ts      Discord client + debounce + per-channel 過濾
 │   ├── session.ts      Session 快取 + 磁碟持久化 + TTL + per-channel queue
 │   ├── acp.ts          Claude CLI spawn + 串流 diff + event 解析
-│   └── reply.ts        Discord 回覆分段 + code fence 平衡 + typing
+│   ├── reply.ts        Discord 回覆分段 + code fence 平衡 + typing
+│   └── cron.ts         排程服務（cron-jobs.json hot-reload + timer + job runner）
 ├── data/               執行期資料（gitignore）
-│   └── sessions.json   channelId → sessionId 映射
+│   ├── sessions.json   channelId → sessionId 映射
+│   └── cron-jobs.json  排程 job 定義 + 狀態
 ├── _AIDocs/            知識庫
 │   └── modules/        各模組詳細文件
 ├── config.example.json 設定範本（token + per-channel）
@@ -83,6 +85,25 @@ catclaw/
 - 超過 TTL（預設 168h = 7 天）→ 開新 session
 - resume 失敗 → 清除 session → 不帶 `--resume` 重試
 - 重啟時 → `loadSessions()` 從 `data/sessions.json` 載入
+
+## 常數速查表
+
+| 常數 | 值 | 說明 | 所在檔案 |
+|------|-----|------|---------|
+| `TEXT_LIMIT` | 2000 | Discord 訊息字數硬上限 | reply.ts |
+| `FLUSH_DELAY_MS` | 3000ms | 定時 flush 延遲 | reply.ts |
+| `debounceMs` | 500ms（預設） | 多則訊息合併等待，config 可調 | discord.ts/config.ts |
+| `typingInterval` | 8000ms | Typing indicator 重發間隔 | reply.ts |
+| `turnTimeoutMs` | 300000ms（預設） | Claude 回應超時（5分鐘），config 可調 | config.ts |
+| `sessionTtlHours` | 168h（預設） | Session 閒置超時（7天），config 可調 | config.ts |
+| `fileUploadThreshold` | 4000（預設） | 超過此字數上傳 .md，0=停用，config 可調 | config.ts |
+| `MIN_TIMER_MS` | 2000ms | cron timer 最短間隔 | cron.ts |
+| `MAX_TIMER_MS` | 60000ms | cron timer 最長間隔 | cron.ts |
+| `BACKOFF_SCHEDULE_MS` | [30000, 60000, 300000] | cron 重試退避：30s / 1min / 5min | cron.ts |
+| `maxConcurrentRuns` | 1（預設） | cron 同時執行 job 上限，config 可調 | config.ts |
+| `selfWriting` reset delay | 1000ms | cron saveStore 後多久重置 selfWriting flag | cron.ts |
+| processedMessages 上限 | 1000 | 去重 Set 超過此數清空 | discord.ts |
+| SIGTERM delay | 250ms | abort 後等多久若未結束才 SIGKILL | acp.ts |
 
 ## Log 控制
 
