@@ -144,6 +144,39 @@ export function getRecentChannelIds(ttlMs: number): string[] {
   return result;
 }
 
+/**
+ * 清除指定頻道的 session（slash command /reset-session 使用）
+ * @returns true = 找到並清除，false = 找不到
+ */
+export function clearSession(channelId: string): boolean {
+  if (!sessionCache.has(channelId)) return false;
+  sessionCache.delete(channelId);
+  sessionUpdatedAt.delete(channelId);
+  saveSessions(Infinity); // 清除時不做 TTL 過濾，直接寫入目前狀態
+  log.info(`[session] clearSession channel=${channelId}`);
+  return true;
+}
+
+/**
+ * 清除所有頻道的 session（slash command /reset-session 無參數使用）
+ * @returns 清除的 session 數量
+ */
+export function clearAllSessions(): number {
+  const count = sessionCache.size;
+  sessionCache.clear();
+  sessionUpdatedAt.clear();
+  saveSessions(Infinity); // 清除時不做 TTL 過濾，直接寫入空狀態
+  log.info(`[session] clearAllSessions count=${count}`);
+  return count;
+}
+
+/**
+ * 取得目前活躍的 session 數量（slash command /status 使用）
+ */
+export function getSessionCount(): number {
+  return sessionCache.size;
+}
+
 // ── Active-turn 追蹤 ─────────────────────────────────────────────────────────
 // turn 執行中寫入 data/active-turns/{channelId}.json，結束時刪除
 // 若 crash 後殘留，index.ts 啟動時掃描並向使用者確認是否接續

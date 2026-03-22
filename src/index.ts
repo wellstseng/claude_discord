@@ -19,6 +19,7 @@ import { log } from "./logger.js";
 import { createDiscordClient } from "./discord.js";
 import { loadSessions, scanAndCleanActiveTurns } from "./session.js";
 import { startCron, stopCron } from "./cron.js";
+import { setupSlashCommands, registerSlashCommands } from "./slash.js";
 
 // 在其他模組開始 log 前設定層級
 setLogLevel(config.logLevel);
@@ -33,6 +34,9 @@ const client = createDiscordClient();
 // 啟動 config.json 監聽，變動時自動 hot-reload
 watchConfig();
 
+// Slash command 事件綁定（在 login 前綁，確保 ready 前就 listening）
+setupSlashCommands(client);
+
 client.once("ready", (c) => {
   log.info(`[bridge] Bot 上線：${c.user.tag}`);
   log.info(`  DM：${config.discord.dm.enabled ? "啟用" : "停用"}`);
@@ -40,6 +44,10 @@ client.once("ready", (c) => {
   log.info(`  Guild 設定：${guildCount > 0 ? `${guildCount} 個` : "全部允許"}`);
   log.info(`  工具訊息：${config.showToolCalls}`);
   log.info(`  Claude 工作目錄：${process.env.CATCLAW_WORKSPACE ?? "(未設定)"}`);
+  log.info(`  管理員白名單：${config.admin.allowedUserIds.length > 0 ? config.admin.allowedUserIds.join(", ") : "（未設定，slash commands 無人可用）"}`);
+
+  // Slash commands 部署到所有 guild（guild command 立即生效）
+  void registerSlashCommands(client);
 
   // Bot 上線後啟動排程服務（需要 client 來發送訊息）
   startCron(client);

@@ -54,6 +54,12 @@ export interface DmConfig {
   enabled: boolean;
 }
 
+/** 管理員設定 */
+export interface AdminConfig {
+  /** 允許執行管理指令的 Discord user ID 白名單 */
+  allowedUserIds: string[];
+}
+
 /** Discord 相關設定 */
 export interface DiscordConfig {
   /** Discord Bot Token */
@@ -88,6 +94,8 @@ export interface CronConfig {
 export interface BridgeConfig {
   /** Discord 相關設定 */
   discord: DiscordConfig;
+  /** 管理員設定（slash command 權限）*/
+  admin: AdminConfig;
   /** Claude 回應超時毫秒數，預設 300000（5 分鐘） */
   turnTimeoutMs: number;
   /** 涉及工具呼叫時的延長超時毫秒數，預設 turnTimeoutMs * 1.6（8 分鐘） */
@@ -122,6 +130,9 @@ interface RawConfig {
       allowFrom?: string[];
       channels?: Record<string, ChannelConfig>;
     }>;
+  };
+  admin?: {
+    allowedUserIds?: string[];
   };
   // claude.cwd / claude.command 已移除，改由環境變數控制
   turnTimeoutMs?: number;
@@ -241,6 +252,9 @@ function loadConfig(): BridgeConfig {
       token: raw.discord.token,
       dm: { enabled: raw.discord.dm?.enabled ?? true },
       guilds,
+    },
+    admin: {
+      allowedUserIds: raw.admin?.allowedUserIds ?? [],
     },
     // 原本在 claude.* 的欄位提升到頂層，從環境變數控制的路徑相關欄位已移除
     turnTimeoutMs: raw.turnTimeoutMs ?? 300_000,

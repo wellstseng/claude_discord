@@ -27,6 +27,13 @@
     }
   },
 
+  // ── 管理員設定（slash commands 權限）─────────────────────────
+  "admin": {
+    // 允許執行 /restart /reset-session /status 的 Discord user ID
+    // 空陣列 = 拒絕所有人（建議至少填入自己的 ID）
+    "allowedUserIds": []
+  },
+
   // ── 全域設定 ───────────────────────────────────────────────────
   "turnTimeoutMs": 300000,         // 單次回應超時（毫秒），預設 5 分鐘
   "turnTimeoutToolCallMs": 480000, // tool_call 時延長超時（毫秒），預設 8 分鐘
