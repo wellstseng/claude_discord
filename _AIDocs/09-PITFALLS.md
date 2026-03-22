@@ -120,15 +120,13 @@ const ch = await client.channels.fetch(channelId);
 
 **解法**：`selfWriting` flag + 延遲重置，bot 自己寫入時跳過 watch callback。（2026-03-20 修正）
 
-## 16. ACTIVE_TURNS_DIR 用 process.cwd() 而非 CATCLAW_WORKSPACE
+## 16. ACTIVE_TURNS_DIR 曾用 process.cwd() 而非 CATCLAW_WORKSPACE（已修正）
 
 **現象**：crash recovery 掃描 active-turns/ 時找不到檔案（或掃到錯誤位置）。
 
-**原因**：`session.ts` 中 `ACTIVE_TURNS_DIR` 的路徑基準是 `process.cwd()`，而 `SESSION_FILE`（sessions.json）的基準是 `resolveWorkspaceDir()`（CATCLAW_WORKSPACE）。若啟動目錄不是 catclaw 專案根目錄（如 PM2 cwd 設定不同），兩者位置不一致。
+**原因**：`session.ts` 中 `ACTIVE_TURNS_DIR` 的路徑基準曾是 `process.cwd()`，而 `SESSION_FILE`（sessions.json）的基準是 `resolveWorkspaceDir()`（CATCLAW_WORKSPACE），兩者位置不一致。
 
-**現況**：PM2 ecosystem.config.cjs 沒有顯式設定 cwd，預設以 ecosystem.config.cjs 所在目錄（專案根目錄）為 cwd，因此通常不影響。但若手動從其他目錄啟動（`node /path/to/catclaw/dist/index.js`），active-turns/ 位置會跑掉。
-
-**已知 bug，尚未修正。** 解法：應改成 `join(resolveWorkspaceDir(), "data", "active-turns")`。
+**已修正**：`ACTIVE_TURNS_DIR` 已改為 `join(resolveWorkspaceDir(), "data", "active-turns")`，與 `SESSION_FILE` 使用相同的 workspace 路徑基準。
 
 ## 17. config.json 殘留廢棄的 claude.cwd / claude.command 欄位
 
@@ -161,5 +159,5 @@ const ch = await client.channels.fetch(channelId);
 | fileMode + MEDIA 回覆異常 | §13 | 切換 mode 時重建 buffer |
 | 重啟後回報頻道不對 | §14 | 傳 `CATCLAW_CHANNEL_ID` env |
 | cron 寫檔觸發自己 reload | §15 | `selfWriting` flag |
-| crash recovery 掃不到 active-turns/ | §16 | 確認 process.cwd() == catclaw 根目錄 |
+| crash recovery 掃不到 active-turns/ | §16（已修正） | 已統一使用 CATCLAW_WORKSPACE |
 | 修改 claude.cwd 但不生效 | §17 | 改設 `CATCLAW_WORKSPACE` 環境變數 |

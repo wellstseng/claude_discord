@@ -58,9 +58,7 @@ export interface EnqueueOptions {
 | 資料 | 路徑 | 說明 |
 |------|------|------|
 | Session 快取 | `<CATCLAW_WORKSPACE>/data/sessions.json` | `resolveWorkspaceDir()` 取路徑 |
-| Active-turn 追蹤 | `<process.cwd()>/data/active-turns/{channelId}.json` | 暫存，turn 結束自動刪除 |
-
-> ⚠️ `ACTIVE_TURNS_DIR` 用 `process.cwd()`（非 `CATCLAW_WORKSPACE`），兩者通常相同（catclaw 專案根目錄）。
+| Active-turn 追蹤 | `<CATCLAW_WORKSPACE>/data/active-turns/{channelId}.json` | 暫存，turn 結束自動刪除 |
 
 ## 磁碟持久化
 

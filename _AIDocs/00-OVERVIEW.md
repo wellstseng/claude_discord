@@ -1,6 +1,6 @@
 # 00 — CatClaw 全貌
 
-> 版本：v1.0.0 | 產生：2026-03-21
+> 版本：v1.0.0 | 最近更新：2026-03-22
 
 ## 是什麼
 
@@ -188,18 +188,23 @@ index.ts
 ## 部署架構
 
 ```
-catclaw/
+catclaw/                          ← 純程式碼
 ├── src/              TypeScript 原始碼
 ├── dist/             編譯後 JS（tsc 輸出，gitignore）
-├── data/             執行期資料（gitignore）
-│   ├── sessions.json     channelId → sessionId 映射（重啟持久化）
-│   └── cron-jobs.json    排程 job 定義 + 狀態
 ├── signal/           PM2 監聽目錄
 │   └── RESTART           重啟 signal file（JSON: {channelId, time}）
-├── config.json       設定檔（gitignore，從 config.example.json 複製）
 ├── catclaw.js        跨平台管理腳本
 ├── ecosystem.config.cjs  PM2 設定（watch: ["signal"]）
 └── package.json
+
+~/.catclaw/                       ← CATCLAW_CONFIG_DIR
+├── catclaw.json          設定檔（含 token、guild 權限、全域設定）
+└── workspace/            ← CATCLAW_WORKSPACE（Claude CLI cwd）
+    ├── AGENTS.md             bot 行為規則（system prompt）
+    └── data/
+        ├── sessions.json     channelId → sessionId 映射（重啟持久化）
+        ├── cron-jobs.json    排程 job 定義 + 狀態
+        └── active-turns/     進行中 turn 追蹤（crash recovery 用）
 ```
 
 ### PM2 重啟流程

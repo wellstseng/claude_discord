@@ -144,7 +144,7 @@ index.ts
 ## 專案結構
 
 ```
-catclaw/
+~/project/catclaw/              ← 純程式碼
 ├── src/
 │   ├── index.ts        進入點：設定 logLevel + loadSessions + Discord login + 重啟回報
 │   ├── config.ts       config.json 載入 + hot-reload + per-channel helper
@@ -154,24 +154,27 @@ catclaw/
 │   ├── acp.ts          Claude CLI spawn + 串流 diff + event 解析 + 錯誤分類
 │   ├── reply.ts        Discord 回覆分段 + code fence 平衡 + typing + fileMode
 │   └── cron.ts         排程服務（cron-jobs.json hot-reload + timer + job runner）
-├── data/                   執行期資料（gitignore）
-│   ├── sessions.json       channelId → sessionId 映射
-│   ├── cron-jobs.json      排程 job 定義 + 狀態
-│   └── active-turns/       進行中 turn 追蹤（crash recovery 用）
-│       └── {channelId}.json  turn 開始時寫入，結束時刪除
 ├── signal/             PM2 監聽目錄（gitignore）
 │   └── RESTART         重啟 signal file（JSON: {channelId, time}）
-├── .env                環境變數（gitignore，從 .env.example 複製）
 ├── _AIDocs/            知識庫
 │   └── modules/        各模組詳細文件
-├── catclaw.json        設定檔（位於 ~/.catclaw/，從 config.example.json 複製）
 ├── config.example.json 設定範本
 ├── cron-jobs.example.json  排程 job 範本
 ├── catclaw.js          跨平台管理腳本
 ├── ecosystem.config.cjs  PM2 設定（watch: ["signal"]）
-├── CLAUDE.md           Claude CLI 專案指引
+├── CLAUDE.md           Claude CLI 專案指引（@import ~/.catclaw/workspace/AGENTS.md）
 ├── package.json
 └── tsconfig.json
+
+~/.catclaw/                     ← CATCLAW_CONFIG_DIR
+├── catclaw.json        設定檔（含 token、guild 權限、全域設定）
+└── workspace/          ← CATCLAW_WORKSPACE（Claude CLI cwd）
+    ├── AGENTS.md           bot 行為規則（system prompt）
+    └── data/
+        ├── sessions.json       channelId → sessionId 映射（重啟持久化）
+        ├── cron-jobs.json      排程 job 定義 + 狀態
+        └── active-turns/       進行中 turn 追蹤（crash recovery 用）
+            └── {channelId}.json  turn 開始時寫入，結束時刪除
 ```
 
 ## config.json 欄位完整說明

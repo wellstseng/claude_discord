@@ -4,6 +4,8 @@
 
 | 日期 | 變更 | 影響文件 |
 |------|------|---------|
+| 2026-03-22 | **fix(session): ACTIVE_TURNS_DIR 改用 resolveWorkspaceDir()**（6192b97）：crash recovery 路徑與 SESSION_FILE 統一，不再依賴 process.cwd()。09-PITFALLS §16 標記已修正。 | session.ts, 09-PITFALLS.md |
+| 2026-03-22 | **docs: _AIDocs 全面校正**：§16 bug 標記為已修正（ACTIVE_TURNS_DIR 已改用 resolveWorkspaceDir）；專案結構圖更新為雙目錄架構（catclaw/ + ~/.catclaw/）；modules/session.md 路徑說明同步 | 09-PITFALLS.md, 00-OVERVIEW.md, 01-ARCHITECTURE.md, modules/session.md |
 | 2026-03-22 | **feat(catclaw.js): reset-session 指令**：新增 `node catclaw.js reset-session [channelId]`，清除指定或全部 channel 的 session（sessions.json）。讀 CATCLAW_WORKSPACE 定位路徑，fallback 到 ~/.catclaw/workspace。 | catclaw.js, modules/pm2.md, 04-DEPLOY.md |
 | 2026-03-22 | **refactor: 環境變數化路徑設定**：移除 config.json 的 claude.cwd / claude.command；改由 CATCLAW_CONFIG_DIR / CATCLAW_WORKSPACE / CATCLAW_CLAUDE_BIN 三個環境變數控制。turnTimeoutMs / sessionTtlHours 提升至 BridgeConfig 頂層。acp.ts 新增 AGENTS.md system prompt 支援。CLAUDE.md 改為 @import workspace/AGENTS.md。ecosystem.config.cjs 加入 env 預設值。 | config.ts, acp.ts, session.ts, cron.ts, discord.ts, ecosystem.config.cjs, CLAUDE.md, .env.example |
 | 2026-03-22 | **docs: session 錯誤處理描述同步**：配合 17bff14 修改，將「resume 失敗→清除 session→重試」更新為「錯誤時保留 session，下次繼續 --resume」 | 00-OVERVIEW.md, 01-ARCHITECTURE.md, modules/session.md, session.ts（註解） |
