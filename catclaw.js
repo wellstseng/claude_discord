@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 /**
  * catclaw 跨平台管理腳本
- * 用法：node catclaw.js [start|stop|restart|logs|status]
+ * 用法：node catclaw.js [start|stop|restart|logs|status|reset-session [channelId]]
  *
  * 重啟機制：
  * - start 使用 ecosystem.config.cjs，PM2 監聽 signal/ 目錄
  * - tsc 編譯不會觸發重啟（只編譯到 dist/，不動 signal file）
  * - 寫入 signal/RESTART 才會觸發 PM2 自動重啟
+ *
+ * reset-session：清除 sessions.json（全部或指定 channelId）
+ * - node catclaw.js reset-session           → 清除所有 session
+ * - node catclaw.js reset-session 12345     → 只清除指定 channel 的 session
  */
 
 import { execSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,7 +84,40 @@ switch (cmd) {
   case "status":
     run("npx pm2 status");
     break;
+
+  case "reset-session": {
+    // ── Session 重置 ──
+    // 讀取 CATCLAW_WORKSPACE 環境變數決定 sessions.json 路徑
+    // 未設定則 fallback 到 ~/.catclaw/workspace（與 ecosystem.config.cjs 一致）
+    const workspace = process.env.CATCLAW_WORKSPACE || resolve(homedir(), ".catclaw", "workspace");
+    const sessionsPath = resolve(workspace, "data", "sessions.json");
+    const targetChannel = process.argv[3]; // 可選，指定 channelId
+
+    if (!existsSync(sessionsPath)) {
+      console.log(`ℹ️ sessions.json 不存在：${sessionsPath}`);
+      process.exit(0);
+    }
+
+    if (targetChannel) {
+      // 只清除指定 channel 的 session
+      const raw = readFileSync(sessionsPath, "utf-8");
+      const data = JSON.parse(raw);
+      if (data.sessions?.[targetChannel]) {
+        delete data.sessions[targetChannel];
+        writeFileSync(sessionsPath, JSON.stringify(data, null, 2), "utf-8");
+        console.log(`✅ 已清除 channel ${targetChannel} 的 session`);
+      } else {
+        console.log(`ℹ️ 找不到 channel ${targetChannel} 的 session`);
+      }
+    } else {
+      // 清除全部
+      writeFileSync(sessionsPath, JSON.stringify({ sessions: {} }, null, 2), "utf-8");
+      console.log(`✅ 已清除所有 session（${sessionsPath}）`);
+    }
+    break;
+  }
+
   default:
-    console.log("用法：node catclaw.js [start|stop|restart|logs|status]");
+    console.log("用法：node catclaw.js [start|stop|restart|logs|status|reset-session [channelId]]");
     process.exit(1);
 }
