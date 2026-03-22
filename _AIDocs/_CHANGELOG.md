@@ -4,6 +4,7 @@
 
 | 日期 | 變更 | 影響文件 |
 |------|------|---------|
+| 2026-03-22 | **fix(restart): 雙保險機制 + watch 關閉**：`/restart` slash command 改為 `rmSync` 舊檔後 `writeFileSync` 新檔，再 `setTimeout 300ms` 直接 `execSync("npx pm2 restart catclaw")`，不依賴 PM2 watch。`ecosystem.config.cjs` 的 `watch` 改為 `false`，消除 double-restart 問題。`catclaw.js restart` 改為直接 `pm2 restart`（不走 signal，無通知）。新增 `start -f` 強制 delete + re-register PM2。 | slash.ts, ecosystem.config.cjs, catclaw.js, modules/pm2.md |
 | 2026-03-22 | **feat: timeout 預警 + 分級 timeout**：80% timeout 時送出 `⏳ 任務仍在進行中` 提示；偵測到 tool_call 自動延長 timeout 至 `turnTimeoutToolCallMs`（預設 turnTimeoutMs×1.6）。新增 AcpEvent `timeout_warning` 型別。 | acp.ts, config.ts, session.ts, reply.ts, discord.ts |
 | 2026-03-22 | **fix(session): ACTIVE_TURNS_DIR 改用 resolveWorkspaceDir()**（6192b97）：crash recovery 路徑與 SESSION_FILE 統一，不再依賴 process.cwd()。09-PITFALLS §16 標記已修正。 | session.ts, 09-PITFALLS.md |
 | 2026-03-22 | **docs: _AIDocs 全面校正**：§16 bug 標記為已修正（ACTIVE_TURNS_DIR 已改用 resolveWorkspaceDir）；專案結構圖更新為雙目錄架構（catclaw/ + ~/.catclaw/）；modules/session.md 路徑說明同步 | 09-PITFALLS.md, 00-OVERVIEW.md, 01-ARCHITECTURE.md, modules/session.md |

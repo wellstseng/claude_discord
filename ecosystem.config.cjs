@@ -7,8 +7,7 @@ module.exports = {
   apps: [{
     name: "catclaw",
     script: "dist/index.js",
-    watch: ["signal"],
-    watch_delay: 1000,
+    watch: false,
     autorestart: true,
     env: {
       // 允許外部環境變數覆寫，fallback 到 ~/.catclaw 預設值

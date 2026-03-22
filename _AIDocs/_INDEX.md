@@ -19,7 +19,7 @@ Discord 收訊 → claude -p stream-json → 串流回覆 Discord。
 | [08-CLAUDE-CLI.md](08-CLAUDE-CLI.md) | Claude CLI 指令格式 + stream-json event 規格 | 2026-03-19 |
 | [09-PITFALLS.md](09-PITFALLS.md) | 17 項陷阱速查 + 錯誤訊息對照表 | 2026-03-22 |
 | [PLAN.md](PLAN.md) | 初始實作計畫（已完成） | 2026-03-18 |
-| [_CHANGELOG.md](_CHANGELOG.md) | 知識庫變更紀錄 | 2026-03-21 |
+| [_CHANGELOG.md](_CHANGELOG.md) | 知識庫變更紀錄 | 2026-03-22 |
 
 ### modules/ — 模組詳細說明
 
@@ -41,6 +41,6 @@ Discord 訊息 → debounce → displayName 前綴 → `claude -p stream-json [-
 
 ## 重啟機制
 
-PM2 監聽 `signal/` 目錄。寫入 `signal/RESTART`（JSON: `{channelId, time}`）觸發重啟。
-重啟後自動在觸發頻道發送 `[CatClaw] 已重啟（時間）`。
-Claude CLI spawn 時帶 `CATCLAW_CHANNEL_ID` 環境變數，確保回報準確。
+**管理員（CLI）**：`node catclaw.js restart` → 直接 `pm2 restart catclaw`，無通知。
+**AI（Discord）**：`/restart` → 寫 `signal/RESTART`（帶 channelId）→ `pm2 restart catclaw` → ready 事件讀 signal → 回報頻道 → 刪除 signal。
+`ecosystem.config.cjs` 的 `watch` 已關閉（改為直接 `pm2 restart`，避免 double-restart）。

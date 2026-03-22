@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * catclaw 跨平台管理腳本
- * 用法：node catclaw.js [init|start|stop|restart|logs|status|reset-session [channelId]]
+ * 用法：node catclaw.js [init|start [-f]|stop|restart|logs|status|reset-session [channelId]]
  *
  * 重啟機制：
  * - start 使用 ecosystem.config.cjs，PM2 監聽 signal/ 目錄
@@ -9,6 +9,7 @@
  * - 寫入 signal/RESTART 才會觸發 PM2 自動重啟
  *
  * init：初始化 ~/.catclaw/ 目錄結構（首次使用必跑，start 會自動呼叫）
+ * start -f：強制 delete + re-register PM2，確保 cwd 正確（重構後使用）
  * reset-session：清除 sessions.json（全部或指定 channelId）
  * - node catclaw.js reset-session           → 清除所有 session
  * - node catclaw.js reset-session 12345     → 只清除指定 channel 的 session
@@ -188,10 +189,23 @@ switch (cmd) {
       process.exit(1);
     }
 
-    if (isRunning()) {
+    const forceFlag = process.argv.includes("-f") || process.argv.includes("--force");
+
+    if (forceFlag) {
+      // -f：強制 delete + re-register，確保 PM2 cwd 正確（重構後或跨環境部署時使用）
+      console.log("🔧 強制重新註冊 PM2 進程...");
+      try {
+        execSync("npx pm2 delete catclaw", { cwd: __dirname, stdio: "pipe" });
+        console.log("  ✓ 舊進程已移除");
+      } catch {
+        // 不存在也沒關係
+      }
+    } else if (isRunning()) {
       console.log("⚠️ catclaw 已在執行中，使用 restart 重啟或 stop 停止");
+      console.log("   （若要強制重新註冊 PM2，使用 node catclaw.js start -f）");
       process.exit(0);
     }
+
     run("npx tsc");
     mkdirSync(resolve(__dirname, "signal"), { recursive: true });
     run("npx pm2 start ecosystem.config.cjs");
@@ -206,8 +220,8 @@ switch (cmd) {
 
   case "restart":
     run("npx tsc");
-    triggerRestart();
-    console.log("🔄 catclaw 重啟信號已送出");
+    run("npx pm2 restart catclaw");
+    console.log("🔄 catclaw 已重啟");
     break;
 
   case "logs":
@@ -246,6 +260,7 @@ switch (cmd) {
   }
 
   default:
-    console.log("用法：node catclaw.js [init|start|stop|restart|logs|status|reset-session [channelId]]");
+    console.log("用法：node catclaw.js [init|start [-f]|stop|restart|logs|status|reset-session [channelId]]");
+    console.log("      start -f  強制 delete + re-register PM2（重構後或跨環境部署時使用）");
     process.exit(1);
 }
