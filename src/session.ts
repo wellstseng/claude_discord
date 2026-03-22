@@ -48,7 +48,7 @@ export interface ActiveTurnRecord {
 const SESSION_FILE = join(resolveWorkspaceDir(), "data", "sessions.json");
 
 /** active-turn 追蹤目錄：每個頻道一個檔案，用於 crash recovery */
-const ACTIVE_TURNS_DIR = resolve(process.cwd(), "data", "active-turns");
+const ACTIVE_TURNS_DIR = join(resolveWorkspaceDir(), "data", "active-turns");
 
 // ── 內部狀態 ────────────────────────────────────────────────────────────────
 
