@@ -13,11 +13,11 @@ Discord 收訊 → claude -p stream-json → 串流回覆 Discord。
 | 文件 | 主題 | 更新日期 |
 |------|------|---------|
 | [00-OVERVIEW.md](00-OVERVIEW.md) | 架構全貌：資料流圖、模組關係、常數速查、config 欄位一覽 | 2026-03-22 |
-| [01-ARCHITECTURE.md](01-ARCHITECTURE.md) | 整體架構 + 資料流 + 專案結構 | 2026-03-19 |
+| [01-ARCHITECTURE.md](01-ARCHITECTURE.md) | 整體架構 + 資料流 + 專案結構 | 2026-03-22 |
 | [02-CONFIG-REFERENCE.md](02-CONFIG-REFERENCE.md) | config.json + cron-jobs.json 完整範例 + 環境變數 | 2026-03-21 |
 | [04-DEPLOY.md](04-DEPLOY.md) | 部署流程、PM2 管理、hot-reload、健康檢查 | 2026-03-22 |
 | [08-CLAUDE-CLI.md](08-CLAUDE-CLI.md) | Claude CLI 指令格式 + stream-json event 規格 | 2026-03-19 |
-| [09-PITFALLS.md](09-PITFALLS.md) | 15 項陷阱速查 + 錯誤訊息對照表 | 2026-03-21 |
+| [09-PITFALLS.md](09-PITFALLS.md) | 17 項陷阱速查 + 錯誤訊息對照表 | 2026-03-22 |
 | [PLAN.md](PLAN.md) | 初始實作計畫（已完成） | 2026-03-18 |
 | [_CHANGELOG.md](_CHANGELOG.md) | 知識庫變更紀錄 | 2026-03-21 |
 

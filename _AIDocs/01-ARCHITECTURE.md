@@ -1,6 +1,6 @@
 # 01 — 架構概覽
 
-> 最近更新：2026-03-21
+> 最近更新：2026-03-22
 
 ## 專案目標
 
@@ -53,7 +53,7 @@ Discord Gateway
       │  呼叫 runClaudeTurn()，攔截 session_init，記錄 UUID + 持久化
       │  錯誤時保留 session，下次繼續 --resume
       ▼
-[acp.ts] runClaudeTurn(sessionId, text, cwd, claudeCmd, channelId)
+[acp.ts] runClaudeTurn(sessionId, text, channelId, signal?)
       │  spawn: claude -p --output-format stream-json --verbose
       │          --include-partial-messages --dangerously-skip-permissions
       │          [--resume <sessionId>] "<prompt>"
@@ -135,6 +135,11 @@ index.ts
 | **原子寫入** | 先寫 .tmp 再 rename 覆蓋，防止 crash 導致 JSON 損壞 |
 | **CATCLAW_CHANNEL_ID** | acp.ts spawn claude 時傳入的環境變數，讓 Claude 知道當前 Discord 頻道 |
 | **Event Queue Pattern** | acp.ts 用 eventQueue + resolveNext 將 callback-based stdout 轉為可 yield 的 AsyncGenerator |
+| **ActiveTurnRecord** | session.ts 寫入 active-turns/{channelId}.json 的追蹤記錄，含 startedAt + prompt，用於 crash recovery |
+| **Crash Recovery** | bot 重啟後掃描 active-turns/ 殘留，偵測被中斷的 turn 並向使用者確認是否接續 |
+| **intentionalChannelIds** | index.ts 從 signal/RESTART 取得的 channelId Set，用於區分有意重啟 vs crash |
+| **CATCLAW_WORKSPACE** | 環境變數，Claude CLI agent 工作目錄 + data/ 存放位置，未設定時 throw |
+| **CATCLAW_CONFIG_DIR** | 環境變數，catclaw.json 所在目錄，未設定時 throw |
 
 ## 專案結構
 
@@ -149,14 +154,17 @@ catclaw/
 │   ├── acp.ts          Claude CLI spawn + 串流 diff + event 解析 + 錯誤分類
 │   ├── reply.ts        Discord 回覆分段 + code fence 平衡 + typing + fileMode
 │   └── cron.ts         排程服務（cron-jobs.json hot-reload + timer + job runner）
-├── data/               執行期資料（gitignore）
-│   ├── sessions.json   channelId → sessionId 映射
-│   └── cron-jobs.json  排程 job 定義 + 狀態
+├── data/                   執行期資料（gitignore）
+│   ├── sessions.json       channelId → sessionId 映射
+│   ├── cron-jobs.json      排程 job 定義 + 狀態
+│   └── active-turns/       進行中 turn 追蹤（crash recovery 用）
+│       └── {channelId}.json  turn 開始時寫入，結束時刪除
 ├── signal/             PM2 監聽目錄（gitignore）
 │   └── RESTART         重啟 signal file（JSON: {channelId, time}）
+├── .env                環境變數（gitignore，從 .env.example 複製）
 ├── _AIDocs/            知識庫
 │   └── modules/        各模組詳細文件
-├── config.json         設定檔（gitignore，從 config.example.json 複製）
+├── catclaw.json        設定檔（位於 ~/.catclaw/，從 config.example.json 複製）
 ├── config.example.json 設定範本
 ├── cron-jobs.example.json  排程 job 範本
 ├── catclaw.js          跨平台管理腳本
@@ -178,10 +186,8 @@ catclaw/
 | `discord.guilds[id].allowBot` | boolean | `false` | — | Guild 預設：是否處理 bot 訊息 |
 | `discord.guilds[id].allowFrom` | string[] | `[]` | — | Guild 預設：白名單（空=不限） |
 | `discord.guilds[id].channels[chId].*` | ChannelConfig | guild 預設 | — | per-channel 覆寫（同上 4 欄位） |
-| `claude.cwd` | string | `$HOME` | — | Claude session spawn cwd |
-| `claude.command` | string | `"claude"` | — | claude CLI binary 路徑 |
-| `claude.turnTimeoutMs` | number | `300000` | — | 回應超時毫秒（5分鐘） |
-| `claude.sessionTtlHours` | number | `168` | — | Session 閒置超時小時（7天） |
+| `turnTimeoutMs` | number | `300000` | — | 回應超時毫秒（5分鐘），頂層欄位 |
+| `sessionTtlHours` | number | `168` | — | Session 閒置超時小時（7天），頂層欄位 |
 | `showToolCalls` | "all"/"summary"/"none" | `"all"` | — | 工具呼叫顯示模式（舊版 boolean 相容） |
 | `showThinking` | boolean | `false` | — | 顯示 Claude 推理過程 |
 | `debounceMs` | number | `500` | — | 訊息合併等待毫秒 |
@@ -190,7 +196,7 @@ catclaw/
 | `cron.enabled` | boolean | `false` | — | 啟用排程服務 |
 | `cron.maxConcurrentRuns` | number | `1` | — | 同時執行 job 上限 |
 
-> config.json 支援 JSONC（`//` 行尾 / 整行註解）。排程 job 定義在 `data/cron-jobs.json`。
+> config.json（實際為 `catclaw.json`）支援 JSONC（`//` 行尾 / 整行註解）。排程 job 定義在 `data/cron-jobs.json`。`claude.cwd` / `claude.command` 已移除，改由環境變數控制。
 
 ## Session 策略
 
@@ -239,6 +245,7 @@ index.ts ready 事件 → 讀 signal/RESTART
 | `BACKOFF_SCHEDULE_MS` | [30000, 60000, 300000] | cron 重試退避：30s / 1min / 5min | cron.ts |
 | `maxConcurrentRuns` | 1（預設） | cron 同時執行 job 上限，config 可調 | config.ts |
 | `selfWriting` reset | 1000ms | cron saveStore 後多久重置 selfWriting flag | cron.ts |
+| `maxAgeMs` (crash recovery) | 600000ms (10min) | active-turn 超過此時間視為過期，不接續 | session.ts |
 | `processedMessages` | 1000 | 去重 Set 超過此數清空 | discord.ts |
 | `UPLOAD_DIR` | /tmp/claude-discord-uploads | 附件暫存根目錄 | discord.ts |
 | `SIGTERM delay` | 250ms | abort 後等多久若未結束才 SIGKILL | acp.ts |

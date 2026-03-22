@@ -120,6 +120,26 @@ const ch = await client.channels.fetch(channelId);
 
 **解法**：`selfWriting` flag + 延遲重置，bot 自己寫入時跳過 watch callback。（2026-03-20 修正）
 
+## 16. ACTIVE_TURNS_DIR 用 process.cwd() 而非 CATCLAW_WORKSPACE
+
+**現象**：crash recovery 掃描 active-turns/ 時找不到檔案（或掃到錯誤位置）。
+
+**原因**：`session.ts` 中 `ACTIVE_TURNS_DIR` 的路徑基準是 `process.cwd()`，而 `SESSION_FILE`（sessions.json）的基準是 `resolveWorkspaceDir()`（CATCLAW_WORKSPACE）。若啟動目錄不是 catclaw 專案根目錄（如 PM2 cwd 設定不同），兩者位置不一致。
+
+**現況**：PM2 ecosystem.config.cjs 沒有顯式設定 cwd，預設以 ecosystem.config.cjs 所在目錄（專案根目錄）為 cwd，因此通常不影響。但若手動從其他目錄啟動（`node /path/to/catclaw/dist/index.js`），active-turns/ 位置會跑掉。
+
+**已知 bug，尚未修正。** 解法：應改成 `join(resolveWorkspaceDir(), "data", "active-turns")`。
+
+## 17. config.json 殘留廢棄的 claude.cwd / claude.command 欄位
+
+**現象**：編輯 config.json 時看到 `claude.cwd` / `claude.command` 欄位，以為仍然有效。
+
+**原因**：重構（5173e98）後這兩個欄位已從 `RawConfig` 移除，程式碼完全忽略。但現有的 `config.json` 未同步清除，欄位依然存在。
+
+**影響**：無功能影響。但若在 config.json 中修改 `claude.cwd`，**不會生效**。cwd 由 `CATCLAW_WORKSPACE` 環境變數控制。
+
+**解法**：直接從 config.json 刪除 `claude.cwd` / `claude.command` 欄位即可（或繼續忽略，無實質影響）。
+
 ---
 
 ## 常見錯誤訊息對照表
@@ -141,3 +161,5 @@ const ch = await client.channels.fetch(channelId);
 | fileMode + MEDIA 回覆異常 | §13 | 切換 mode 時重建 buffer |
 | 重啟後回報頻道不對 | §14 | 傳 `CATCLAW_CHANNEL_ID` env |
 | cron 寫檔觸發自己 reload | §15 | `selfWriting` flag |
+| crash recovery 掃不到 active-turns/ | §16 | 確認 process.cwd() == catclaw 根目錄 |
+| 修改 claude.cwd 但不生效 | §17 | 改設 `CATCLAW_WORKSPACE` 環境變數 |
