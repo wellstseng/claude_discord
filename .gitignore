@@ -1,7 +1,8 @@
 node_modules/
 dist/
-config.json
+catclaw.json
 data/
 .DS_Store
 signal/
 .signal/
+.env
