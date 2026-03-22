@@ -107,7 +107,7 @@ function ensureInitialized() {
     try {
       const raw = readFileSync(catclawJsonPath, "utf-8").replace(/\/\/.*$/gm, "");
       const cfg = JSON.parse(raw);
-      if (!cfg.discord?.token || cfg.discord.token === "your_discord_bot_token_here") {
+      if (!cfg.discord?.token || cfg.discord.token === "your_discord_bot_token_here" || cfg.discord.token === "") {
         console.warn(`⚠️  ${catclawJsonPath} 中 discord.token 尚未設定`);
         needsToken = true;
       }
