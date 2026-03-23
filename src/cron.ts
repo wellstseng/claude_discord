@@ -450,22 +450,27 @@ async function runJob(job: CronJobRuntime): Promise<void> {
     entry.lastError = message;
     entry.lastRunAtMs = Date.now();
 
-    // 失敗時回報到指定頻道（非 silent 且有 channelId）
-    const actionChannelId = "channelId" in entry.action ? (entry.action as { channelId?: string }).channelId : undefined;
-    if (actionChannelId && !(entry.action as { silent?: boolean }).silent && discordClient) {
-      try {
-        const ch = await discordClient.channels.fetch(actionChannelId);
-        if (ch && "send" in ch) {
-          const errorMsg = `⚠️ 排程 **${entry.name}** 執行失敗：${message}`.slice(0, 2000);
-          await (ch as SendableChannels).send(errorMsg);
+    const maxRetries = entry.maxRetries ?? 3;
+    const retryCount = entry.retryCount ?? 0;
+    const isLastAttempt = retryCount >= maxRetries;
+
+    // 只在最後一次重試失敗時才回報頻道（避免重試期間連續洗版）
+    if (isLastAttempt) {
+      const actionChannelId = "channelId" in entry.action ? (entry.action as { channelId?: string }).channelId : undefined;
+      if (actionChannelId && !(entry.action as { silent?: boolean }).silent && discordClient) {
+        try {
+          const ch = await discordClient.channels.fetch(actionChannelId);
+          if (ch && "send" in ch) {
+            const retryInfo = maxRetries > 0 ? `（已重試 ${maxRetries} 次）` : "";
+            const errorMsg = `⚠️ 排程 **${entry.name}** 執行失敗${retryInfo}：${message}`.slice(0, 2000);
+            await (ch as SendableChannels).send(errorMsg);
+          }
+        } catch {
+          // 發送失敗不影響流程
         }
-      } catch {
-        // 發送失敗不影響重試流程
       }
     }
 
-    const maxRetries = entry.maxRetries ?? 3;
-    const retryCount = entry.retryCount ?? 0;
     if (retryCount < maxRetries) {
       // 重試：指數退避
       const backoffMs = BACKOFF_SCHEDULE_MS[Math.min(retryCount, BACKOFF_SCHEDULE_MS.length - 1)];
