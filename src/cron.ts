@@ -375,6 +375,8 @@ async function execCommand(command: string, channelId?: string, silent?: boolean
     ...process.env,
     // 強制 Python/子程序 UTF-8 輸出，避免 Windows cp950 亂碼
     ...(IS_WIN ? { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" } : {}),
+    // SSH 首次連線自動接受 host key（寫入 known_hosts），後續 key 變更仍拒絕
+    GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new",
   };
 
   const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
