@@ -65,6 +65,7 @@ interface CronJobRuntime {
 const STORE_PATH = join(resolveWorkspaceDir(), "data", "cron-jobs.json");
 const MIN_TIMER_MS = 2_000;
 const MAX_TIMER_MS = 60_000;
+const IS_WIN = platform() === "win32";
 
 /** 重試退避時間表（毫秒） */
 const BACKOFF_SCHEDULE_MS = [
@@ -72,6 +73,65 @@ const BACKOFF_SCHEDULE_MS = [
   60_000,      // 第 2 次 → 1 min
   300_000,     // 第 3 次 → 5 min
 ];
+
+// ── Shell 偵測 ─────────────────────────────────────────────────────────────
+
+/** shell 名稱 → 執行資訊 */
+interface ShellInfo {
+  /** 完整路徑或指令名 */
+  bin: string;
+  /** 傳入指令的 args 格式（command 會被 append） */
+  args: (cmd: string) => string[];
+}
+
+/**
+ * 啟動時偵測可用 shell，快取結果
+ * Windows 優先順序：bash（Git Bash）→ powershell → cmd
+ * Unix 優先順序：sh → bash
+ */
+function detectShells(): Map<string, ShellInfo> {
+  const found = new Map<string, ShellInfo>();
+
+  if (IS_WIN) {
+    // Git Bash — 從常見路徑探測
+    const gitBashCandidates = [
+      join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "usr", "bin", "bash.exe"),
+      join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
+      join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Git", "usr", "bin", "bash.exe"),
+    ];
+    for (const p of gitBashCandidates) {
+      if (existsSync(p)) {
+        found.set("bash", { bin: p, args: (cmd) => ["-c", cmd] });
+        break;
+      }
+    }
+    // PowerShell（幾乎一定存在）
+    const ps = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    if (existsSync(ps)) {
+      found.set("powershell", { bin: ps, args: (cmd) => ["-NoProfile", "-Command", cmd] });
+    }
+    // cmd（一定存在）
+    const cmd = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
+    found.set("cmd", { bin: cmd, args: (c) => ["/c", c] });
+  } else {
+    // Unix
+    found.set("sh", { bin: "/bin/sh", args: (cmd) => ["-c", cmd] });
+    if (existsSync("/usr/bin/bash") || existsSync("/bin/bash")) {
+      found.set("bash", { bin: existsSync("/usr/bin/bash") ? "/usr/bin/bash" : "/bin/bash", args: (cmd) => ["-c", cmd] });
+    }
+  }
+
+  return found;
+}
+
+/** 可用 shell 快取（啟動時偵測一次） */
+const availableShells = detectShells();
+
+/** 預設 shell：Windows=bash>powershell>cmd, Unix=sh */
+const defaultShell: ShellInfo | undefined =
+  IS_WIN
+    ? (availableShells.get("bash") ?? availableShells.get("powershell") ?? availableShells.get("cmd"))
+    : (availableShells.get("sh") ?? availableShells.get("bash"));
 
 // ── 內部狀態 ────────────────────────────────────────────────────────────────
 
@@ -291,26 +351,34 @@ async function execClaude(channelId: string, prompt: string): Promise<void> {
 /**
  * 執行 exec action：直接跑 shell 指令
  *
- * Windows：用 bash（Git Bash）執行，統一 MSYS2 路徑語法 + UTF-8 輸出
- * Unix：用 /bin/sh 執行
+ * Shell 選擇邏輯：
+ * 1. job 指定 shell（"bash"/"sh"/"cmd"/"powershell"）→ 直接使用
+ * 2. 未指定 → 自動偵測（Windows: bash>powershell>cmd, Unix: sh>bash）
  *
  * 可選將 stdout 結果送到 channelId，失敗時也會回報錯誤
  */
-async function execCommand(command: string, channelId?: string, silent?: boolean, timeoutSec?: number): Promise<void> {
+async function execCommand(command: string, channelId?: string, silent?: boolean, timeoutSec?: number, shellOverride?: string): Promise<void> {
   const cwd = resolveWorkspaceDir();
   const timeout = (timeoutSec ?? 120) * 1000;
-  const isWin = platform() === "win32";
 
-  // Windows 用 bash（Git Bash），確保 MSYS2 路徑 + UTF-8；Unix 用 sh
-  const shell = isWin ? "bash" : "sh";
+  // shell 選擇：job 指定 > 自動偵測
+  const shell = shellOverride
+    ? availableShells.get(shellOverride)
+    : defaultShell;
+
+  if (!shell) {
+    const available = [...availableShells.keys()].join(", ") || "(none)";
+    throw new Error(`找不到 shell${shellOverride ? ` "${shellOverride}"` : ""}（可用: ${available}）`);
+  }
+
   const env = {
     ...process.env,
     // 強制 Python/子程序 UTF-8 輸出，避免 Windows cp950 亂碼
-    ...(isWin ? { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" } : {}),
+    ...(IS_WIN ? { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" } : {}),
   };
 
   const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(shell, ["-c", command], { cwd, timeout, maxBuffer: 1024 * 1024, env }, (err, stdout, stderr) => {
+    execFile(shell.bin, shell.args(command), { cwd, timeout, maxBuffer: 1024 * 1024, env }, (err, stdout, stderr) => {
       if (err) {
         const detail = (err as NodeJS.ErrnoException & { killed?: boolean; signal?: string });
         const reason = detail.killed
@@ -355,7 +423,7 @@ async function runJob(job: CronJobRuntime): Promise<void> {
     if (entry.action.type === "message") {
       await execMessage(entry.action.channelId, entry.action.text);
     } else if (entry.action.type === "exec") {
-      await execCommand(entry.action.command, entry.action.channelId, entry.action.silent, entry.action.timeoutSec);
+      await execCommand(entry.action.command, entry.action.channelId, entry.action.silent, entry.action.timeoutSec, entry.action.shell);
     } else {
       await execClaude(entry.action.channelId, entry.action.prompt);
     }
@@ -507,7 +575,9 @@ export function startCron(client: Client): void {
   watchCronJobs();
   armTimer();
 
-  log.info(`[cron] 排程服務已啟動（${Object.keys(store.jobs).length} 個 job，max concurrent: ${config.cron.maxConcurrentRuns}）`);
+  const shellNames = [...availableShells.keys()].join(", ");
+  const defaultName = defaultShell ? [...availableShells.entries()].find(([, v]) => v === defaultShell)?.[0] ?? "?" : "none";
+  log.info(`[cron] 排程服務已啟動（${Object.keys(store.jobs).length} 個 job，max concurrent: ${config.cron.maxConcurrentRuns}，shells: [${shellNames}]，default: ${defaultName}）`);
 }
 
 /**
