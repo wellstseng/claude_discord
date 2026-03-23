@@ -82,7 +82,7 @@ export type CronSchedule =
 export type CronAction =
   | { type: "message"; channelId: string; text: string }     // 直接發訊息
   | { type: "claude"; channelId: string; prompt: string }    // 跑 Claude turn，結果送到頻道
-  | { type: "exec"; command: string; channelId?: string; silent?: boolean; timeoutSec?: number; shell?: string };  // 執行 shell 指令，shell 可指定 "bash"/"sh"/"cmd"/"powershell"（省略則自動偵測）
+  | { type: "exec"; command: string; channelId?: string; silent?: boolean; timeoutSec?: number; shell?: string; background?: boolean };  // background 預設 true（隱藏視窗），設 false 可顯示終端機
 
 /** Cron 全域設定（job 定義在 data/cron-jobs.json） */
 export interface CronConfig {

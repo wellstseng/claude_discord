@@ -357,7 +357,7 @@ async function execClaude(channelId: string, prompt: string): Promise<void> {
  *
  * 可選將 stdout 結果送到 channelId，失敗時也會回報錯誤
  */
-async function execCommand(command: string, channelId?: string, silent?: boolean, timeoutSec?: number, shellOverride?: string): Promise<void> {
+async function execCommand(command: string, channelId?: string, silent?: boolean, timeoutSec?: number, shellOverride?: string, background?: boolean): Promise<void> {
   const cwd = resolveWorkspaceDir();
   const timeout = (timeoutSec ?? 120) * 1000;
 
@@ -380,7 +380,7 @@ async function execCommand(command: string, channelId?: string, silent?: boolean
   };
 
   const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(shell.bin, shell.args(command), { cwd, timeout, maxBuffer: 1024 * 1024, env, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(shell.bin, shell.args(command), { cwd, timeout, maxBuffer: 1024 * 1024, env, windowsHide: background !== false }, (err, stdout, stderr) => {
       if (err) {
         const detail = (err as NodeJS.ErrnoException & { killed?: boolean; signal?: string });
         const reason = detail.killed
@@ -425,7 +425,7 @@ async function runJob(job: CronJobRuntime): Promise<void> {
     if (entry.action.type === "message") {
       await execMessage(entry.action.channelId, entry.action.text);
     } else if (entry.action.type === "exec") {
-      await execCommand(entry.action.command, entry.action.channelId, entry.action.silent, entry.action.timeoutSec, entry.action.shell);
+      await execCommand(entry.action.command, entry.action.channelId, entry.action.silent, entry.action.timeoutSec, entry.action.shell, entry.action.background);
     } else {
       await execClaude(entry.action.channelId, entry.action.prompt);
     }
