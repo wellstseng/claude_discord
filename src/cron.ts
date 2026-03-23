@@ -16,7 +16,8 @@
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync, watch, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { execFile, exec } from "node:child_process";
+import { execFile } from "node:child_process";
+import { platform } from "node:os";
 import { Cron } from "croner";
 import type { Client, SendableChannels } from "discord.js";
 import { config, resolveWorkspaceDir } from "./config.js";
@@ -289,16 +290,27 @@ async function execClaude(channelId: string, prompt: string): Promise<void> {
 
 /**
  * 執行 exec action：直接跑 shell 指令
- * 用 execFile 透過 shell 執行，cwd 為 CATCLAW_WORKSPACE
- * 可選將 stdout 結果送到 channelId
+ *
+ * Windows：用 bash（Git Bash）執行，統一 MSYS2 路徑語法 + UTF-8 輸出
+ * Unix：用 /bin/sh 執行
+ *
+ * 可選將 stdout 結果送到 channelId，失敗時也會回報錯誤
  */
 async function execCommand(command: string, channelId?: string, silent?: boolean, timeoutSec?: number): Promise<void> {
   const cwd = resolveWorkspaceDir();
   const timeout = (timeoutSec ?? 120) * 1000;
+  const isWin = platform() === "win32";
 
-  // 用 exec（自動選 platform shell：Windows=cmd, Unix=sh）取代 execFile("sh")
+  // Windows 用 bash（Git Bash），確保 MSYS2 路徑 + UTF-8；Unix 用 sh
+  const shell = isWin ? "bash" : "sh";
+  const env = {
+    ...process.env,
+    // 強制 Python/子程序 UTF-8 輸出，避免 Windows cp950 亂碼
+    ...(isWin ? { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" } : {}),
+  };
+
   const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    exec(command, { cwd, timeout, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(shell, ["-c", command], { cwd, timeout, maxBuffer: 1024 * 1024, env }, (err, stdout, stderr) => {
       if (err) {
         const detail = (err as NodeJS.ErrnoException & { killed?: boolean; signal?: string });
         const reason = detail.killed
@@ -369,6 +381,20 @@ async function runJob(job: CronJobRuntime): Promise<void> {
     entry.lastResult = "error";
     entry.lastError = message;
     entry.lastRunAtMs = Date.now();
+
+    // 失敗時回報到指定頻道（非 silent 且有 channelId）
+    const actionChannelId = "channelId" in entry.action ? (entry.action as { channelId?: string }).channelId : undefined;
+    if (actionChannelId && !(entry.action as { silent?: boolean }).silent && discordClient) {
+      try {
+        const ch = await discordClient.channels.fetch(actionChannelId);
+        if (ch && "send" in ch) {
+          const errorMsg = `⚠️ 排程 **${entry.name}** 執行失敗：${message}`.slice(0, 2000);
+          await (ch as SendableChannels).send(errorMsg);
+        }
+      } catch {
+        // 發送失敗不影響重試流程
+      }
+    }
 
     const maxRetries = entry.maxRetries ?? 3;
     const retryCount = entry.retryCount ?? 0;

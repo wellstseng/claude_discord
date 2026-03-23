@@ -161,16 +161,34 @@ const ch = await client.channels.fetch(channelId);
 | cron 寫檔觸發自己 reload | §15 | `selfWriting` flag |
 | crash recovery 掃不到 active-turns/ | §16（已修正） | 已統一使用 CATCLAW_WORKSPACE |
 | 修改 claude.cwd 但不生效 | §17 | 改設 `CATCLAW_WORKSPACE` 環境變數 |
-| cron exec job 在 Windows 失敗 ENOENT | §18 | `execFile("sh")` → `exec()` |
+| cron exec job 在 Windows 失敗 ENOENT | §18 | Windows 用 `bash`（Git Bash），Unix 用 `sh` |
 | catclaw.json trailing comma 導致 hot-reload 失敗 | §19 | JSONC strip 後仍需合法 JSON |
+| cron exec 輸出亂碼（cp950） | §20 | 注入 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1` |
+| cron exec 失敗時頻道無回報 | §21 | catch 區塊加 Discord 錯誤訊息發送 |
 
-## 18. cron exec 在 Windows 失敗（spawn sh ENOENT）
+## 18. cron exec 在 Windows 失敗（spawn sh ENOENT → cmd 路徑不通）
 
-**現象**：cron exec action 執行時報 `spawn sh ENOENT`，job 持續重試失敗。
+**現象**：`execFile("sh")` 報 ENOENT；改 `exec()` 後走 cmd.exe，MSYS2 路徑 `/c/Projects/...` 不認。
 
-**原因**：`execFile("sh", ["-c", command])` 在 Windows PM2 環境中 PATH 沒有 MSYS2 的 `sh`。
+**原因**：Windows PM2 環境 PATH 沒有 `sh`；`exec()` 預設走 cmd.exe，不支援 MSYS2 路徑和 bash 語法。
 
-**解法**：改用 `exec(command, opts)` — Node.js `exec` 會自動選擇 platform shell（Windows=cmd, Unix=/bin/sh），跨平台相容。
+**解法**：偵測 `platform() === "win32"` 時用 `execFile("bash", ["-c", cmd])`（Git Bash），Unix 用 `execFile("sh", ["-c", cmd])`。確保 Git Bash 在 PATH 中。
+
+## 20. cron exec 輸出亂碼（Windows cp950）
+
+**現象**：cron-jobs.json 的 lastError 出現 `�t�Χ䤣����w` 亂碼。
+
+**原因**：Windows cmd/Python 預設輸出 cp950（繁體中文 BIG5），Node.js 以 UTF-8 解讀。
+
+**解法**：exec 時注入環境變數 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1`，強制 Python 子程序 UTF-8 輸出。搭配 bash 執行也確保 shell 層面 UTF-8。
+
+## 21. cron exec 失敗時頻道無回報
+
+**現象**：job 執行失敗只寫 log 和 store，使用者在 Discord 不知道出錯。
+
+**原因**：`runJob` 的 catch 區塊只記錄 lastError，不送 Discord。
+
+**解法**：catch 區塊加入 Discord 錯誤訊息發送（`⚠️ 排程 **{name}** 執行失敗：{message}`），只在有 channelId 且非 silent 時觸發，發送失敗不影響重試流程。
 
 ## 19. catclaw.json trailing comma 導致 hot-reload 持續失敗
 

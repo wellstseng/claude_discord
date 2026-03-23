@@ -4,7 +4,7 @@
 
 | 日期 | 變更 | 影響文件 |
 |------|------|---------|
-| 2026-03-23 | **fix(cron): exec action Windows 相容**：`execFile("sh", ["-c", cmd])` 改為 `exec(cmd)`，自動選 platform shell。新增 09-PITFALLS §18-§19（exec ENOENT + JSONC trailing comma） | cron.ts, 09-PITFALLS.md |
+| 2026-03-23 | **fix(cron): exec 三修**：①Windows 用 bash（Git Bash）+Unix 用 sh ②注入 PYTHONIOENCODING/PYTHONUTF8 解 cp950 亂碼 ③失敗時回報 Discord 頻道。新增 09-PITFALLS §18§20§21 | cron.ts, 09-PITFALLS.md |
 | 2026-03-23 | **feat(cron): 新增 exec action type**：排程可直接執行 shell 指令，支援 `channelId` 回報、`silent` 靜默、`timeoutSec` 可調逾時（預設 120s）。timeout 時正確辨識 `err.killed` + `err.signal`。 | cron.ts, config.ts, 02-CONFIG-REFERENCE.md, modules/cron.md |
 | 2026-03-22 | **fix(restart): 雙保險機制 + watch 關閉** | slash.ts, ecosystem.config.cjs, catclaw.js, modules/pm2.md |
 | 2026-03-22 | **feat: timeout 預警 + 分級 timeout** | acp.ts, config.ts, session.ts, reply.ts, discord.ts |
