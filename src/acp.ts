@@ -141,15 +141,26 @@ export async function* runClaudeTurn(
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, CATCLAW_CHANNEL_ID: channelId },
+    windowsHide: true,
+    detached: true,    // Windows: 不分配 console 視窗
   });
+  // detached 但不 unref()，確保父程序仍追蹤子程序生命週期
 
   log.debug(`[acp] process spawned, pid=${proc.pid}`);
 
   // 處理 AbortSignal：SIGTERM → 250ms → SIGKILL
+  // detached 模式下用 process.kill(-pid) 殺整個 process group
+  const killProc = (sig: NodeJS.Signals) => {
+    try {
+      if (proc.pid) process.kill(-proc.pid, sig);
+    } catch {
+      proc.kill(sig);  // fallback: 直接殺
+    }
+  };
   const abortHandler = () => {
-    proc.kill("SIGTERM");
+    killProc("SIGTERM");
     setTimeout(() => {
-      if (!proc.killed) proc.kill("SIGKILL");
+      if (!proc.killed) killProc("SIGKILL");
     }, 250);
   };
   signal?.addEventListener("abort", abortHandler, { once: true });
