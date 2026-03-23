@@ -16,6 +16,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync, watch, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { execFile } from "node:child_process";
 import { Cron } from "croner";
 import type { Client, SendableChannels } from "discord.js";
 import { config, resolveWorkspaceDir } from "./config.js";
@@ -287,6 +288,46 @@ async function execClaude(channelId: string, prompt: string): Promise<void> {
 }
 
 /**
+ * 執行 exec action：直接跑 shell 指令
+ * 用 execFile 透過 shell 執行，cwd 為 CATCLAW_WORKSPACE
+ * 可選將 stdout 結果送到 channelId
+ */
+async function execCommand(command: string, channelId?: string, silent?: boolean, timeoutSec?: number): Promise<void> {
+  const cwd = resolveWorkspaceDir();
+  const timeout = (timeoutSec ?? 120) * 1000;
+
+  const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    execFile("sh", ["-c", command], { cwd, timeout, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        reject(new Error(`exit ${err.code ?? "unknown"}: ${stderr.trim() || err.message}`));
+      } else {
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim() });
+      }
+    });
+  });
+
+  if (result.stderr) {
+    log.warn(`[cron/exec] stderr: ${result.stderr}`);
+  }
+
+  // 有 channelId 且非 silent → 回報結果
+  if (channelId && !silent && discordClient) {
+    const channel = await discordClient.channels.fetch(channelId);
+    if (channel && "send" in channel) {
+      const output = result.stdout || "(no output)";
+      let remaining = output;
+      const sendable = channel as SendableChannels;
+      while (remaining.length > 0) {
+        await sendable.send(remaining.slice(0, 2000));
+        remaining = remaining.slice(2000);
+      }
+    }
+  }
+
+  log.info(`[cron/exec] 完成: ${command}${result.stdout ? ` → ${result.stdout.slice(0, 100)}` : ""}`);
+}
+
+/**
  * 執行單一 job
  */
 async function runJob(job: CronJobRuntime): Promise<void> {
@@ -296,6 +337,8 @@ async function runJob(job: CronJobRuntime): Promise<void> {
   try {
     if (entry.action.type === "message") {
       await execMessage(entry.action.channelId, entry.action.text);
+    } else if (entry.action.type === "exec") {
+      await execCommand(entry.action.command, entry.action.channelId, entry.action.silent, entry.action.timeoutSec);
     } else {
       await execClaude(entry.action.channelId, entry.action.prompt);
     }
