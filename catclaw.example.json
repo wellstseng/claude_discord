@@ -1,50 +1,32 @@
-// catclaw 設定檔範本（JSONC 格式，支援 // 註解）
-// 複製此檔為 ~/.catclaw/catclaw.json 後修改
-// 路徑控制請改用環境變數（CATCLAW_CONFIG_DIR / CATCLAW_WORKSPACE / CATCLAW_CLAUDE_BIN）
 {
-  // ── Discord 連線與權限 ─────────────────────────────────────────
   "discord": {
-    // Discord Bot Token（從 Developer Portal 取得）
     "token": "",
-
-    // DM 私訊設定
     "dm": {
       "enabled": true
     },
-
-    // Per-guild 權限設定
-    // 繼承鏈：Thread → Parent Channel → Guild 預設
     "guilds": {
-      // "<你的 Guild ID>": {
-      //   "allow": true,
-      //   "requireMention": true,
-      //   "allowBot": false,
-      //   "allowFrom": [],
-      //   "channels": {
-      //     "<頻道 ID>": { "allow": true, "requireMention": false }
-      //   }
-      // }
+      "<你的 Guild ID>": {
+        "allow": true,
+        "requireMention": true,
+        "allowBot": false,
+        "allowFrom": [],
+        "channels": {
+          "<頻道 ID>": { "allow": true, "requireMention": false }
+        }
+      }
     }
   },
-
-  // ── 管理員設定（slash commands 權限）─────────────────────────
   "admin": {
-    // 允許執行 /restart /reset-session /status 的 Discord user ID
-    // 空陣列 = 拒絕所有人（建議至少填入自己的 ID）
     "allowedUserIds": []
   },
-
-  // ── 全域設定 ───────────────────────────────────────────────────
-  "turnTimeoutMs": 300000,         // 單次回應超時（毫秒），預設 5 分鐘
-  "turnTimeoutToolCallMs": 480000, // tool_call 時延長超時（毫秒），預設 8 分鐘
-  "sessionTtlHours": 168,          // Session 閒置超時（小時），預設 7 天
-  "showToolCalls": "summary",      // all / summary / none
+  "turnTimeoutMs": 300000,
+  "turnTimeoutToolCallMs": 480000,
+  "sessionTtlHours": 168,
+  "showToolCalls": "summary",
   "showThinking": false,
   "debounceMs": 500,
-  "fileUploadThreshold": 4000,     // 超過此字數上傳為 .md（0 = 停用）
-  "logLevel": "info",              // debug / info / warn / error / silent
-
-  // ── 排程（job 定義在 data/cron-jobs.json）──────────────────────
+  "fileUploadThreshold": 4000,
+  "logLevel": "info",
   "cron": {
     "enabled": false,
     "maxConcurrentRuns": 1
