@@ -13,11 +13,14 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { log } from "./logger.js";
-import { resolveWorkspaceDir, resolveClaudeBin } from "./config.js";
+import { resolveWorkspaceDir, resolveClaudeBin, config } from "./config.js";
 import { buildSkillsPrompt } from "./skills/registry.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── 型別定義 ────────────────────────────────────────────────────────────────
 
@@ -134,6 +137,26 @@ export async function* runClaudeTurn(
 
   if (systemPrompt) {
     args.push("--system-prompt", systemPrompt);
+  }
+
+  // ── MCP Discord Tool（Phase 0 過渡，S4/S5 完成後可移除）──────────────────
+  // 在 workspace 根目錄寫入 .mcp.json，Claude CLI 啟動時自動載入
+  const mcpServerPath = join(__dirname, "mcp", "discord-server.js");
+  if (existsSync(mcpServerPath) && config.discord.token) {
+    try {
+      writeFileSync(join(cwd, ".mcp.json"), JSON.stringify({
+        mcpServers: {
+          "catclaw-discord": {
+            command: "node",
+            args: [mcpServerPath],
+            env: { DISCORD_TOKEN: config.discord.token },
+          },
+        },
+      }));
+      log.debug("[acp] .mcp.json 已寫入");
+    } catch (err) {
+      log.warn(`[acp] 寫入 .mcp.json 失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // 有上次 session → --resume 延續對話上下文
