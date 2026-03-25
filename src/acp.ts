@@ -142,7 +142,9 @@ export async function* runClaudeTurn(
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, CATCLAW_CHANNEL_ID: channelId },
     windowsHide: true,
-    detached: true,    // Windows: 不分配 console 視窗
+    // Windows: detached 會觸發 CREATE_NEW_CONSOLE，與 windowsHide 衝突造成閃視窗，不使用
+    // Unix: detached=true 讓 process.kill(-pid) 可殺整個 process group
+    detached: process.platform !== "win32",
   });
   // detached 但不 unref()，確保父程序仍追蹤子程序生命週期
 
