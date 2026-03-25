@@ -1,21 +1,31 @@
 # catclaw
 
-輕量 Discord Bot，直接透過 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) 進行對話。
+輕量 Discord Bot，直接透過 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) 進行對話。不依賴 Claude API SDK 或 OpenClaw。
 
 ## 功能
 
 - 串流回覆（即時顯示 Claude 輸出）
-- Per-channel 設定（allow / requireMention）
+- Per-channel 設定（allow / requireMention / allowBot / allowFrom）
+- Thread 繼承（thread → parent channel → guild 預設）
 - Persistent session（同頻道延續對話上下文）
-- 多頻道並行（不同 channel 平行處理，同 channel 串行）
+- 多頻道並行（不同 channel 平行處理，同 channel 串行佇列）
 - DM 支援（直接私訊 bot）
 - Typing indicator（回應中顯示打字狀態）
-- Turn timeout（超時自動取消）
+- Turn timeout（基礎 5 分鐘，tool call 延長至 ~8 分鐘）
+- Turn timeout 80% 警告（送 ⏳ 提示）
 - Debounce（短時間內多則訊息自動合併）
+- Crash recovery（重啟後清理中斷的 turn）
+- Signal-based restart（Discord 頻道觸發 PM2 重啟並通知）
+- Config hot-reload（修改 catclaw.json 自動生效，不需重啟）
+- Cron 排程（定時送訊息 / 開 Claude turn / 執行 shell）
+- Slash commands
+- 對話歷史記錄（SQLite）
 - 2000 字自動分段 + code fence 跨段平衡
 - 附件下載（使用者上傳檔案 → Claude 可讀取）
 - MEDIA token 檔案上傳（Claude 回覆含 `MEDIA: /path` → 自動上傳至 Discord）
 - 長回覆自動轉 .md 檔案上傳（超過 fileUploadThreshold）
+- Thinking 顯示（可選，引用格式）
+- showToolCalls 三級控制（all / summary / none）
 
 ## 架構
 
@@ -28,12 +38,15 @@ graph TB
 
     subgraph catclaw
         IDX[index.ts<br/>進入點]
-        CFG[config.ts<br/>config.json 載入]
+        CFG[config.ts<br/>catclaw.json 載入]
         LOG[logger.ts<br/>Log Level]
         DIS[discord.ts<br/>訊息過濾 + Debounce]
         SES[session.ts<br/>Session 快取 + 佇列]
         ACP[acp.ts<br/>CLI Spawn + 串流 Diff]
         REP[reply.ts<br/>分段回覆 + Typing]
+        CRN[cron.ts<br/>排程服務]
+        HST[history.ts<br/>SQLite 歷史]
+        SLH[slash.ts<br/>Slash Commands]
     end
 
     subgraph Claude
@@ -57,104 +70,25 @@ graph TB
     DGW -->|回覆| User
 ```
 
-## 訊息處理流程
+## 目錄結構
 
-```mermaid
-sequenceDiagram
-    participant U as 使用者
-    participant D as Discord
-    participant Bot as discord.ts
-    participant S as session.ts
-    participant A as acp.ts
-    participant C as Claude CLI
-    participant R as reply.ts
-
-    U->>D: 發送訊息（@Bot 你好）
-    D->>Bot: messageCreate event
-
-    Note over Bot: 過濾：bot? 頻道? mention?
-
-    Bot->>Bot: debounce 500ms（合併多則）
-    Bot->>R: createReplyHandler(message)
-    R->>D: sendTyping()（顯示打字中）
-
-    Bot->>S: enqueue(channelId, text, onEvent)
-    Note over S: Promise chain 串行佇列<br/>AbortController + timeout
-
-    S->>A: runClaudeTurn(sessionId, text)
-    A->>C: spawn claude -p --output-format stream-json<br/>--resume <sessionId> "你好"
-
-    loop NDJSON 串流
-        C-->>A: {"type":"assistant","message":{"content":[{"text":"累積文字..."}]}}
-        A-->>A: diff lastTextLength → 提取新增文字
-        A-->>S: yield {type:"text_delta", text:"新增部分"}
-        S-->>R: onEvent({type:"text_delta"})
-        R-->>R: buffer 累積，>= 2000 字時切割
-    end
-
-    C-->>A: {"type":"result", ...}
-    A-->>S: yield {type:"done"}
-    S-->>R: onEvent({type:"done"})
-    R->>D: message.reply(完整回覆) / channel.send(後續分段)
-    D->>U: 顯示回覆
-```
-
-## Claude CLI 介接
-
-本專案不使用 Claude API SDK，而是直接 spawn Claude Code CLI 子程序進行對話：
-
-```mermaid
-graph LR
-    subgraph "acp.ts（Node.js 程序）"
-        SP[spawn]
-        BUF[NDJSON Buffer]
-        DIFF[Diff Engine<br/>lastTextLength]
-        Q[Event Queue]
-        GEN[AsyncGenerator]
-    end
-
-    subgraph "Claude Code CLI（子程序）"
-        CLI["claude -p<br/>--output-format stream-json<br/>--verbose<br/>--include-partial-messages<br/>--dangerously-skip-permissions<br/>--resume &lt;sessionId&gt;<br/>&quot;prompt&quot;"]
-    end
-
-    SP -->|"stdio: [ignore, pipe, pipe]"| CLI
-    CLI -->|stdout NDJSON| BUF
-    BUF -->|JSON.parse 每行| DIFF
-    DIFF -->|"text_delta / tool_call / done"| Q
-    Q -->|"yield AcpEvent"| GEN
-```
-
-### 串流 Diff 機制
-
-Claude CLI 的 `--include-partial-messages` 回傳的是**累積文字**（不是 delta）：
+程式碼與資料完全分離：
 
 ```
-事件 1: text = "你"           → delta = "你"     (length 0→1)
-事件 2: text = "你好"          → delta = "好"     (length 1→2)
-事件 3: text = "你好，我是"     → delta = "，我是"  (length 2→5)
-```
+~/project/catclaw/         ← 純程式碼（Git repo）
+  src/
+  dist/
+  signal/                  ← PM2 重啟 signal 檔（自動生成）
 
-`acp.ts` 追蹤 `lastTextLength`，每次用 `fullText.slice(lastTextLength)` 提取新增部分。
-
-### Session 延續
-
-```mermaid
-sequenceDiagram
-    participant S as session.ts
-    participant A as acp.ts
-    participant C as Claude CLI
-
-    Note over S: 首次對話（無 sessionId）
-    S->>A: runClaudeTurn(null, "你好")
-    A->>C: claude -p ... "你好"
-    C-->>A: {"type":"system","subtype":"init","session_id":"abc-123"}
-    A-->>S: {type:"session_init", sessionId:"abc-123"}
-    Note over S: 快取 sessionCache[channelId] = "abc-123"
-
-    Note over S: 後續對話（有 sessionId）
-    S->>A: runClaudeTurn("abc-123", "繼續")
-    A->>C: claude -p --resume abc-123 ... "繼續"
-    Note over C: 延續上次對話上下文
+~/.catclaw/                ← CATCLAW_CONFIG_DIR（使用者資料）
+  catclaw.json             ← 主設定檔（JSONC，支援 // 註解）
+  workspace/               ← CATCLAW_WORKSPACE（Claude CLI cwd）
+    AGENTS.md              ← Claude 行為規則
+    data/
+      sessions.json        ← Session 持久化
+      cron-jobs.json       ← Cron 定義 + 狀態
+      active-turns/        ← Crash recovery 追蹤
+    history.db             ← 對話歷史（SQLite）
 ```
 
 ## 前置需求
@@ -167,53 +101,42 @@ sequenceDiagram
 ## 安裝
 
 ```bash
-git clone https://github.com/wellstseng/claude_discord.git
-cd claude_discord
+git clone <repo>
+cd catclaw
 pnpm install
 pnpm build
 ```
 
 ## 設定
 
-複製範本並編輯：
+catclaw.json 放在 `~/.catclaw/catclaw.json`（JSONC 格式，支援 `//` 註解）：
 
-```bash
-cp config.example.json config.json
-```
-
-### config.json 結構
-
-```json
+```jsonc
 {
-  "token": "你的 Discord Bot Token",
-
-  "showToolCalls": false,
-
-  "dm": {
-    "enabled": true
-  },
-
-  "guilds": {
-    "<伺服器 ID>": {
-      "channels": {
-        "<頻道 ID>": {
-          "allow": true,
-          "requireMention": false
-        },
-        "<另一頻道 ID>": {
-          "allow": true,
-          "requireMention": true
+  "discord": {
+    "token": "你的 Discord Bot Token",
+    "dm": { "enabled": true },
+    "guilds": {
+      "<伺服器 ID>": {
+        "allow": true,
+        "requireMention": true,
+        "allowBot": false,
+        "allowFrom": [],
+        "channels": {
+          "<頻道 ID>": { "allow": true, "requireMention": false }
         }
       }
     }
   },
-
-  "claudeCwd": "",
-  "claudeCommand": "claude",
-  "debounceMs": 500,
   "turnTimeoutMs": 300000,
+  "turnTimeoutToolCallMs": 480000,
+  "sessionTtlHours": 168,
+  "showToolCalls": "summary",
+  "showThinking": false,
+  "debounceMs": 500,
+  "fileUploadThreshold": 4000,
   "logLevel": "info",
-  "fileUploadThreshold": 4000
+  "cron": { "enabled": false, "maxConcurrentRuns": 1 }
 }
 ```
 
@@ -221,78 +144,134 @@ cp config.example.json config.json
 
 | 欄位 | 說明 | 預設值 |
 |------|------|--------|
-| `token` | Discord Bot Token（必填） | — |
-| `showToolCalls` | 是否在 Discord 顯示工具呼叫訊息 | `true` |
-| `dm.enabled` | 是否啟用 DM 回應 | `true` |
-| `guilds` | Per-guild/channel 設定（空物件 = 所有頻道允許） | `{}` |
-| `claudeCwd` | Claude CLI 的工作目錄 | `$HOME` |
-| `claudeCommand` | Claude CLI 路徑 | `"claude"` |
-| `debounceMs` | 同一人連續訊息的合併等待時間（ms） | `500` |
-| `turnTimeoutMs` | Claude 回應超時（ms） | `300000` |
+| `discord.token` | Discord Bot Token（必填） | — |
+| `discord.dm.enabled` | 是否啟用 DM 回應 | `true` |
+| `discord.guilds` | Per-guild/channel 設定 | `{}` |
+| `turnTimeoutMs` | 基礎回應超時（ms） | `300000` (5 分鐘) |
+| `turnTimeoutToolCallMs` | Tool call 時延長超時（ms） | `480000` (~8 分鐘) |
+| `sessionTtlHours` | Session 閒置過期時間 | `168` (7 天) |
+| `showToolCalls` | 工具呼叫顯示：`all` / `summary` / `none` | `"summary"` |
+| `showThinking` | 是否顯示 Claude 思考過程 | `false` |
+| `debounceMs` | 同一人連續訊息合併等待時間（ms） | `500` |
+| `fileUploadThreshold` | 回覆超過此字數自動上傳為 .md（0 = 停用） | `4000` |
 | `logLevel` | Log 層級：`debug` / `info` / `warn` / `error` / `silent` | `"info"` |
-| `fileUploadThreshold` | 回覆超過此字數自動上傳為 .md 檔（0 = 停用） | `4000` |
+| `cron.enabled` | 啟用 cron 排程 | `false` |
+| `cron.maxConcurrentRuns` | Cron 最大並發數 | `1` |
 
-### Per-Channel 設定
-
-| 欄位 | 說明 | 預設值 |
-|------|------|--------|
-| `allow` | 是否允許回應此頻道 | — |
-| `requireMention` | 是否需要 @mention bot 才觸發 | `true` |
-
-- `guilds` 為空物件 → 所有頻道皆允許，預設需要 mention
-- `guilds` 有設定 → 只有明確 `allow: true` 的頻道會回應
-
-## 檔案上傳 / 下載
-
-### Inbound（使用者 → Claude）
-
-使用者在 Discord 附帶檔案（圖片、文件等），bot 會自動下載到 `/tmp/claude-discord-uploads/{messageId}/`，並在 prompt 中附上路徑，讓 Claude CLI 透過 Read 工具讀取。
-
-### Outbound（Claude → Discord）
-
-Claude CLI 回覆中包含 `MEDIA: /absolute/path/to/file`，bot 會自動解析並上傳該檔案到 Discord 作為附件。
+### Guild 設定繼承鏈
 
 ```
-# Claude 回覆範例
-這是分析結果。
-
-MEDIA: /tmp/output/chart.png
-MEDIA: /tmp/output/report.pdf
+Thread → channels[threadId] → channels[parentId] → Guild 預設
 ```
 
-上述回覆會送出文字部分，並將 `chart.png` 和 `report.pdf` 作為 Discord 附件上傳。
+| Guild 欄位 | 說明 |
+|-----------|------|
+| `allow` | 是否允許此 guild |
+| `requireMention` | 需要 @mention bot 才觸發 |
+| `allowBot` | 是否允許其他 bot 觸發 |
+| `allowFrom` | 白名單使用者 ID（空 = 全部允許） |
+| `channels` | Per-channel 覆寫設定（繼承 guild 預設） |
 
-### 長回覆自動上傳
+### 環境變數
 
-當回覆總字數超過 `fileUploadThreshold`（預設 4000），會自動將完整內容上傳為 `response.md`，附帶前 150 字預覽。
+| 變數 | 預設 | 說明 |
+|------|------|------|
+| `CATCLAW_CONFIG_DIR` | `~/.catclaw` | catclaw.json 位置 |
+| `CATCLAW_WORKSPACE` | `~/.catclaw/workspace` | Claude CLI cwd |
+| `CATCLAW_CLAUDE_BIN` | `"claude"` | claude binary 路徑 |
+| `ACP_TRACE` | — | `1` 啟用 debug 串流輸出 |
 
 ## 啟動
 
-```bash
-pnpm start
-```
-
-開發模式（自動重新編譯）：
+使用 PM2 管理程序（推薦）：
 
 ```bash
-pnpm dev
-# 另一終端
-pnpm start
+node catclaw.js start        # tsc 編譯 + PM2 啟動
+node catclaw.js restart      # tsc 重新編譯 + PM2 重啟
+node catclaw.js stop         # PM2 停止
+node catclaw.js logs         # PM2 即時 log
+node catclaw.js status       # PM2 狀態
+node catclaw.js reset-session             # 清除所有 session
+node catclaw.js reset-session <channelId> # 清除指定 channel
 ```
+
+## Claude CLI 介接
+
+本專案不使用 Claude API SDK，直接 spawn Claude Code CLI 子程序：
+
+```bash
+claude -p --output-format stream-json --verbose --include-partial-messages \
+  --dangerously-skip-permissions [--resume <sessionId>] "<prompt>"
+```
+
+### 串流 Diff 機制
+
+CLI 的 `--include-partial-messages` 回傳**累積文字**（非 delta）。`acp.ts` 追蹤 `lastTextLength`，每次 `fullText.slice(lastTextLength)` 提取新增部分。
+
+### Session 延續
+
+- 首次：無 `--resume`，從 `session_init` event 取 UUID 並快取
+- 後續：`--resume <UUID>` 延續上下文
+- 持久化：`data/sessions.json`（atomic write）
+- TTL 超時 → 自動開新 session
+
+## Cron 排程
+
+定義檔：`~/.catclaw/workspace/data/cron-jobs.json`（hot-reload）
+
+```jsonc
+{
+  "jobs": [
+    {
+      "id": "daily-standup",
+      "schedule": "0 9 * * 1-5",
+      "channelId": "<頻道 ID>",
+      "action": "claude",
+      "prompt": "產生今日站立會議提醒"
+    }
+  ]
+}
+```
+
+| 排程類型 | 設定方式 |
+|---------|---------|
+| Cron | `"schedule": "0 9 * * *"` |
+| 固定間隔 | `"everyMs": 3600000` |
+| 一次性 | `"at": "2026-01-01T09:00:00"` |
+
+Action 類型：`message`（送固定訊息）、`claude`（開 Claude turn）、`exec`（執行 shell 指令）
+
+## 檔案上傳
+
+### Inbound（使用者 → Claude）
+
+使用者附帶檔案 → 自動下載至 `/tmp/claude-discord-uploads/{messageId}/` → Claude 透過 Read 工具讀取。
+
+### Outbound（Claude → Discord）
+
+Claude 回覆中包含 `MEDIA: /absolute/path/to/file` → 自動解析並上傳為 Discord 附件。
+
+### 長回覆自動上傳
+
+回覆總字數超過 `fileUploadThreshold`（預設 4000）→ 自動上傳為 `response.md` + 前 150 字預覽。
 
 ## 專案結構
 
 ```
-claude_discord/
+catclaw/
 ├── src/
-│   ├── index.ts        進入點
-│   ├── config.ts       config.json 載入 + per-channel helper
+│   ├── index.ts        進入點、啟動序列、關閉處理
+│   ├── config.ts       catclaw.json 載入 + hot-reload + per-channel helper
 │   ├── logger.ts       Log level 控制
-│   ├── discord.ts      Discord client + debounce + 訊息過濾
-│   ├── session.ts      Session 快取 + per-channel 串行佇列
-│   ├── acp.ts          Claude CLI spawn + 串流解析
-│   └── reply.ts        Discord 回覆分段 + typing
-├── config.example.json 設定範本
+│   ├── discord.ts      Discord client + 訊息過濾 + debounce
+│   ├── session.ts      Session 快取 + per-channel 串行佇列 + timeout + crash recovery
+│   ├── acp.ts          Claude CLI spawn + 串流 diff + AcpEvent
+│   ├── reply.ts        Discord 回覆分段 + typing + thinking + MEDIA upload
+│   ├── cron.ts         Cron 排程服務
+│   ├── history.ts      SQLite 對話歷史
+│   └── slash.ts        Slash commands
+├── catclaw.js          CLI 進入點（start/restart/stop/logs/status/reset-session）
+├── ecosystem.config.cjs PM2 設定
 ├── package.json
 └── tsconfig.json
 ```
