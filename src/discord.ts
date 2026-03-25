@@ -29,6 +29,7 @@ import type { BridgeConfig } from "./config.js";
 import { config, getChannelAccess } from "./config.js";
 import { enqueue } from "./session.js";
 import { createReplyHandler } from "./reply.js";
+import { matchSkill } from "./skills/registry.js";
 import { recordUserMessage } from "./history.js";
 import { log } from "./logger.js";
 
@@ -269,7 +270,7 @@ async function handleMessage(
   log.debug(`[discord] 通過過濾，text="${text.slice(0, 80)}" → 進入 debounce`);
 
   // Debounce：合併短時間內同一人的多則訊息
-  debounce(message, text, config, (combinedText, firstMessage) => {
+  debounce(message, text, config, (combinedText, firstMessage) => { void (async () => {
     // 生成 turn_id，串聯 user input + AI response
     const turnId = randomUUID();
 
@@ -286,6 +287,30 @@ async function handleMessage(
       attachments: [...firstMessage.attachments.values()].map(a => a.name ?? a.url),
     });
 
+    // ── Skill 攔截層（Phase 0） ────────────────────────────────────────────
+    // 比對 skill trigger，有匹配直接執行，不送 Claude CLI
+    const skillMatch = matchSkill(combinedText);
+    if (skillMatch) {
+      const { skill, args } = skillMatch;
+      log.info(`[discord] skill 命中：${skill.name} args="${args}"`);
+      try {
+        if (skill.preflight) {
+          const check = await skill.preflight({ args, message: firstMessage, channelId: firstMessage.channelId, authorId: firstMessage.author.id, config });
+          if (!check.ok) {
+            void firstMessage.reply(`❌ ${skill.name} 無法執行：${check.reason ?? "前置檢查失敗"}`);
+            return;
+          }
+        }
+        const result = await skill.execute({ args, message: firstMessage, channelId: firstMessage.channelId, authorId: firstMessage.author.id, config });
+        void firstMessage.reply(result.text);
+      } catch (err) {
+        log.warn(`[discord] skill ${skill.name} 執行失敗：${err instanceof Error ? err.message : String(err)}`);
+        void firstMessage.reply(`❌ ${skill.name} 執行失敗`);
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const onEvent = createReplyHandler(firstMessage, config, turnId);
 
     // 多人頻道中讓 Claude 知道發言者身份
@@ -297,5 +322,5 @@ async function handleMessage(
       turnTimeoutToolCallMs: config.turnTimeoutToolCallMs,
       sessionTtlMs: config.sessionTtlHours * 3600_000,
     });
-  });
+  })(); });
 }

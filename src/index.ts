@@ -21,6 +21,7 @@ import { loadSessions, scanAndCleanActiveTurns } from "./session.js";
 import { startCron, stopCron } from "./cron.js";
 import { setupSlashCommands, registerSlashCommands } from "./slash.js";
 import { initHistory } from "./history.js";
+import { loadBuiltinSkills } from "./skills/registry.js";
 
 // 在其他模組開始 log 前設定層級
 setLogLevel(config.logLevel);
@@ -30,6 +31,9 @@ loadSessions();
 
 // 初始化訊息歷史 DB
 initHistory();
+
+// 載入內建 skill（Phase 0：Command-type Skill 攔截層）
+void loadBuiltinSkills();
 
 // ── 啟動 ─────────────────────────────────────────────────────────────────────
 

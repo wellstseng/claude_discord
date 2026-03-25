@@ -53,6 +53,9 @@ function closeFenceIfOpen(text: string): string {
 /** MEDIA token 正規表達式：MEDIA: /path/to/file 或 MEDIA: `path with spaces` */
 const MEDIA_RE = /\bMEDIA:\s*`?([^\n`]+)`?/gi;
 
+/** Windows 絕對路徑（C:\... 或 C:/...） */
+const WINDOWS_ABS_PATH_RE = /^[a-zA-Z]:[\\/]/;
+
 /**
  * 從文字中抽取 MEDIA: token，回傳清理後的文字 + 檔案路徑
  *
@@ -68,8 +71,8 @@ function extractMediaTokens(raw: string): {
   const text = raw
     .replace(MEDIA_RE, (_, path: string) => {
       const trimmed = path.trim();
-      // 只接受絕對路徑（/ 開頭），避免誤抓
-      if (trimmed.startsWith("/")) {
+      // 只接受絕對路徑（Unix / 開頭，或 Windows C:\... 格式），避免誤抓
+      if (trimmed.startsWith("/") || WINDOWS_ABS_PATH_RE.test(trimmed)) {
         mediaPaths.push(trimmed);
       }
       return "";
