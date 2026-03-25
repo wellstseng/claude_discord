@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/skills/builtin-prompt dist/skills/builtin-prompt",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "pm2:start": "pm2 start dist/index.js --name catclaw",
