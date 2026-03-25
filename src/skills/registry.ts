@@ -84,7 +84,7 @@ export async function loadBuiltinSkills(): Promise<void> {
 interface PromptSkill {
   name: string;
   description: string;
-  content: string; // SKILL.md 完整內容（含 frontmatter）
+  filePath: string; // SKILL.md 絕對路徑（供 Claude Read tool 使用）
 }
 
 const promptSkills: PromptSkill[] = [];
@@ -101,16 +101,16 @@ export function loadPromptSkills(): void {
   }
 
   const found = scanSkillMd(baseDir);
-  for (const { name, content } of found) {
-    promptSkills.push({ name, description: extractDescription(content), content });
+  for (const { name, filePath, content } of found) {
+    promptSkills.push({ name, description: extractDescription(content), filePath });
     log.info(`[skills] Prompt-type 載入：${name}`);
   }
   log.info(`[skills] Prompt-type 載入完成，共 ${promptSkills.length} 個`);
 }
 
-/** 遞迴掃描目錄，回傳所有 SKILL.md 的 {name, content} */
-function scanSkillMd(dir: string): Array<{ name: string; content: string }> {
-  const result: Array<{ name: string; content: string }> = [];
+/** 遞迴掃描目錄，回傳所有 SKILL.md 的 {name, filePath, content} */
+function scanSkillMd(dir: string): Array<{ name: string; filePath: string; content: string }> {
+  const result: Array<{ name: string; filePath: string; content: string }> = [];
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -125,7 +125,7 @@ function scanSkillMd(dir: string): Array<{ name: string; content: string }> {
         const content = readFileSync(fullPath, "utf-8");
         // name 取自上層目錄名稱
         const name = dir.split(/[\\/]/).pop() ?? "unknown";
-        result.push({ name, content });
+        result.push({ name, filePath: fullPath, content });
       } catch (err) {
         log.warn(`[skills] 讀取失敗：${fullPath} — ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -149,14 +149,24 @@ function extractDescription(content: string): string {
 }
 
 /**
- * 產生所有 Prompt-type skill 的 system prompt 注入字串
- * 格式：每個 skill 以 --- 分隔，完整附上 SKILL.md 內容
+ * 產生 Prompt-type skill 的 system prompt 注入字串
+ *
+ * 仿 OpenClaw 兩段式：只注入清單（name + description + path）
+ * Claude 需要時自己用 Read tool 讀取 SKILL.md 完整內容
  */
 export function buildSkillsPrompt(): string {
   if (promptSkills.length === 0) return "";
 
-  const parts = promptSkills.map((s) =>
-    `# Skill: ${s.name}\n${s.content}`
-  );
-  return `\n\n---\n# 可用 Skill（Prompt-type）\n\n${parts.join("\n\n---\n\n")}`;
+  const items = promptSkills.map((s) =>
+    `  <skill>\n    <name>${s.name}</name>\n    <description>${s.description}</description>\n    <location>${s.filePath}</location>\n  </skill>`
+  ).join("\n");
+
+  return `\n\n## Skills
+Scan <available_skills> before replying.
+- If a skill clearly applies: use Read tool to load the SKILL.md at <location>, then follow it.
+- If none apply: do not load any SKILL.md.
+
+<available_skills>
+${items}
+</available_skills>`;
 }
