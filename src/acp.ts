@@ -17,6 +17,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { log } from "./logger.js";
 import { resolveWorkspaceDir, resolveClaudeBin } from "./config.js";
+import { buildSkillsPrompt } from "./skills/registry.js";
 
 // ── 型別定義 ────────────────────────────────────────────────────────────────
 
@@ -114,15 +115,25 @@ export async function* runClaudeTurn(
   // 從 workspace 根目錄讀取 AGENTS.md 作為 system prompt
   // 檔案不存在時跳過，不強制（讓 Claude 用預設行為）
   const agentsPath = join(cwd, "AGENTS.md");
+  let systemPrompt = "";
   if (existsSync(agentsPath)) {
     try {
-      const agentsContent = readFileSync(agentsPath, "utf-8");
-      args.push("--system-prompt", agentsContent);
-      log.debug(`[acp] 載入 system prompt: ${agentsPath} (${agentsContent.length} 字)`);
+      systemPrompt = readFileSync(agentsPath, "utf-8");
+      log.debug(`[acp] 載入 AGENTS.md: ${agentsPath} (${systemPrompt.length} 字)`);
     } catch (err) {
-      // 讀取失敗不中止，讓 Claude 繼續（不影響主流程）
-      log.warn(`[acp] 讀取 AGENTS.md 失敗，跳過 system prompt：${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[acp] 讀取 AGENTS.md 失敗：${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  // 注入 Prompt-type Skill 系統提示
+  const skillsPrompt = buildSkillsPrompt();
+  if (skillsPrompt) {
+    systemPrompt += skillsPrompt;
+    log.debug(`[acp] 注入 skills prompt (+${skillsPrompt.length} 字)`);
+  }
+
+  if (systemPrompt) {
+    args.push("--system-prompt", systemPrompt);
   }
 
   // 有上次 session → --resume 延續對話上下文
