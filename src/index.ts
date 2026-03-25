@@ -88,11 +88,11 @@ client.once("ready", (c) => {
       if (channelId) {
         intentionalChannelIds.add(channelId);
         // NOTE: cache 在 ready 時可能尚未填充，用 fetch 確保取得頻道
-        client.channels.fetch(channelId).then((ch) => {
+        client.channels.fetch(channelId).then(async (ch) => {
           if (ch?.isTextBased() && "send" in ch) {
-            ch.send(`[CatClaw] 已重啟（${restartTime}）`);
+            await ch.send(`[CatClaw] 已重啟（${restartTime}）`);
+            log.info(`[bridge] 重啟通知已送出 channel=${channelId}`);
           }
-          log.info(`[bridge] 重啟通知已送出 channel=${channelId}`);
         }).catch((err: unknown) => {
           log.warn(`[bridge] 重啟通知失敗 channel=${channelId}: ${err}`);
         });
@@ -113,16 +113,16 @@ client.once("ready", (c) => {
       continue;
     }
 
-    client.channels.fetch(chId).then((ch) => {
+    client.channels.fetch(chId).then(async (ch) => {
       if (ch?.isTextBased() && "send" in ch) {
         const promptPreview = record.prompt.length > 100
           ? record.prompt.slice(0, 100) + "…"
           : record.prompt;
-        ch.send(
+        await ch.send(
           `[CatClaw] 上一輪對話被意外中斷。\n中斷的指令：「${promptPreview}」\n要繼續嗎？`
         );
+        log.info(`[bridge] crash recovery 確認訊息已送出 channel=${chId}`);
       }
-      log.info(`[bridge] crash recovery 確認訊息已送出 channel=${chId}`);
     }).catch((err: unknown) => {
       log.warn(`[bridge] crash recovery 確認訊息失敗 channel=${chId}: ${err}`);
     });
