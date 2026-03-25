@@ -15,7 +15,7 @@
 
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Skill } from "./types.js";
 import { log } from "../logger.js";
 
@@ -68,7 +68,7 @@ export async function loadBuiltinSkills(): Promise<void> {
 
   for (const file of files) {
     try {
-      const mod = (await import(join(dir, file))) as { skill?: Skill };
+      const mod = (await import(pathToFileURL(join(dir, file)).href)) as { skill?: Skill };
       if (mod.skill) {
         registerSkill(mod.skill);
       }
