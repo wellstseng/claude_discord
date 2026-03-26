@@ -82,10 +82,17 @@ export interface HistoryConfig {
 export interface ProviderEntry {
   /**
    * Provider 型別（明確指定時優先於自動偵測）
-   * - "claude"       → ClaudeApiProvider（Anthropic Messages API）
-   * - "openai-compat"→ OpenAICompatProvider（/v1/chat/completions，支援 OpenAI / Codex / Ollama）
+   * - "claude"        → ClaudeApiProvider（Anthropic Messages API）
+   * - "openai-compat" → OpenAICompatProvider（/v1/chat/completions）
+   * - "codex-oauth"   → CodexOAuthProvider（OpenAI Codex + OAuth 自動刷新）
    */
-  type?: "claude" | "openai-compat";
+  type?: "claude" | "openai-compat" | "codex-oauth";
+  /** OAuth token 檔案路徑（codex-oauth 用，預設 ~/.codex/auth.json） */
+  oauthTokenPath?: string;
+  /** OAuth refresh endpoint（codex-oauth 用，預設 https://auth.openai.com/oauth/token） */
+  oauthRefreshUrl?: string;
+  /** OAuth client_id（codex-oauth 用，部分 provider 需要） */
+  oauthClientId?: string;
   /** API Key（支援環境變數展開） */
   apiKey?: string;
   /** 模型 ID */
