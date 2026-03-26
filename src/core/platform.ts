@@ -29,6 +29,7 @@ import { initRegistrationManager } from "../accounts/registration.js";
 import { initIdentityLinker } from "../accounts/identity-linker.js";
 import { initProjectManager, type ProjectManager } from "../projects/manager.js";
 import { initMemoryEngine, type MemoryEngine } from "../memory/engine.js";
+import { initRateLimiter, getRateLimiter, type RateLimiter } from "./rate-limiter.js";
 
 // ── 子系統實例（module-level singleton） ─────────────────────────────────────
 
@@ -36,6 +37,7 @@ let _accountRegistry: AccountRegistry | null = null;
 let _toolRegistry: ToolRegistry | null = null;
 let _projectManager: ProjectManager | null = null;
 let _memoryEngine: MemoryEngine | null = null;
+let _rateLimiter: RateLimiter | null = null;
 let _permissionGate: PermissionGate | null = null;
 let _safetyGuard: SafetyGuard | null = null;
 let _sessionManager: SessionManager | null = null;
@@ -143,6 +145,13 @@ export async function initPlatform(
     }
   }
 
+  // ── 9.5 Rate Limiter ───────────────────────────────────────────────────────
+  _rateLimiter = initRateLimiter(config.rateLimit ?? {
+    guest:    { requestsPerMinute: 5 },
+    member:   { requestsPerMinute: 30 },
+    admin:    { requestsPerMinute: 120 },
+  });
+
   // ── 10. Workflow Engine ─────────────────────────────────────────────────────
   const workflowDataDir = join(catclawDir, "workspace", "data", "workflow");
   const memoryDir = join(catclawDir, "memory");
@@ -191,6 +200,10 @@ export function getPlatformProjectManager(): ProjectManager {
 /** 記憶引擎（可選，未初始化時回傳 null） */
 export function getPlatformMemoryEngine(): MemoryEngine | null {
   return _memoryEngine;
+}
+
+export function getPlatformRateLimiter(): RateLimiter | null {
+  return _rateLimiter;
 }
 
 export function getPlatformSessionManager(): SessionManager {

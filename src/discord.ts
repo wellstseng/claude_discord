@@ -36,13 +36,16 @@ import {
   isPlatformReady,
   resolveDiscordIdentity,
   ensureGuestAccount,
+  getAccountRegistry,
   getPlatformSessionManager,
   getPlatformPermissionGate,
   getPlatformToolRegistry,
   getPlatformSafetyGuard,
   getPlatformMemoryEngine,
   getPlatformProjectManager,
+  getPlatformRateLimiter,
 } from "./core/platform.js";
+import { resolveProvider, getChannelAccess as getCoreChannelAccess } from "./core/config.js";
 import { getProviderRegistry } from "./providers/registry.js";
 import { agentLoop } from "./core/agent-loop.js";
 import { eventBus } from "./core/event-bus.js";
@@ -366,8 +369,48 @@ async function handleMessage(
         }
       }
 
+      // ── 帳號角色 + 當前專案 ─────────────────────────────────────────────
+      let accountRole = isGuest ? "guest" : "member";
+      let currentProjectId: string | undefined;
+      try {
+        const acct = getAccountRegistry().get(accountId);
+        if (acct) {
+          accountRole = acct.role;
+          currentProjectId = acct.projects?.[0];
+        }
+      } catch { /* account registry not available */ }
+
+      // 頻道綁定的專案優先於帳號的 currentProject
+      const guildId = firstMessage.guild?.id ?? null;
+      const coreChannelAccess = guildId
+        ? getCoreChannelAccess(guildId, firstMessage.channelId)
+        : undefined;
+      const resolvedProjectId = coreChannelAccess?.boundProject ?? currentProjectId;
+
+      // ── Rate Limit 檢查 ─────────────────────────────────────────────────
+      const rateLimiter = getPlatformRateLimiter();
+      if (rateLimiter) {
+        const rlResult = rateLimiter.check(accountId, accountRole);
+        if (!rlResult.allowed) {
+          const waitSec = Math.ceil(rlResult.retryAfterMs / 1000);
+          void firstMessage.reply(
+            `⏳ 請求過於頻繁，請 ${waitSec} 秒後再試（角色 \`${accountRole}\` 每分鐘上限已達）`
+          );
+          log.info(`[discord] rate limit accountId=${accountId} role=${accountRole}`);
+          return;
+        }
+        rateLimiter.record(accountId);
+      }
+
+      // ── Provider 路由（channel > role > project > default） ─────────────
+      const providerId = resolveProvider({
+        channelAccess: coreChannelAccess,
+        role: accountRole,
+        projectId: resolvedProjectId,
+      });
       const providerRegistry = getProviderRegistry();
-      const provider = providerRegistry.resolve({ channelId: firstMessage.channelId });
+      const provider = providerRegistry.get(providerId)
+        ?? providerRegistry.resolve({ role: accountRole, projectId: resolvedProjectId });
 
       const isGroupChannel = !!firstMessage.guild;
       const prompt = combinedText;
@@ -377,11 +420,9 @@ async function handleMessage(
       const memEngine = getPlatformMemoryEngine();
       if (memEngine) {
         try {
-          // 取得帳號當前專案
-          const account = (() => { try { return getPlatformProjectManager() && null; } catch { return null; } })();
-          void account; // 暫不使用，後續 S11 補完整 projectId 解析
           const recallResult = await memEngine.recall(prompt, {
             accountId,
+            projectId: resolvedProjectId,
             channelId: firstMessage.channelId,
           });
           if (recallResult.fragments.length > 0) {
@@ -399,7 +440,7 @@ async function handleMessage(
         accountId,
         isGroupChannel,
         speakerDisplay: firstMessage.author.displayName,
-        speakerRole: isGuest ? "guest" : "member",
+        speakerRole: accountRole,
         provider,
         systemPrompt: systemPromptFromMemory || undefined,
         turnTimeoutMs: config.turnTimeoutMs,
