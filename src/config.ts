@@ -163,6 +163,24 @@ interface RawConfig {
 
 // ── Config 路徑解析 ──────────────────────────────────────────────────────────
 
+/** String-aware JSONC comment stripper，跳過字串內的 //（如 URL） */
+function stripJsoncComments(text: string): string {
+  let result = "";
+  let inString = false;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "\\" && inString) { result += ch + (text[i + 1] ?? ""); i += 2; continue; }
+    if (ch === '"') { inString = !inString; result += ch; i++; continue; }
+    if (!inString && ch === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+    result += ch; i++;
+  }
+  return result;
+}
+
 /**
  * 讀取 CATCLAW_CONFIG_DIR 環境變數決定 catclaw.json 位置
  * 找不到直接 throw（不 fallback，錯了就要明確報錯）
@@ -226,8 +244,8 @@ function loadConfig(): BridgeConfig {
   let raw: RawConfig;
   try {
     const text = readFileSync(configPath, "utf-8");
-    // 支援 JSONC：strip 掉 // 註解（整行註解 + 行尾註解）後再 parse
-    const stripped = text.replace(/\/\/.*$/gm, "");
+    // 支援 JSONC：string-aware comment stripping（避免誤刪 URL 的 //）
+    const stripped = stripJsoncComments(text);
     raw = JSON.parse(stripped) as RawConfig;
   } catch (err) {
     throw new Error(

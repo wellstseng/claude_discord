@@ -312,6 +312,37 @@ interface RawConfig {
 
 // ── 路徑解析 ──────────────────────────────────────────────────────────────────
 
+/**
+ * String-aware JSONC comment stripper
+ * 跳過字串內容（包括 URL 的 //），只刪除真正的行注解
+ */
+function stripJsoncComments(text: string): string {
+  let result = "";
+  let inString = false;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "\\" && inString) {
+      result += ch + (text[i + 1] ?? "");
+      i += 2;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      i++;
+      continue;
+    }
+    if (!inString && ch === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+    result += ch;
+    i++;
+  }
+  return result;
+}
+
 function resolveConfigPath(): string {
   const dir = process.env.CATCLAW_CONFIG_DIR;
   if (!dir) throw new Error("環境變數 CATCLAW_CONFIG_DIR 未設定，無法定位 catclaw.json");
@@ -374,8 +405,8 @@ function loadConfig(): BridgeConfig {
   let raw: RawConfig;
   try {
     const text = readFileSync(configPath, "utf-8");
-    // 支援 JSONC：strip 掉 // 行注解後 parse
-    const stripped = text.replace(/\/\/.*$/gm, "");
+    // 支援 JSONC：string-aware comment stripping（避免誤刪 URL 裡的 //）
+    const stripped = stripJsoncComments(text);
     raw = JSON.parse(stripped) as RawConfig;
   } catch (err) {
     throw new Error(`無法讀取 catclaw.json（${configPath}）：${err instanceof Error ? err.message : String(err)}`);

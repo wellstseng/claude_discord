@@ -115,8 +115,8 @@ export class LanceVectorService implements VectorService {
       vector: vectors[0],
       text,
       namespace,
-      path: opts.path ?? null,
-      meta: opts.meta ? JSON.stringify(opts.meta) : null,
+      path: opts.path ?? "",       // LanceDB 不接受 null，用空字串代替
+      meta: opts.meta ? JSON.stringify(opts.meta) : "",
       updatedAt: new Date().toISOString(),
     };
 
@@ -174,8 +174,8 @@ export class LanceVectorService implements VectorService {
           id: r["id"] as string,
           text: r["text"] as string,
           score: 1 - (r["_distance"] as number ?? 0),
-          path: r["path"] as string | undefined,
-          meta: r["meta"] as string | undefined,
+          path: (r["path"] as string) || undefined,
+          meta: (r["meta"] as string) || undefined,
         }))
         .filter(r => r.score >= minScore)
         .sort((a, b) => b.score - a.score)

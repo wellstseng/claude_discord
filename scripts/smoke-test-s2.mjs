@@ -13,18 +13,24 @@ let passed = 0;
 let failed = 0;
 let skipped = 0;
 
+// 收集所有 test，最後統一按序 await
+const _queue = [];
+
 function test(name, fn) {
-  const result = fn();
-  if (result instanceof Promise) {
-    return result
-      .then(v => {
-        if (v === "skip") { console.log(`  ⊘ ${name} (skip)`); skipped++; }
-        else { console.log(`  ✓ ${name}`); passed++; }
-      })
-      .catch(err => { console.error(`  ✗ ${name}: ${err.message}`); failed++; });
+  _queue.push({ name, fn });
+}
+
+async function runAll() {
+  for (const { name, fn } of _queue) {
+    try {
+      const result = await fn();
+      if (result === "skip") { console.log(`  ⊘ ${name} (skip)`); skipped++; }
+      else { console.log(`  ✓ ${name}`); passed++; }
+    } catch (err) {
+      console.error(`  ✗ ${name}: ${err.message}`);
+      failed++;
+    }
   }
-  if (result === "skip") { console.log(`  ⊘ ${name} (skip)`); skipped++; }
-  else { console.log(`  ✓ ${name}`); passed++; }
 }
 
 function assert(cond, msg) {
@@ -40,9 +46,19 @@ const testCatclawDir = join(homedir(), ".catclaw-test");
 process.env.CATCLAW_CONFIG_DIR = testCatclawDir;
 process.env.CATCLAW_WORKSPACE  = join(testCatclawDir, "workspace");
 
+// ── 從 catclaw-test config 讀取 ollama 設定（含 model 名稱）─────────────────
+
+const { config: testConfig } = await import("../dist/core/config.js");
+const ollamaCfg = testConfig.ollama ?? {
+  enabled: true,
+  primary: { host: "http://localhost:11434", model: "qwen3:14b", embeddingModel: "nomic-embed-text:latest" },
+  failover: false, thinkMode: false, numPredict: 256, timeout: 10000,
+};
+
 // ── Module 1: ollama/client ────────────────────────────────────────────────
 
 console.log("\n[1] ollama/client");
+console.log(`   config: primary=${ollamaCfg.primary.host} model=${ollamaCfg.primary.model} embed=${ollamaCfg.primary.embeddingModel ?? "(none)"}`);
 
 const { OllamaClient, buildBackendsFromConfig, initOllamaClient, getOllamaClient, resetOllamaClient } =
   await import("../dist/ollama/client.js");
@@ -50,7 +66,7 @@ const { OllamaClient, buildBackendsFromConfig, initOllamaClient, getOllamaClient
 test("buildBackendsFromConfig 解析 primary+fallback", () => {
   const cfg = {
     enabled: true,
-    primary: { host: "http://localhost:11434", model: "qwen3:8b", embeddingModel: "qwen3-embedding:latest" },
+    primary: { host: "http://localhost:11434", model: "qwen3:8b", embeddingModel: "nomic-embed-text:latest" },
     fallback: { host: "http://fallback:11434", model: "qwen3:1.7b" },
     failover: true,
     thinkMode: false,
@@ -60,7 +76,7 @@ test("buildBackendsFromConfig 解析 primary+fallback", () => {
   const backends = buildBackendsFromConfig(cfg);
   assert(backends.length === 2, `expected 2, got ${backends.length}`);
   assert(backends[0].name === "primary");
-  assert(backends[0].embeddingModel === "qwen3-embedding:latest");
+  assert(backends[0].embeddingModel === "nomic-embed-text:latest");
   assert(backends[1].name === "fallback");
   assert(backends[1].priority > backends[0].priority, "fallback priority should be higher number");
 });
@@ -100,35 +116,26 @@ test("getOllamaClient 未初始化時拋出", () => {
   let thrown = false;
   try { getOllamaClient(); } catch { thrown = true; }
   assert(thrown, "should throw");
+  // 重新初始化，讓後續 embedding 測試可用
+  initOllamaClient(ollamaCfg);
 });
 
-// ── Ollama 連線測試（online 才跑）─────────────────────────────────────────
+// ── 初始化 client（後續測試共用）──────────────────────────────────────────
+initOllamaClient(ollamaCfg);
+const mainClient = getOllamaClient();
+const primaryBackend = mainClient["backends"][0];
+const ollamaOnline = await mainClient.checkHealth(primaryBackend);
+console.log(`   Ollama: ${ollamaOnline ? "✓ online" : "✗ offline (embedding tests will skip)"}`);
 
-test("ollama health check（需 Ollama 在線）", async () => {
-  const cfg = {
-    enabled: true,
-    primary: { host: "http://localhost:11434", model: "qwen3:1.7b", embeddingModel: "qwen3-embedding:latest" },
-    failover: false,
-    thinkMode: false,
-    numPredict: 256,
-    timeout: 10000,
-  };
-  initOllamaClient(cfg);
-  const client = getOllamaClient();
-  const backends = client["backends"];
-  const healthy = await client.checkHealth(backends[0]);
-  if (!healthy) return "skip"; // offline → skip
-  assert(healthy === true);
+test("ollama health check", async () => {
+  if (!ollamaOnline) return "skip";
+  assert(ollamaOnline === true);
 });
 
-test("ollama embed（需 Ollama 在線且有 embedding model）", async () => {
-  const client = getOllamaClient();
-  const backends = client["backends"];
-  const healthy = await client.checkHealth(backends[0]);
-  if (!healthy) return "skip";
-
-  const vecs = await client.embed(["hello world", "測試向量"]);
-  if (!vecs.length) return "skip"; // embedding model 不可用
+test("ollama embed（需 embedding model）", async () => {
+  if (!ollamaOnline) return "skip";
+  const vecs = await mainClient.embed(["hello world", "測試向量"]);
+  if (!vecs.length) return "skip";
   assert(vecs.length === 2, `expected 2, got ${vecs.length}`);
   assert(vecs[0].length > 0, "zero-dim vector");
   console.log(`      → ${vecs[0].length} dims`);
@@ -154,11 +161,7 @@ test("setCachedDim / getCachedDim", () => {
 });
 
 test("embedOne + embedTexts（需 Ollama 在線）", async () => {
-  const client = getOllamaClient();
-  const backends = client["backends"];
-  const healthy = await client.checkHealth(backends[0]);
-  if (!healthy) return "skip";
-
+  if (!ollamaOnline) return "skip";
   const vec = await embedOne("測試 embed");
   if (!vec.length) return "skip";
   assert(vec.length > 0, "zero-dim");
@@ -213,14 +216,8 @@ test("validateNamespace — 合法格式", async () => {
 });
 
 test("upsert + search（需 Ollama embedding 在線）", async () => {
-  const client = getOllamaClient();
-  const backends = client["backends"];
-  const healthy = await client.checkHealth(backends[0]);
-  if (!healthy) return "skip";
-
-  // 先確認 embedding 可用
-  const { embedOne: e } = await import("../dist/vector/embedding.js");
-  const testVec = await e("test");
+  if (!ollamaOnline) return "skip";
+  const testVec = await embedOne("test");
   if (!testVec.length) return "skip";
 
   const svc = getVectorService();
@@ -237,13 +234,8 @@ test("upsert + search（需 Ollama embedding 在線）", async () => {
 });
 
 test("delete（需 Ollama embedding 在線）", async () => {
-  const client = getOllamaClient();
-  const backends = client["backends"];
-  const healthy = await client.checkHealth(backends[0]);
-  if (!healthy) return "skip";
-
-  const { embedOne: e } = await import("../dist/vector/embedding.js");
-  const testVec = await e("test");
+  if (!ollamaOnline) return "skip";
+  const testVec = await embedOne("test");
   if (!testVec.length) return "skip";
 
   const svc = getVectorService();
@@ -252,14 +244,13 @@ test("delete（需 Ollama embedding 在線）", async () => {
   assert(!results.some(r => r.id === "atom-1"), "atom-1 should be deleted");
 });
 
-// ── 清理 + 結果 ───────────────────────────────────────────────────────────
+// ── 執行所有測試（sequential）+ 清理 + 結果 ──────────────────────────────
+
+await runAll();
 
 resetVectorService();
 resetOllamaClient();
 rmSync(tmpDir, { recursive: true, force: true });
-
-// 等所有 async 測試完成
-await new Promise(r => setTimeout(r, 100));
 
 console.log(`\n${"─".repeat(40)}`);
 const total = passed + failed + skipped;
