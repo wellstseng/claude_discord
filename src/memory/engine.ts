@@ -1,0 +1,247 @@
+/**
+ * @file memory/engine.ts
+ * @description 記憶引擎 — 組裝所有 memory 子模組，對外提供 MemoryEngine 介面
+ *
+ * 生命週期：init() → recall/extract/write → shutdown()
+ * 觸發點：EventBus 事件（turn:before, turn:after, session:idle, platform:shutdown）
+ */
+
+import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { log } from "../logger.js";
+import { initVectorService, getVectorService, resetVectorService } from "../vector/lancedb.js";
+import { buildContext } from "./context-builder.js";
+import type { MemoryConfig } from "../core/config.js";
+
+// ── Re-export 子模組型別 ──────────────────────────────────────────────────────
+export type { AtomFragment, MemoryLayer, RecallContext, RecallPaths, RecallResult } from "./recall.js";
+export type { KnowledgeItem, KnowledgeType, KnowledgeTier, ExtractOpts } from "./extract.js";
+export type { PromotionCandidate, ArchiveCandidate, ConsolidateResult } from "./consolidate.js";
+export type { SessionStats, RutWarning } from "./episodic.js";
+export type { ContextPayload } from "./context-builder.js";
+export type { WriteGateResult } from "./write-gate.js";
+
+// ── 路徑解析 ──────────────────────────────────────────────────────────────────
+
+function resolvePath(p: string): string {
+  return p.startsWith("~") ? p.replace("~", homedir()) : p;
+}
+
+function projectDir(globalPath: string, projectId: string): string {
+  return join(dirname(resolvePath(globalPath)), "projects", projectId);
+}
+
+function accountDir(globalPath: string, accountId: string): string {
+  return join(dirname(resolvePath(globalPath)), "accounts", accountId);
+}
+
+function episodicDir(globalPath: string): string {
+  return join(dirname(resolvePath(globalPath)), "episodic");
+}
+
+// ── MemoryEngine ─────────────────────────────────────────────────────────────
+
+export interface MemoryStatus {
+  initialized: boolean;
+  vectorAvailable: boolean;
+  globalDir: string;
+  projectCount: number;
+  accountCount: number;
+}
+
+export class MemoryEngine {
+  private cfg: MemoryConfig;
+  private initialized = false;
+
+  constructor(cfg: MemoryConfig) {
+    this.cfg = cfg;
+  }
+
+  // ── 生命週期 ─────────────────────────────────────────────────────────────────
+
+  async init(): Promise<void> {
+    if (this.initialized) return;
+
+    const globalPath = resolvePath(this.cfg.globalPath);
+    const vectorDbPath = resolvePath(this.cfg.vectorDbPath);
+
+    // 確保目錄存在
+    mkdirSync(globalPath, { recursive: true });
+    mkdirSync(vectorDbPath, { recursive: true });
+
+    // 初始化 Vector Service
+    try {
+      const vsvc = initVectorService(vectorDbPath);
+      await vsvc.init();
+    } catch (err) {
+      log.warn(`[memory-engine] VectorService 初始化失敗（graceful）：${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    this.initialized = true;
+    log.info(`[memory-engine] 初始化完成：global=${globalPath}`);
+  }
+
+  async shutdown(): Promise<void> {
+    if (!this.initialized) return;
+    resetVectorService();
+    this.initialized = false;
+    log.info("[memory-engine] 已關閉");
+  }
+
+  // ── Recall ───────────────────────────────────────────────────────────────────
+
+  async recall(
+    prompt: string,
+    ctx: import("./recall.js").RecallContext
+  ): Promise<import("./recall.js").RecallResult> {
+    const { recall } = await import("./recall.js");
+    const globalPath = resolvePath(this.cfg.globalPath);
+    const paths: import("./recall.js").RecallPaths = {
+      globalDir: globalPath,
+      projectDir: ctx.projectId ? projectDir(this.cfg.globalPath, ctx.projectId) : undefined,
+      accountDir: ctx.accountId ? accountDir(this.cfg.globalPath, ctx.accountId) : undefined,
+    };
+    return recall(prompt, ctx, paths, this.cfg.recall);
+  }
+
+  // ── Context Build ─────────────────────────────────────────────────────────────
+
+  buildContext(
+    fragments: import("./recall.js").AtomFragment[],
+    prompt: string,
+    blindSpot = false
+  ): import("./context-builder.js").ContextPayload {
+    return buildContext(fragments, prompt, this.cfg.contextBudget, this.cfg.contextBudgetRatio, blindSpot);
+  }
+
+  // ── Extract ───────────────────────────────────────────────────────────────────
+
+  /** 逐輪萃取（fire-and-forget） */
+  extractPerTurn(
+    newText: string,
+    opts: import("./extract.js").ExtractOpts
+  ): Promise<import("./extract.js").KnowledgeItem[]> {
+    if (!this.cfg.extract.enabled || !this.cfg.extract.perTurn) return Promise.resolve([]);
+    return import("./extract.js").then(({ extractPerTurn }) =>
+      extractPerTurn(newText, { ...opts, maxItems: this.cfg.extract.maxItemsPerTurn })
+    );
+  }
+
+  /** 全量掃描萃取（session end） */
+  async extractFullScan(
+    response: string,
+    opts: import("./extract.js").ExtractOpts
+  ): Promise<import("./extract.js").KnowledgeItem[]> {
+    if (!this.cfg.extract.enabled || !this.cfg.extract.onSessionEnd) return [];
+    const { extractFullScan } = await import("./extract.js");
+    return extractFullScan(response, { ...opts, maxItems: this.cfg.extract.maxItemsSessionEnd });
+  }
+
+  // ── Write Gate ────────────────────────────────────────────────────────────────
+
+  async checkWrite(
+    content: string,
+    namespace: string,
+    bypass = false
+  ): Promise<import("./write-gate.js").WriteGateResult> {
+    const { checkWriteGate } = await import("./write-gate.js");
+    return checkWriteGate(content, namespace, {
+      bypass,
+      dedupThreshold: this.cfg.writeGate.dedupThreshold,
+    });
+  }
+
+  // ── Consolidate ───────────────────────────────────────────────────────────────
+
+  async evaluatePromotions(
+    memoryDir?: string
+  ): Promise<import("./consolidate.js").ConsolidateResult> {
+    const { consolidate } = await import("./consolidate.js");
+    const dir = memoryDir ?? resolvePath(this.cfg.globalPath);
+    const stagingDir = join(dirname(dir), "_staging");
+    return consolidate(dir, {
+      autoPromoteThreshold: this.cfg.consolidate.autoPromoteThreshold,
+      suggestPromoteThreshold: this.cfg.consolidate.suggestPromoteThreshold,
+      halfLifeDays: this.cfg.consolidate.decay.halfLifeDays,
+      archiveThreshold: this.cfg.consolidate.decay.archiveThreshold,
+      archiveCandidatesPath: join(stagingDir, "archive-candidates.md"),
+    });
+  }
+
+  // ── Episodic ──────────────────────────────────────────────────────────────────
+
+  async generateEpisodic(
+    stats: import("./episodic.js").SessionStats
+  ): Promise<string | null> {
+    if (!this.cfg.episodic.enabled) return null;
+    const { generateEpisodic } = await import("./episodic.js");
+    return generateEpisodic(stats, {
+      episodicDir: episodicDir(this.cfg.globalPath),
+      ttlDays: this.cfg.episodic.ttlDays,
+    });
+  }
+
+  async detectRutPatterns(): Promise<import("./episodic.js").RutWarning[]> {
+    if (!this.cfg.rutDetection.enabled) return [];
+    const { detectRutPatterns } = await import("./episodic.js");
+    return detectRutPatterns(episodicDir(this.cfg.globalPath));
+  }
+
+  // ── 狀態 ─────────────────────────────────────────────────────────────────────
+
+  getStatus(): MemoryStatus {
+    let vectorAvailable = false;
+    try {
+      vectorAvailable = getVectorService().isAvailable();
+    } catch { /* not initialized */ }
+
+    const globalPath = resolvePath(this.cfg.globalPath);
+    const projectsDir = join(dirname(globalPath), "projects");
+    const accountsDir = join(dirname(globalPath), "accounts");
+
+    let projectCount = 0, accountCount = 0;
+    try {
+      if (existsSync(projectsDir)) projectCount = readdirSync(projectsDir).length;
+    } catch { /* ignore */ }
+    try {
+      if (existsSync(accountsDir)) accountCount = readdirSync(accountsDir).length;
+    } catch { /* ignore */ }
+
+    return {
+      initialized: this.initialized,
+      vectorAvailable,
+      globalDir: globalPath,
+      projectCount,
+      accountCount,
+    };
+  }
+
+  /** 重建向量索引（rebuild 指定 namespace） */
+  async rebuildIndex(namespace: string): Promise<void> {
+    try {
+      const { getVectorService } = await import("../vector/lancedb.js");
+      await getVectorService().rebuild(namespace);
+    } catch (err) {
+      log.warn(`[memory-engine] rebuildIndex 失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
+// ── 全域單例 ──────────────────────────────────────────────────────────────────
+
+let _engine: MemoryEngine | null = null;
+
+export function initMemoryEngine(cfg: MemoryConfig): MemoryEngine {
+  _engine = new MemoryEngine(cfg);
+  return _engine;
+}
+
+export function getMemoryEngine(): MemoryEngine {
+  if (!_engine) throw new Error("[memory-engine] 尚未初始化，請先呼叫 initMemoryEngine()");
+  return _engine;
+}
+
+export function resetMemoryEngine(): void {
+  _engine = null;
+}
