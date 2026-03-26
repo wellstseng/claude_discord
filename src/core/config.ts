@@ -441,6 +441,14 @@ function loadConfig(): BridgeConfig {
     throw new Error("catclaw.json 中 discord.token 欄位必填");
   }
 
+  // S17：safety.enabled/selfProtect 被明確關閉 → 拒絕啟動
+  if (raw.safety?.enabled === false) {
+    throw new Error("catclaw.json safety.enabled=false 被禁止，拒絕啟動（移除此欄位可恢復預設 true）");
+  }
+  if (raw.safety?.selfProtect === false) {
+    throw new Error("catclaw.json safety.selfProtect=false 被禁止，拒絕啟動（移除此欄位可恢復預設 true）");
+  }
+
   // 正規化 guilds
   const guilds: Record<string, GuildConfig> = {};
   if (raw.discord.guilds) {
@@ -533,10 +541,11 @@ function loadConfig(): BridgeConfig {
       pairingExpireMinutes: raw.accounts?.pairingExpireMinutes ?? 30,
     },
     rateLimit: raw.rateLimit ?? {
-      guest:     { requestsPerMinute: 5 },
-      member:    { requestsPerMinute: 30 },
-      developer: { requestsPerMinute: 60 },
-      admin:     { requestsPerMinute: 120 },
+      guest:            { requestsPerMinute: 5 },
+      member:           { requestsPerMinute: 30 },
+      developer:        { requestsPerMinute: 60 },
+      admin:            { requestsPerMinute: 120 },
+      "platform-owner": { requestsPerMinute: 300 },
     },
     homeClaudeCode: raw.homeClaudeCode ? {
       enabled: raw.homeClaudeCode.enabled ?? false,

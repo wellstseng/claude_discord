@@ -26,6 +26,7 @@ const PAIRING_MAX_ATTEMPTS = 3;
 const PAIRING_LOCKOUT_MS = 15 * 60 * 1000;             // 15min
 const PAIRING_RATE_WINDOW_MS = 10 * 60 * 1000;         // 10min
 const PAIRING_RATE_MAX = 3;
+const MAX_PENDING_PAIRINGS = 10;                        // S10：全局待處理配對碼上限
 
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
@@ -182,11 +183,16 @@ export class RegistrationManager {
       }
     }
 
+    // S10：全局待處理配對碼上限（先 cleanup 過期，再計數）
+    this.cleanupPairings();
+    if (this.pairings.size >= MAX_PENDING_PAIRINGS) {
+      return { ok: false, reason: "系統目前待處理配對碼已達上限，請聯絡管理員" };
+    }
+
     // 產生新配對碼（6碼英數，去掉易混淆字元）
     const code = this.generatePairingCode();
     this.pairings.set(code, { code, platform, platformId, createdAt: now, attempts: 0 });
 
-    this.cleanupPairings();
     log.info(`[registration] 配對碼 ${code} 建立 platform=${platform} id=${platformId}`);
     return { ok: true, code };
   }

@@ -15,7 +15,7 @@
  * - CATCLAW_CLAUDE_BIN：Claude CLI binary 路徑（可選，預設 "claude"）
  */
 
-import { readFileSync, watch } from "node:fs";
+import { readFileSync, statSync, watch } from "node:fs";
 import { resolve } from "node:path";
 import type { LogLevel } from "./logger.js";
 import { setLogLevel, log } from "./logger.js";
@@ -240,6 +240,14 @@ function parseShowToolCalls(value: string | boolean | undefined): "all" | "summa
 function loadConfig(): BridgeConfig {
   // 路徑由環境變數決定，找不到直接 throw
   const configPath = resolveConfigPath();
+
+  // S19：config 檔案權限警告（含 token，不應 group/world 可讀）
+  try {
+    const mode = statSync(configPath).mode;
+    if (mode & 0o077) {
+      console.warn(`[catclaw] 警告：catclaw.json (${configPath}) 權限過寬（建議 chmod 600）`);
+    }
+  } catch { /* 忽略：stat 失敗不阻止啟動 */ }
 
   let raw: RawConfig;
   try {
