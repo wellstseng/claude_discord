@@ -24,6 +24,7 @@ import { PermissionGate, initPermissionGate } from "../accounts/permission-gate.
 import { SafetyGuard, initSafetyGuard } from "../safety/guard.js";
 import { SessionManager, initSessionManager } from "./session.js";
 import { buildProviderRegistry, initProviderRegistry } from "../providers/registry.js";
+import { initWorkflow } from "../workflow/bootstrap.js";
 
 // ── 子系統實例（module-level singleton） ─────────────────────────────────────
 
@@ -107,6 +108,16 @@ export async function initPlatform(
   };
   _sessionManager = initSessionManager(sessionCfg);
   await _sessionManager.init();
+
+  // ── 7. Workflow Engine ──────────────────────────────────────────────────────
+  const workflowDataDir = join(catclawDir, "workspace", "data", "workflow");
+  const memoryDir = join(catclawDir, "memory");
+  initWorkflow(
+    config.workflow,
+    workflowDataDir,
+    memoryDir,
+    process.cwd(),
+  );
 
   _ready = true;
   log.info(`[platform] 初始化完成 providers=${Object.keys(config.providers).join(",")}`);
