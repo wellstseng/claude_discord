@@ -103,18 +103,23 @@ export async function buildProviderRegistry(
   for (const [id, entry] of Object.entries(entries)) {
     let provider: LLMProvider | null = null;
 
-    if (id === "claude-api" || entry.apiKey) {
-      // Claude API Provider
+    // 型別解析優先序：entry.type > wsUrl > id heuristic > field heuristic
+    let providerType: "claude" | "openai-compat" | "openclaw" | null = null;
+    if (entry.type)               providerType = entry.type;
+    else if (entry.wsUrl)         providerType = "openclaw";
+    else if (id === "claude-api") providerType = "claude";
+    else if (entry.host || entry.baseUrl) providerType = "openai-compat";
+    else if (entry.apiKey)        providerType = "claude";  // 無 baseUrl → 預設 Anthropic
+
+    if (providerType === "claude") {
       const { ClaudeApiProvider } = await import("./claude-api.js");
       provider = new ClaudeApiProvider(id, entry);
-    } else if (entry.wsUrl) {
-      // OpenClaw WS provider — placeholder
-      log.debug(`[provider-registry] openclaw provider ${id} 暫不初始化（S8 實作）`);
-    } else if (entry.host || entry.baseUrl) {
-      // Ollama / OpenAI-compat
+    } else if (providerType === "openai-compat") {
       const { OpenAICompatProvider } = await import("./openai-compat.js");
       provider = new OpenAICompatProvider(id, entry);
       if (provider.init) await provider.init();
+    } else if (providerType === "openclaw") {
+      log.debug(`[provider-registry] openclaw provider ${id} 暫不初始化（S8 實作）`);
     }
 
     if (provider) registry.register(provider);

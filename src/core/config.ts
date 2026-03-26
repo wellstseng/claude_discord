@@ -80,6 +80,12 @@ export interface HistoryConfig {
 
 /** 單一 Provider 設定 */
 export interface ProviderEntry {
+  /**
+   * Provider 型別（明確指定時優先於自動偵測）
+   * - "claude"       → ClaudeApiProvider（Anthropic Messages API）
+   * - "openai-compat"→ OpenAICompatProvider（/v1/chat/completions，支援 OpenAI / Codex / Ollama）
+   */
+  type?: "claude" | "openai-compat";
   /** API Key（支援環境變數展開） */
   apiKey?: string;
   /** 模型 ID */
