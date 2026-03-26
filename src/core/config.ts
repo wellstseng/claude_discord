@@ -188,6 +188,28 @@ export interface AccountsConfig {
 /** 速率限制（per-role） */
 export type RateLimitConfig = Record<string, { requestsPerMinute: number }>;
 
+/** Context Engineering 設定 */
+export interface ContextEngineeringConfig {
+  enabled: boolean;
+  /** CE 專用 LLM model（Compaction 等壓縮作業用，全域預設） */
+  model?: string;
+  strategies?: {
+    compaction?: { enabled?: boolean; triggerTurns?: number; preserveRecentTurns?: number };
+    budgetGuard?: { enabled?: boolean; maxUtilization?: number; contextWindowTokens?: number };
+    slidingWindow?: { enabled?: boolean; maxTurns?: number };
+  };
+}
+
+/** Inbound History 設定 */
+export interface InboundHistoryConfig {
+  enabled: boolean;
+  fullWindowHours: number;
+  decayWindowHours: number;
+  bucketBTokenCap: number;
+  decayIITokenCap: number;
+  inject: { enabled: boolean };
+}
+
 /** HomeClaudeCode 共用記憶策略 */
 export interface HomeClaudeCodeConfig {
   /**
@@ -243,6 +265,10 @@ export interface BridgeConfig {
   accounts: AccountsConfig;
   /** 速率限制 */
   rateLimit: RateLimitConfig;
+  /** Context Engineering 設定 */
+  contextEngineering?: ContextEngineeringConfig;
+  /** Inbound History 設定 */
+  inboundHistory?: InboundHistoryConfig;
   /** HomeClaudeCode 共用記憶策略 */
   homeClaudeCode?: HomeClaudeCodeConfig;
   /** 多 Agent 設定（用於 --agent <id> 啟動） */

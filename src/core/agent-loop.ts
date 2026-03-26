@@ -24,6 +24,11 @@ import type { SafetyGuard } from "../safety/guard.js";
 import { eventBus as _eventBusInstance } from "./event-bus.js";
 type EventBus = typeof _eventBusInstance;
 import type { ToolContext } from "../tools/types.js";
+import { getTurnAuditLog } from "./turn-audit-log.js";
+import { getContextEngine } from "./context-engine.js";
+import { getToolLogStore, ToolLogStore } from "./tool-log-store.js";
+import { getSessionSnapshotStore } from "./session-snapshot.js";
+import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
 
 // ── 常數 ─────────────────────────────────────────────────────────────────────
 
@@ -32,6 +37,8 @@ const MAX_LOOPS = 20;
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
 export interface AgentLoopOpts {
+  /** 平台識別碼（用於 session key 前綴，預設 "discord"） */
+  platform?: string;
   /** 平台頻道 ID（用於 session key） */
   channelId: string;
   /** CatClaw accountId */
@@ -162,6 +169,7 @@ export async function* agentLoop(
 ): AsyncGenerator<AgentLoopEvent> {
   const { sessionManager, permissionGate, toolRegistry, safetyGuard, eventBus } = deps;
   const { channelId, accountId, provider, projectId } = opts;
+  const platform = opts.platform ?? "discord";
 
   // ── 1. 進門權限檢查 ────────────────────────────────────────────────────────
   const accessResult = permissionGate.checkAccess(accountId);
@@ -171,11 +179,30 @@ export async function* agentLoop(
   }
 
   // ── 2. Session + messages ──────────────────────────────────────────────────
-  const sessionKey = `ch:${channelId}`;
+  const sessionKey = `${platform}:ch:${channelId}`;
   const session = sessionManager.getOrCreate(sessionKey, accountId, channelId, opts.provider.id);
 
+  // Session Snapshot（turn 開始前快照）
+  const snapshotStore = getSessionSnapshotStore();
+  if (snapshotStore) {
+    snapshotStore.save(sessionKey, session.turnCount, session.messages);
+  }
+
+  // ContextEngine：套用 CE strategies（compaction / budget-guard / sliding-window）
+  const rawHistory = sessionManager.getHistory(sessionKey);
+  const contextEngine = getContextEngine();
+  let processedHistory: Message[];
+  if (contextEngine) {
+    processedHistory = await contextEngine.build(rawHistory, {
+      sessionKey,
+      turnIndex: session.turnCount,
+    });
+  } else {
+    processedHistory = rawHistory;
+  }
+
   const messages: Message[] = [
-    ...sessionManager.getHistory(sessionKey),
+    ...processedHistory,
     { role: "user", content: prompt },
   ];
 
@@ -194,6 +221,7 @@ export async function* agentLoop(
   if (opts.signal) {
     opts.signal.addEventListener("abort", () => controller.abort());
   }
+  registerTurnAbort(sessionKey, controller);
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   if (opts.turnTimeoutMs) {
     timeoutHandle = setTimeout(() => controller.abort(), opts.turnTimeoutMs);
@@ -201,6 +229,7 @@ export async function* agentLoop(
 
   const tracker = new TurnTracker();
   let loopCount = 0;
+  const turnStartMs = Date.now();
 
   eventBus.emit("turn:before", { accountId, channelId, sessionKey, prompt, projectId });
 
@@ -322,18 +351,80 @@ export async function* agentLoop(
     }
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
+    clearTurnAbort(sessionKey);
   }
 
   // ── 6. Turn 結束 ────────────────────────────────────────────────────────────
   const fullResponse = tracker.getFullResponse();
 
+  // Tool Log Store：儲存 tool 執行記錄，session history 加索引摘要
+  const toolLogStore = getToolLogStore();
+  let toolLogPath: string | null = null;
+  const extraMessages: Message[] = [];
+  if (toolLogStore && tracker.toolCalls.length > 0) {
+    toolLogPath = toolLogStore.save(
+      sessionKey,
+      session.turnCount,
+      tracker.toolCalls.map(tc => ({
+        id: Math.random().toString(36).slice(2),
+        name: tc.name,
+        params: tc.params,
+        result: tc.result,
+        error: tc.error,
+        durationMs: tc.durationMs,
+      })),
+    );
+    if (toolLogPath) {
+      const summary = ToolLogStore.buildIndexSummary(
+        tracker.toolCalls.map(tc => ({ id: "", name: tc.name, params: tc.params, result: tc.result, error: tc.error, durationMs: tc.durationMs })),
+        toolLogPath,
+      );
+      extraMessages.push({ role: "user" as const, content: summary });
+    }
+  }
+
   // 儲存 turn 到 session
   sessionManager.addMessages(sessionKey, [
     { role: "user", content: prompt },
     { role: "assistant", content: fullResponse },
+    ...extraMessages,
   ]);
 
   eventBus.emit("turn:after", { accountId, channelId, sessionKey, prompt, projectId }, fullResponse);
+
+  // Session Snapshot：正常完成 → 刪除快照（CE 壓縮時保留 48h）
+  if (snapshotStore) {
+    const ceApplied = (contextEngine?.lastBuildBreakdown?.strategiesApplied?.length ?? 0) > 0;
+    if (!ceApplied) {
+      snapshotStore.delete(sessionKey, session.turnCount);
+    }
+    // CE 壓縮時快照在 save 時已設定 expiresAt=48h，不需額外操作
+  }
+
+  // Turn Audit Log 記錄
+  const auditLog = getTurnAuditLog();
+  if (auditLog) {
+    const sessionAfter = sessionManager.get(sessionKey) ?? session;
+    const ceBreakdown = contextEngine?.lastBuildBreakdown;
+    auditLog.append({
+      ts: new Date().toISOString(),
+      platform,
+      sessionKey,
+      channelId,
+      accountId,
+      turnIndex: sessionAfter?.turnCount ?? 0,
+      phase: {
+        inboundReceivedMs: turnStartMs,
+        completedMs: Date.now(),
+      },
+      ceApplied: ceBreakdown?.strategiesApplied ?? [],
+      tokensBeforeCE: ceBreakdown?.tokensBeforeCE,
+      tokensAfterCE: ceBreakdown?.tokensAfterCE,
+      toolCalls: tracker.toolCalls.length,
+      toolLogPath: toolLogPath ?? undefined,
+      durationMs: Date.now() - turnStartMs,
+    });
+  }
 
   yield { type: "done", text: fullResponse, turnCount: loopCount };
   log.debug(`[agent-loop] done accountId=${accountId} channelId=${channelId} loops=${loopCount} tools=${tracker.toolCalls.length}`);

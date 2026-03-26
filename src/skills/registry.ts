@@ -73,10 +73,9 @@ export async function loadBuiltinSkills(): Promise<void> {
 
   for (const file of files) {
     try {
-      const mod = (await import(pathToFileURL(join(dir, file)).href)) as { skill?: Skill };
-      if (mod.skill) {
-        registerSkill(mod.skill);
-      }
+      const mod = (await import(pathToFileURL(join(dir, file)).href)) as { skill?: Skill; skills?: Skill[] };
+      if (mod.skill) registerSkill(mod.skill);
+      if (mod.skills) mod.skills.forEach(s => registerSkill(s));
     } catch (err) {
       log.warn(`[skills] 載入失敗：${file} — ${err instanceof Error ? err.message : String(err)}`);
     }

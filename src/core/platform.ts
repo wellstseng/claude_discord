@@ -30,6 +30,12 @@ import { initIdentityLinker } from "../accounts/identity-linker.js";
 import { initProjectManager, type ProjectManager } from "../projects/manager.js";
 import { initMemoryEngine, type MemoryEngine } from "../memory/engine.js";
 import { initRateLimiter, getRateLimiter, type RateLimiter } from "./rate-limiter.js";
+import { renameSessions } from "../migration/rename-sessions.js";
+import { initTurnAuditLog } from "./turn-audit-log.js";
+import { initContextEngine } from "./context-engine.js";
+import { initToolLogStore } from "./tool-log-store.js";
+import { initInboundHistoryStore } from "../discord/inbound-history.js";
+import { initSessionSnapshotStore } from "./session-snapshot.js";
 
 // ── 子系統實例（module-level singleton） ─────────────────────────────────────
 
@@ -115,6 +121,9 @@ export async function initPlatform(
     persistPath: join(catclawDir, "workspace", "data", "sessions-v2"),
   };
   _sessionManager = initSessionManager(sessionCfg);
+  // V1 → V2 session 檔名遷移（加 platform 前綴，冪等）
+  const sessionPersistDir = join(catclawDir, "workspace", "data", "sessions-v2");
+  renameSessions({ persistDir: sessionPersistDir, platform: "discord" });
   await _sessionManager.init();
 
   // ── 7. Registration + Identity Linker ─────────────────────────────────────
@@ -141,7 +150,7 @@ export async function initPlatform(
     contextBudgetRatio: { global: 0.3, project: 0.4, account: 0.3 },
     writeGate: { enabled: true, dedupThreshold: 0.80 },
     recall: { triggerMatch: true, vectorSearch: false, relatedEdgeSpreading: true, vectorMinScore: 0.65, vectorTopK: 5 },
-    extract: { enabled: false, perTurn: false, onSessionEnd: false, maxItemsPerTurn: 3, maxItemsSessionEnd: 5, minNewChars: 500 },
+    extract: { enabled: true, perTurn: true, onSessionEnd: false, maxItemsPerTurn: 3, maxItemsSessionEnd: 5, minNewChars: 500 },
     consolidate: { autoPromoteThreshold: 20, suggestPromoteThreshold: 8, decay: { enabled: false, halfLifeDays: 30, archiveThreshold: 0.1 } },
     episodic: { enabled: false, ttlDays: 24 },
     rutDetection: { enabled: false, windowSize: 14, minOccurrences: 2 },
@@ -162,6 +171,24 @@ export async function initPlatform(
     member:   { requestsPerMinute: 30 },
     admin:    { requestsPerMinute: 120 },
   });
+
+  // ── 9.6 Context Engine ─────────────────────────────────────────────────────
+  const ceCfg = config.contextEngineering;
+  if (ceCfg?.enabled !== false) {
+    initContextEngine({
+      compaction: ceCfg?.strategies?.compaction,
+      budgetGuard: ceCfg?.strategies?.budgetGuard,
+      slidingWindow: ceCfg?.strategies?.slidingWindow,
+    });
+    log.info("[platform] ContextEngine 初始化完成");
+  }
+
+  // ── 9.7 Turn Audit Log + Tool Log Store ────────────────────────────────────
+  const auditDataDir = join(catclawDir, "workspace", "data");
+  initTurnAuditLog(auditDataDir);
+  initToolLogStore(auditDataDir);
+  initInboundHistoryStore(auditDataDir);
+  initSessionSnapshotStore(auditDataDir);
 
   // ── 10. Workflow Engine ─────────────────────────────────────────────────────
   const workflowDataDir = join(catclawDir, "workspace", "data", "workflow");

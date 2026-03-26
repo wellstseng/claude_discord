@@ -45,6 +45,7 @@ import {
   getPlatformProjectManager,
   getPlatformRateLimiter,
 } from "./core/platform.js";
+import { getInboundHistoryStore, type InboundEntry } from "./discord/inbound-history.js";
 import { resolveProvider, getChannelAccess as getCoreChannelAccess } from "./core/config.js";
 import { getProviderRegistry } from "./providers/registry.js";
 import { agentLoop } from "./core/agent-loop.js";
@@ -259,6 +260,21 @@ async function handleMessage(
       return;
     }
     if (!message.mentions.has(botUser)) {
+      // Inbound History：記錄未被 mention 的訊息，供下次觸發時注入
+      const inboundStore = getInboundHistoryStore();
+      if (inboundStore && message.content.trim()) {
+        const entry: InboundEntry = {
+          ts: new Date().toISOString(),
+          platform: "discord",
+          channelId: message.channelId,
+          authorId: message.author.id,
+          authorName: message.author.displayName,
+          content: message.content.trim(),
+          wasProcessed: false,
+        };
+        inboundStore.append(message.channelId, entry);
+        log.debug(`[discord] inbound-history append channel=${message.channelId}`);
+      }
       log.debug("[discord] 忽略：未 mention bot");
       return;
     }
@@ -435,14 +451,45 @@ async function handleMessage(
         }
       }
 
+      // ── Inbound History 注入 ─────────────────────────────────────────────
+      let combinedSystemPrompt = systemPromptFromMemory;
+      const inboundStore = getInboundHistoryStore();
+      const inboundCfg = (config as unknown as Record<string, unknown>).inboundHistory as Record<string, unknown> | undefined;
+      if (inboundStore && inboundCfg?.enabled !== false) {
+        try {
+          const inboundContext = await inboundStore.consumeForInjection(
+            firstMessage.channelId,
+            {
+              enabled: true,
+              fullWindowHours: (inboundCfg?.fullWindowHours as number | undefined) ?? 24,
+              decayWindowHours: (inboundCfg?.decayWindowHours as number | undefined) ?? 168,
+              bucketBTokenCap: (inboundCfg?.bucketBTokenCap as number | undefined) ?? 600,
+              decayIITokenCap: (inboundCfg?.decayIITokenCap as number | undefined) ?? 300,
+              inject: { enabled: (inboundCfg?.inject as Record<string, unknown> | undefined)?.enabled as boolean ?? false },
+            },
+          );
+          if (inboundContext) {
+            combinedSystemPrompt = combinedSystemPrompt
+              ? `${combinedSystemPrompt}\n\n${inboundContext}`
+              : inboundContext;
+          }
+        } catch (err) {
+          log.debug(`[discord] inbound-history inject 失敗（繼續）：${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // ── Ack Reaction：⏳ queued ──────────────────────────────────────────
+      void firstMessage.react("⏳").catch(() => { /* 無 permission 時靜默 */ });
+
       const gen = agentLoop(prompt, {
+        platform: "discord",
         channelId: firstMessage.channelId,
         accountId,
         isGroupChannel,
         speakerDisplay: firstMessage.author.displayName,
         speakerRole: accountRole,
         provider,
-        systemPrompt: systemPromptFromMemory || undefined,
+        systemPrompt: combinedSystemPrompt || undefined,
         turnTimeoutMs: config.turnTimeoutMs,
         showToolCalls: config.showToolCalls as "all" | "summary" | "none",
       }, {
@@ -453,7 +500,38 @@ async function handleMessage(
         eventBus,
       });
 
-      void handleAgentLoopReply(gen, firstMessage, config);
+      // ── Ack Reaction 包裝 gen ────────────────────────────────────────────
+      async function* withAckReactions(source: typeof gen) {
+        let thinking = false;
+        let toolActive = false;
+        for await (const evt of source) {
+          if (evt.type === "tool_start" && !toolActive) {
+            toolActive = true;
+            if (thinking) {
+              void firstMessage.reactions.cache.get("🤔")?.remove().catch(() => {});
+              thinking = false;
+            }
+            void firstMessage.react("🔧").catch(() => {});
+          } else if (!thinking && evt.type === "text_delta") {
+            thinking = true;
+            void firstMessage.reactions.cache.get("⏳")?.remove().catch(() => {});
+            void firstMessage.react("🤔").catch(() => {});
+          }
+          if (evt.type === "done") {
+            void firstMessage.reactions.cache.get("⏳")?.remove().catch(() => {});
+            void firstMessage.reactions.cache.get("🤔")?.remove().catch(() => {});
+            void firstMessage.reactions.cache.get("🔧")?.remove().catch(() => {});
+          } else if (evt.type === "error") {
+            void firstMessage.reactions.cache.get("⏳")?.remove().catch(() => {});
+            void firstMessage.reactions.cache.get("🤔")?.remove().catch(() => {});
+            void firstMessage.reactions.cache.get("🔧")?.remove().catch(() => {});
+            void firstMessage.react("❌").catch(() => {});
+          }
+          yield evt;
+        }
+      }
+
+      void handleAgentLoopReply(withAckReactions(gen), firstMessage, config);
     } else {
       // 舊 Claude CLI 路徑（向下相容）
       const onEvent = createReplyHandler(firstMessage, config, turnId);

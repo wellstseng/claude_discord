@@ -249,12 +249,14 @@ export class SessionManager {
 // ── Session Key 工具函式 ──────────────────────────────────────────────────────
 
 /**
- * 產生 session key
- * - 群組頻道（isDm=false）：`ch:{channelId}`（per-channel，所有人共用同一 session）
- * - DM（isDm=true）：`dm:{accountId}:{channelId}`（per-account）
+ * 產生 session key（含平台前綴）
+ * - 群組頻道（isDm=false）：`{platform}:ch:{channelId}`
+ * - DM（isDm=true）：`{platform}:dm:{accountId}:{channelId}`
+ *
+ * 持久化檔名：`:` → `_`，例如 `discord_ch_111.json`
  */
-export function makeSessionKey(channelId: string, accountId: string, isDm: boolean): string {
-  return isDm ? `dm:${accountId}:${channelId}` : `ch:${channelId}`;
+export function makeSessionKey(channelId: string, accountId: string, isDm: boolean, platform = "discord"): string {
+  return isDm ? `${platform}:dm:${accountId}:${channelId}` : `${platform}:ch:${channelId}`;
 }
 
 // ── 路徑解析 ──────────────────────────────────────────────────────────────────
