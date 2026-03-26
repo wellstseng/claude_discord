@@ -103,6 +103,19 @@ export class PermissionGate {
     return { allowed: true };
   }
 
+  // ── Tier-only 檢查（無需指定 tool，供 Skill 權限檢查使用） ─────────────────
+
+  checkTier(accountId: string, tier: ToolTier): PermissionResult {
+    const account = this.accountRegistry.get(accountId);
+    if (!account) return { allowed: false, reason: `未知帳號：${accountId}` };
+    if (account.disabled) return { allowed: false, reason: "帳號已停用" };
+    const allowedTiers = ROLE_TIER_ACCESS[account.role];
+    if (!allowedTiers.includes(tier)) {
+      return { allowed: false, reason: `角色 ${account.role} 無法存取 tier=${tier}` };
+    }
+    return { allowed: true };
+  }
+
   // ── 取得帳號可用的 ToolDefinition 清單（物理移除，LLM 看不到被移除的） ────
 
   listAvailable(accountId: string): ToolDefinition[] {

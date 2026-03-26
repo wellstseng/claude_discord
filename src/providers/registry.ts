@@ -111,8 +111,10 @@ export async function buildProviderRegistry(
       // OpenClaw WS provider — placeholder
       log.debug(`[provider-registry] openclaw provider ${id} 暫不初始化（S8 實作）`);
     } else if (entry.host || entry.baseUrl) {
-      // Ollama / OpenAI-compat — placeholder
-      log.debug(`[provider-registry] ${id} (ollama/openai-compat) 暫不初始化（S8 實作）`);
+      // Ollama / OpenAI-compat
+      const { OpenAICompatProvider } = await import("./openai-compat.js");
+      provider = new OpenAICompatProvider(id, entry);
+      if (provider.init) await provider.init();
     }
 
     if (provider) registry.register(provider);

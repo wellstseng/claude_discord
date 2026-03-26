@@ -306,6 +306,20 @@ async function handleMessage(
     if (skillMatch) {
       const { skill, args } = skillMatch;
       log.info(`[discord] skill 命中：${skill.name} args="${args}"`);
+
+      // Tier 權限檢查（平台就緒時才啟用）
+      if (isPlatformReady()) {
+        const { accountId } = resolveDiscordIdentity(
+          firstMessage.author.id,
+          config.admin?.allowedUserIds ?? [],
+        );
+        const tierCheck = getPlatformPermissionGate().checkTier(accountId, skill.tier);
+        if (!tierCheck.allowed) {
+          void firstMessage.reply(`❌ 權限不足：${tierCheck.reason ?? "tier 限制"}`);
+          return;
+        }
+      }
+
       try {
         if (skill.preflight) {
           const check = await skill.preflight({ args, message: firstMessage, channelId: firstMessage.channelId, authorId: firstMessage.author.id, config });
