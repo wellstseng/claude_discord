@@ -175,11 +175,18 @@ export async function initPlatform(
   // ── 9.6 Context Engine ─────────────────────────────────────────────────────
   const ceCfg = config.contextEngineering;
   if (ceCfg?.enabled !== false) {
-    initContextEngine({
+    const ce = initContextEngine({
       compaction: ceCfg?.strategies?.compaction,
       budgetGuard: ceCfg?.strategies?.budgetGuard,
       slidingWindow: ceCfg?.strategies?.slidingWindow,
     });
+    // 若 compaction 指定了 model，建立專用 CE provider 並注入
+    const ceModel = ceCfg?.strategies?.compaction?.model;
+    if (ceModel) {
+      const { ClaudeApiProvider } = await import("../providers/claude-api.js");
+      ce.setCeProvider(new ClaudeApiProvider("ce-compaction", { model: ceModel }));
+      log.debug(`[platform] CE compaction provider: ${ceModel}`);
+    }
     log.info("[platform] ContextEngine 初始化完成");
   }
 

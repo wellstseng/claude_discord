@@ -66,6 +66,7 @@ export function estimateTokens(messages: Message[]): number {
 
 export interface CompactionConfig {
   enabled: boolean;
+  model?: string;              // CE 壓縮用 LLM model（不填則用 platform 傳入的 ceProvider）
   triggerTurns: number;        // 超過此 turn 數才觸發（預設 20）
   preserveRecentTurns: number; // 保留最近 N 輪不壓縮（預設 5）
 }
@@ -229,6 +230,9 @@ export class SlidingWindowStrategy implements ContextStrategy {
 
 export class ContextEngine {
   private strategies = new Map<string, ContextStrategy>();
+  private _ceProvider?: LLMProvider;
+
+  setCeProvider(p: LLMProvider): void { this._ceProvider = p; }
 
   /** 最後一次 build 的 breakdown */
   lastBuildBreakdown: ContextBreakdown = {
@@ -270,7 +274,7 @@ export class ContextEngine {
       const strategy = this.strategies.get(name);
       if (!strategy?.enabled) continue;
       if (strategy.shouldApply(ctx)) {
-        ctx = await strategy.apply(ctx, opts.ceProvider);
+        ctx = await strategy.apply(ctx, opts.ceProvider ?? this._ceProvider);
         applied.push(name);
         log.debug(`[context-engine] strategy=${name} applied`);
       }
@@ -298,7 +302,7 @@ export class ContextEngine {
 let _contextEngine: ContextEngine | null = null;
 
 export function initContextEngine(cfg?: {
-  compaction?: Partial<CompactionConfig>;
+  compaction?: Partial<CompactionConfig> & { model?: string };
   budgetGuard?: Partial<BudgetGuardConfig>;
   slidingWindow?: Partial<SlidingWindowConfig>;
 }): ContextEngine {

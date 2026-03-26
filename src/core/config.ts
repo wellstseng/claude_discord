@@ -204,11 +204,12 @@ export type RateLimitConfig = Record<string, { requestsPerMinute: number }>;
 /** Context Engineering 設定 */
 export interface ContextEngineeringConfig {
   enabled: boolean;
-  /** CE 專用 LLM model（Compaction 等壓縮作業用，全域預設） */
-  model?: string;
   strategies?: {
-    compaction?: { enabled?: boolean; triggerTurns?: number; preserveRecentTurns?: number };
+    /** Compaction：LLM 壓縮策略，model 只在此處需要 */
+    compaction?: { enabled?: boolean; model?: string; triggerTurns?: number; preserveRecentTurns?: number };
+    /** BudgetGuard：純 token 計算，無需 LLM */
     budgetGuard?: { enabled?: boolean; maxUtilization?: number; contextWindowTokens?: number };
+    /** SlidingWindow：純視窗裁切，無需 LLM */
     slidingWindow?: { enabled?: boolean; maxTurns?: number };
   };
 }
