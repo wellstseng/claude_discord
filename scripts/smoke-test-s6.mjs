@@ -234,7 +234,7 @@ test("tool_start + showToolCalls=summary → 只送一次「處理中」", async
 console.log("\n[6] E2E（skip without API key）");
 
 test("E2E agentLoop → handleAgentLoopReply（skip without API key）", async () => {
-  if (!process.env.ANTHROPIC_API_KEY) return "skip";
+  if (!process.env.ANTHROPIC_TOKEN) return "skip";
 
   const { handleAgentLoopReply } = await import("../dist/core/reply-handler.js");
   const { isPlatformReady } = await import("../dist/core/platform.js");

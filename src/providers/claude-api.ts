@@ -43,7 +43,7 @@ export class ClaudeApiProvider implements LLMProvider {
     this.thinkingEnabled = entry.thinking ?? false;
 
     if (!this.token) {
-      log.warn(`[claude-api:${id}] 未設定 token，請在 config 設定 "token": "\${ANTHROPIC_API_KEY}"`);
+      log.warn(`[claude-api:${id}] 未設定 token，請在 config 設定 "token": "\${ANTHROPIC_TOKEN}"`);
     }
   }
 

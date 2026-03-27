@@ -2,7 +2,7 @@
  * S4 Smoke Test — Provider Layer + Session Manager
  * 執行：node scripts/smoke-test-s4.mjs
  *
- * claude-api 端到端測試需要 ANTHROPIC_API_KEY 環境變數
+ * claude-api 端到端測試需要 ANTHROPIC_TOKEN 環境變數
  * 若未設定則 skip（不 fail）
  */
 
@@ -41,9 +41,9 @@ process.env.CATCLAW_WORKSPACE  = join(testCatclawDir, "workspace");
 
 const { config: testConfig } = await import("../dist/core/config.js");
 
-const apiKey = process.env.ANTHROPIC_API_KEY ?? testConfig.providers?.["claude-api"]?.apiKey;
+const apiKey = process.env.ANTHROPIC_TOKEN ?? testConfig.providers?.["claude-api"]?.token;
 const hasApiKey = Boolean(apiKey);
-console.log(`   ANTHROPIC_API_KEY: ${hasApiKey ? "✓ 設定" : "✗ 未設定（E2E 測試將 skip）"}`);
+console.log(`   ANTHROPIC_TOKEN: ${hasApiKey ? "✓ 設定" : "✗ 未設定（E2E 測試將 skip）"}`);
 
 // ── Module 1: providers/base ──────────────────────────────────────────────────
 
@@ -186,7 +186,7 @@ test("ClaudeApiProvider stream 無 apiKey 拋出", async () => {
   assert(thrown, "應拋出認證錯誤");
 });
 
-test("ClaudeApiProvider E2E（需 ANTHROPIC_API_KEY）", async () => {
+test("ClaudeApiProvider E2E（需 ANTHROPIC_TOKEN）", async () => {
   if (!hasApiKey) return "skip";
   const p = new ClaudeApiProvider("claude-api", { apiKey, model: "claude-haiku-4-5-20251001" });
   const result = await p.stream(
@@ -356,7 +356,7 @@ test("initSessionManager / getSessionManager singleton", async () => {
 
 console.log("\n[5] 整合（provider + session + API call）");
 
-test("Provider + Session E2E（需 ANTHROPIC_API_KEY）", async () => {
+test("Provider + Session E2E（需 ANTHROPIC_TOKEN）", async () => {
   if (!hasApiKey) return "skip";
 
   // 1. 建立 session

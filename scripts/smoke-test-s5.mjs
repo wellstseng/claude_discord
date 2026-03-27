@@ -2,7 +2,7 @@
  * S5 Smoke Test — Tool 系統 + Permission Gate + Safety Guard + Agent Loop
  * 執行：node scripts/smoke-test-s5.mjs
  *
- * Agent Loop E2E 需要 ANTHROPIC_API_KEY（無則 skip）
+ * Agent Loop E2E 需要 ANTHROPIC_TOKEN（無則 skip）
  */
 
 import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
@@ -41,9 +41,9 @@ process.env.CATCLAW_CONFIG_DIR = testCatclawDir;
 process.env.CATCLAW_WORKSPACE  = join(testCatclawDir, "workspace");
 
 const { config: testConfig } = await import("../dist/core/config.js");
-const apiKey = process.env.ANTHROPIC_API_KEY ?? testConfig.providers?.["claude-api"]?.apiKey;
+const apiKey = process.env.ANTHROPIC_TOKEN ?? testConfig.providers?.["claude-api"]?.token;
 const hasApiKey = Boolean(apiKey);
-console.log(`   ANTHROPIC_API_KEY: ${hasApiKey ? "✓ 設定" : "✗ 未設定（E2E 測試將 skip）"}`);
+console.log(`   ANTHROPIC_TOKEN: ${hasApiKey ? "✓ 設定" : "✗ 未設定（E2E 測試將 skip）"}`);
 
 // ── Module 1: tools/types ─────────────────────────────────────────────────────
 
@@ -481,7 +481,7 @@ test("agentLoop safety guard 阻擋危險 run_command", async () => {
 
 // ── Module 6: E2E（需 API Key） ───────────────────────────────────────────────
 
-console.log("\n[6] E2E（需 ANTHROPIC_API_KEY）");
+console.log("\n[6] E2E（需 ANTHROPIC_TOKEN）");
 
 test("agentLoop E2E Claude API（無 tool）", async () => {
   if (!hasApiKey) return "skip";

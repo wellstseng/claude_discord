@@ -114,7 +114,7 @@ export interface ProviderEntry {
   oauthRefreshUrl?: string;
   /** OAuth client_id（codex-oauth 用，部分 provider 需要） */
   oauthClientId?: string;
-  /** HTTP 認證 Token（支援環境變數展開，如 ${ANTHROPIC_API_KEY}） */
+  /** HTTP 認證 Token（支援環境變數展開，如 ${ANTHROPIC_TOKEN}） */
   token?: string;
   /** 模型 ID */
   model?: string;
