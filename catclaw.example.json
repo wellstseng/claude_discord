@@ -51,8 +51,10 @@
   //   id 含 ollama → ollama | entry.host/baseUrl → openai-compat
   //   entry.apiKey（無 baseUrl）→ claude
   "providers": {
-    // Claude API：讀環境變數 ANTHROPIC_API_KEY，無需額外設定
+    // Claude API：apiKey 使用 ${VAR} 語法引用環境變數
+    // 需先設定環境變數 ANTHROPIC_API_KEY（export 或 .env）
     "claude-api": {
+      "apiKey": "${ANTHROPIC_API_KEY}",
       "model": "claude-sonnet-4-6"
     },
 
