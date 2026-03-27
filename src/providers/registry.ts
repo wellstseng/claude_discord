@@ -104,10 +104,11 @@ export async function buildProviderRegistry(
     let provider: LLMProvider | null = null;
 
     // 型別解析優先序：entry.type > wsUrl > id heuristic > field heuristic
-    let providerType: "claude" | "openai-compat" | "codex-oauth" | "openclaw" | null = null;
+    let providerType: "claude" | "openai-compat" | "codex-oauth" | "openclaw" | "ollama" | null = null;
     if (entry.type)               providerType = entry.type;
     else if (entry.wsUrl)         providerType = "openclaw";
     else if (id === "claude-api") providerType = "claude";
+    else if (id === "ollama" || id.startsWith("ollama-")) providerType = "ollama";
     else if (entry.host || entry.baseUrl) providerType = "openai-compat";
     else if (entry.apiKey)        providerType = "claude";  // 無 baseUrl → 預設 Anthropic
 
@@ -117,6 +118,10 @@ export async function buildProviderRegistry(
     } else if (providerType === "claude") {
       const { ClaudeApiProvider } = await import("./claude-api.js");
       provider = new ClaudeApiProvider(id, entry);
+    } else if (providerType === "ollama") {
+      const { OllamaProvider } = await import("./ollama.js");
+      provider = new OllamaProvider(id, entry);
+      if (provider.init) await provider.init();
     } else if (providerType === "openai-compat") {
       const { OpenAICompatProvider } = await import("./openai-compat.js");
       provider = new OpenAICompatProvider(id, entry);

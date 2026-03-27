@@ -96,8 +96,18 @@ export interface ProviderEntry {
    * - "claude"        → ClaudeApiProvider（Anthropic Messages API）
    * - "openai-compat" → OpenAICompatProvider（/v1/chat/completions）
    * - "codex-oauth"   → CodexOAuthProvider（OpenAI Codex + OAuth 自動刷新）
+   * - "ollama"        → OllamaProvider（/api/chat NDJSON，支援 think 參數）
    */
-  type?: "claude" | "openai-compat" | "codex-oauth";
+  type?: "claude" | "openai-compat" | "codex-oauth" | "ollama";
+  /**
+   * Ollama thinking 模式（僅 type=ollama 有效，qwen3 等 thinking 模型使用）
+   * true = 送出 think:true 參數，回應包含推理過程
+   */
+  think?: boolean;
+  /**
+   * Ollama num_predict（最大輸出 token，僅 type=ollama 有效，預設 4096）
+   */
+  numPredict?: number;
   /** OAuth token 檔案路徑（codex-oauth 用，預設 ~/.codex/auth.json） */
   oauthTokenPath?: string;
   /** OAuth refresh endpoint（codex-oauth 用，預設 https://auth.openai.com/oauth/token） */
