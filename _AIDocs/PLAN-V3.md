@@ -433,15 +433,18 @@ S-V3-5（持久子 agent + Discord thread 綁定）
 
 ---
 
+## V3 後續 Optional 功能（不在 V3 Sprint 內，視需求評估）
+
+| 功能 | 說明 | 優先度 |
+|------|------|--------|
+| **Tool 8-layer policy pipeline** | 現有 2 層（permission gate + safety guard）擴充至按 profile/group/sandbox/depth 層層過濾 | 中 |
+| **Auth profile 輪替** | 多 API key 輪替 + cooldown + failover，支援長時間高並行任務 | 中 |
+
+---
+
 ## V4 未來方向
 
-| 功能 | 說明 |
-|------|------|
-| allowNestedSpawn | opt-in 開放子 agent 再 spawn（3 層架構） |
-| Subagent 結果寫入記憶 | 完成結果存入 MemoryEngine |
-| Vector search 啟用 | memory recall vectorSearch:true（Ollama 在線） |
-| Cron + subagent | 排程自動 spawn 子 agent |
-| Subagent 間通訊 | 子 A 的輸出直接作為子 B 的輸入（pipeline 模式） |
+→ 詳見 [PLAN-V4.md](PLAN-V4.md)
 
 ---
 
