@@ -62,6 +62,10 @@ interface ChildRunOpts {
   signal: AbortSignal;
   workspaceDir?: string;
   attachmentsDir?: string;
+  /** 父層 spawn 深度（子層為此值 + 1） */
+  parentSpawnDepth?: number;
+  /** opt-in 開放子 agent 再 spawn（深度 < 2 時有效） */
+  allowNestedSpawn?: boolean;
 }
 
 // ── ACP Runtime（SUB-6）──────────────────────────────────────────────────────
@@ -198,6 +202,10 @@ async function runChildAgentLoop(opts: ChildRunOpts): Promise<{ text: string; tu
   let fullText = "";
   let turnCount = 0;
 
+  const childDepth = (opts.parentSpawnDepth ?? 0) + 1;
+  // allowNestedSpawn:true + depth < 2 → 允許子 agent spawn（深度限制由 agent-loop 強制）
+  const childAllowSpawn = (opts.allowNestedSpawn === true) && childDepth < 2;
+
   const loopGen = agentLoop(opts.task, {
     platform: "subagent",
     channelId: opts.childSessionKey,
@@ -206,7 +214,8 @@ async function runChildAgentLoop(opts: ChildRunOpts): Promise<{ text: string; tu
     systemPrompt,
     signal: opts.signal,
     turnTimeoutMs: opts.timeoutMs,
-    allowSpawn: false,  // 子 agent 不能再 spawn
+    allowSpawn: childAllowSpawn,
+    spawnDepth: childDepth,
     workspaceDir: opts.workspaceDir,
     _sessionKeyOverride: opts.childSessionKey,
   }, {
@@ -247,6 +256,7 @@ export const tool: Tool = {
       async:      { type: "boolean", description: "true = 立即回傳 runId，背景執行（預設 false）" },
       keepSession:{ type: "boolean", description: "完成後保留 session（debug 用，預設 false）" },
       mode:       { type: "string",  description: "run（預設，one-shot）| session（持久，需搭配 keepSession:true）" },
+      allowNestedSpawn: { type: "boolean", description: "opt-in 允許子 agent 再 spawn（最多 3 層，預設 false）" },
       attachments: {
         type: "array",
         description: "spawn 時帶入的附件",
@@ -273,9 +283,10 @@ export const tool: Tool = {
     const runtime    = (params["runtime"] as "default" | "coding" | "acp") ?? "default";
     const maxTurns   = typeof params["maxTurns"] === "number" ? params["maxTurns"] : 10;
     const timeoutMs  = typeof params["timeoutMs"] === "number" ? params["timeoutMs"] : 120_000;
-    const isAsync    = params["async"] === true;
-    const keepSession= params["keepSession"] === true;
-    const mode       = (params["mode"] as "run" | "session") ?? "run";
+    const isAsync          = params["async"] === true;
+    const keepSession      = params["keepSession"] === true;
+    const mode             = (params["mode"] as "run" | "session") ?? "run";
+    const allowNestedSpawn = params["allowNestedSpawn"] === true;
     const attachments = Array.isArray(params["attachments"]) ? params["attachments"] : [];
 
     if (!task) return { result: { status: "error", error: "task 不能為空" } };
@@ -347,6 +358,8 @@ export const tool: Tool = {
             timeoutMs,
             signal: record.abortController.signal,
             attachmentsDir,
+            parentSpawnDepth: ctx.spawnDepth ?? 0,
+            allowNestedSpawn,
           }),
           new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error("__TIMEOUT__")), timeoutMs + 1000);

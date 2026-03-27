@@ -122,6 +122,11 @@ export interface AgentLoopOpts {
    * 子 agent 傳入 false — 邏輯面過濾，tool list 不含此工具。
    */
   allowSpawn?: boolean;
+  /**
+   * Spawn 深度（0 = 頂層 parent）。
+   * ≥ 2 時 allowSpawn 強制 false（最多 3 層：parent → child → grandchild）。
+   */
+  spawnDepth?: number;
   /** LLM 呼叫失敗重試次數（預設 3） */
   retryMaxAttempts?: number;
   /** 重試 backoff 基礎毫秒（預設 1000） */
@@ -244,7 +249,9 @@ export async function* agentLoop(
   const { sessionManager, permissionGate, toolRegistry, safetyGuard, eventBus } = deps;
   const { channelId, accountId, provider, projectId } = opts;
   const platform = opts.platform ?? "discord";
-  const allowSpawn = opts.allowSpawn !== false;  // 預設 true
+  const spawnDepth = opts.spawnDepth ?? 0;
+  // allowSpawn: depth ≥ 2 強制 false（最多 3 層）；opts.allowSpawn 明確 false 也關閉
+  const allowSpawn = opts.allowSpawn !== false && spawnDepth < 2;
 
   // ── 1. 進門權限檢查 ────────────────────────────────────────────────────────
   const accessResult = permissionGate.checkAccess(accountId);
@@ -390,7 +397,7 @@ export async function* agentLoop(
 
         const batchResults = await Promise.all(spawnCalls.map(async (call): Promise<SpawnBatchResult> => {
           const params = call.params as Record<string, unknown>;
-          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus };
+          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth };
           const events: SpawnEvent[] = [];
           const hookResult = runBeforeToolCall(
             { id: call.id, name: call.name, params },
@@ -440,6 +447,7 @@ export async function* agentLoop(
           sessionId: sessionKey,
           channelId,
           eventBus,
+          spawnDepth,
         };
 
         // before_tool_call

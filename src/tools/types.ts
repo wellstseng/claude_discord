@@ -41,6 +41,11 @@ export interface ToolContext {
   channelId: string;
   /** CatClaw 事件匯流排（EventEmitter 子集，避免循環引用） */
   eventBus: Pick<EventEmitter, "emit">;
+  /**
+   * Spawn 深度（0 = 頂層 parent）。
+   * 傳入子 agent 時 +1；≥ 2 時 allowSpawn 強制 false（最多 3 層）。
+   */
+  spawnDepth?: number;
 }
 
 // ── Tool 介面 ─────────────────────────────────────────────────────────────────
