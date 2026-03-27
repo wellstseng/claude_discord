@@ -54,6 +54,11 @@ export interface Tool {
   tier: ToolTier;
   /** 參數 JSON Schema */
   parameters: JsonSchema;
+  /**
+   * 單次 tool result 最大 token 數上限（超出時截斷，1 token ≈ 4 chars）。
+   * 未設定則套用全域預設（8000 tokens）。設 0 表示無限制。
+   */
+  resultTokenCap?: number;
   /** 執行函式 */
   execute(params: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }

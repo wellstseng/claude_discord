@@ -33,6 +33,22 @@ import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
 // ── 常數 ─────────────────────────────────────────────────────────────────────
 
 const MAX_LOOPS = 20;
+const DEFAULT_RESULT_TOKEN_CAP = 8000;   // 1 token ≈ 4 chars → 32000 chars
+
+// ── Tool result 截斷 ──────────────────────────────────────────────────────────
+
+function truncateToolResult(text: string, tokenCap: number): string {
+  if (tokenCap === 0) return text;                       // 0 = 無限制
+  const charCap = tokenCap * 4;
+  if (text.length <= charCap) return text;
+
+  const lines = text.split("\n");
+  const totalLines = lines.length;
+  const head = lines.slice(0, 50).join("\n");
+  const tail = lines.slice(-20).join("\n");
+  const notice = `\n[結果過長已截斷。原始共 ${totalLines} 行 / ${text.length} 字元，顯示前 50 行 + 末 20 行]\n`;
+  return head + notice + tail;
+}
 
 // ── LLM 呼叫重試 + backoff ────────────────────────────────────────────────────
 
@@ -389,7 +405,9 @@ export async function* agentLoop(
           const t0 = Date.now();
           const toolResult = await toolRegistry.execute(call.name, hookResult.params, toolCtx);
           const durationMs = Date.now() - t0;
-          const resultText = toolResult.error ? `錯誤：${toolResult.error}` : JSON.stringify(toolResult.result ?? null);
+          const rawText = toolResult.error ? `錯誤：${toolResult.error}` : JSON.stringify(toolResult.result ?? null);
+          const tokenCap = toolRegistry.get(call.name)?.resultTokenCap ?? DEFAULT_RESULT_TOKEN_CAP;
+          const resultText = truncateToolResult(rawText, tokenCap);
           events.push({ type: "tool_result", name: call.name, id: call.id, result: toolResult.result, error: toolResult.error });
           return {
             toolResult: { tool_use_id: call.id, content: resultText, is_error: Boolean(toolResult.error) },
@@ -453,9 +471,11 @@ export async function* agentLoop(
 
         tracker.recordToolCall(call.name, hookResult.params, toolResult.result, toolResult.error, durationMs);
 
-        const resultText = toolResult.error
+        const rawResultText = toolResult.error
           ? `錯誤：${toolResult.error}`
           : JSON.stringify(toolResult.result ?? null);
+        const cap = toolRegistry.get(call.name)?.resultTokenCap ?? DEFAULT_RESULT_TOKEN_CAP;
+        const resultText = truncateToolResult(rawResultText, cap);
 
         toolResults.push({
           tool_use_id: call.id,
