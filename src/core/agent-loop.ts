@@ -29,6 +29,7 @@ import { getContextEngine } from "./context-engine.js";
 import { getToolLogStore, ToolLogStore } from "./tool-log-store.js";
 import { getSessionSnapshotStore } from "./session-snapshot.js";
 import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
+import type { MemoryEngine } from "../memory/engine.js";
 
 // ── 常數 ─────────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,17 @@ export interface AgentLoopOpts {
    * 正常流程不使用此欄位。
    */
   _sessionKeyOverride?: string;
+  /**
+   * 記憶 Recall 選項。
+   * 啟用時於 LLM 呼叫前注入向量搜尋結果到 system prompt。
+   * 呼叫端不需自行組裝記憶 context 即可注入。
+   */
+  memoryRecall?: {
+    enabled: boolean;
+    /** true = hybrid（vector + trigger），false = 僅 trigger */
+    vectorSearch: boolean;
+    topK?: number;
+  };
 }
 
 /** AgentLoop yield 出的事件 */
@@ -244,6 +256,8 @@ export async function* agentLoop(
     toolRegistry: ToolRegistry;
     safetyGuard: SafetyGuard;
     eventBus: EventBus;
+    /** 可選記憶引擎，配合 opts.memoryRecall 使用 */
+    memoryEngine?: MemoryEngine;
   },
 ): AsyncGenerator<AgentLoopEvent> {
   const { sessionManager, permissionGate, toolRegistry, safetyGuard, eventBus } = deps;
@@ -301,8 +315,31 @@ export async function* agentLoop(
     toolDefs = toolDefs.filter(d => d.name !== "spawn_subagent");
   }
 
+  // ── 3b. Memory Recall（可選，供子 agent 等無前置 recall 的情境使用）──────────
+  let memoryContextBlock = "";
+  if (opts.memoryRecall?.enabled && deps.memoryEngine) {
+    try {
+      const recallResult = await deps.memoryEngine.recall(
+        prompt,
+        { accountId, projectId },
+        { vectorSearch: opts.memoryRecall.vectorSearch, vectorTopK: opts.memoryRecall.topK ?? 5 },
+      );
+      if (recallResult.fragments.length > 0) {
+        const ctx = deps.memoryEngine.buildContext(recallResult.fragments, prompt);
+        memoryContextBlock = ctx.text;
+        log.debug(`[agent-loop] memory recall 注入 ${recallResult.fragments.length} fragments (vectorSearch=${opts.memoryRecall.vectorSearch})`);
+      }
+    } catch (err) {
+      log.debug(`[agent-loop] memory recall 失敗（繼續）：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // ── 4. System prompt + 群組多人聲明 ────────────────────────────────────────
   let systemPrompt = opts.systemPrompt ?? "";
+  // memory context 前置到 system prompt
+  if (memoryContextBlock) {
+    systemPrompt = memoryContextBlock + (systemPrompt ? `\n\n${systemPrompt}` : "");
+  }
   if (opts.isGroupChannel && opts.speakerDisplay) {
     const isolation = `[多人頻道] 當前說話者：${opts.speakerDisplay}（${accountId}/${opts.speakerRole ?? "member"}）`;
     systemPrompt = systemPrompt ? `${systemPrompt}\n\n${isolation}` : isolation;
