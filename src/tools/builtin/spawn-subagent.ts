@@ -257,6 +257,7 @@ export const tool: Tool = {
       keepSession:{ type: "boolean", description: "完成後保留 session（debug 用，預設 false）" },
       mode:       { type: "string",  description: "run（預設，one-shot）| session（持久，需搭配 keepSession:true）" },
       allowNestedSpawn: { type: "boolean", description: "opt-in 允許子 agent 再 spawn（最多 3 層，預設 false）" },
+      inputFrom:  { type: "string",  description: "等待指定 runId 的子 agent 完成，以其 result 作為本次 task 的前置輸入（pipeline 模式）" },
       attachments: {
         type: "array",
         description: "spawn 時帶入的附件",
@@ -287,9 +288,33 @@ export const tool: Tool = {
     const keepSession      = params["keepSession"] === true;
     const mode             = (params["mode"] as "run" | "session") ?? "run";
     const allowNestedSpawn = params["allowNestedSpawn"] === true;
+    const inputFrom        = params["inputFrom"] ? String(params["inputFrom"]) : undefined;
     const attachments = Array.isArray(params["attachments"]) ? params["attachments"] : [];
 
     if (!task) return { result: { status: "error", error: "task 不能為空" } };
+
+    // inputFrom：等待前置子 agent 完成，將 result 注入 task
+    let resolvedTask = task;
+    if (inputFrom) {
+      const upstream = registry.get(inputFrom);
+      if (!upstream) return { result: { status: "error", error: `inputFrom 找不到 runId：${inputFrom}` } };
+
+      // 等待最多 timeoutMs
+      const waitStart = Date.now();
+      while (upstream.status === "running") {
+        if (Date.now() - waitStart > timeoutMs) {
+          return { result: { status: "timeout", result: null } };
+        }
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      if (upstream.status !== "completed") {
+        return { result: { status: "error", error: `inputFrom 子 agent 結束狀態 ${upstream.status}，無法繼承輸出` } };
+      }
+
+      resolvedTask = `[前置子 agent 輸出]\n${upstream.result ?? ""}\n\n[本次任務]\n${task}`;
+      log.debug(`[spawn-subagent] pipeline inputFrom=${inputFrom} task prepended`);
+    }
 
     // 1. allowSpawn 檢查（由 agent-loop opts 注入到 toolContext 未來版，現在透過 registry 無 record 判定）
     // 2. concurrent 上限
@@ -349,7 +374,7 @@ export const tool: Tool = {
       try {
         const { text, turns } = await Promise.race([
           runChildAgentLoop({
-            task,
+            task: resolvedTask,
             childSessionKey: record.childSessionKey,
             accountId: record.accountId,
             providerId,
