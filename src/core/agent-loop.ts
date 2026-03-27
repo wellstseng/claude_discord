@@ -145,6 +145,10 @@ export interface AgentLoopOpts {
    * 記憶 Recall 選項。
    * 啟用時於 LLM 呼叫前注入向量搜尋結果到 system prompt。
    * 呼叫端不需自行組裝記憶 context 即可注入。
+   *
+   * ⚠️ 若呼叫端已自行組裝 memory context 至 systemPrompt（如 discord.ts），
+   * 請勿同時啟用此選項，否則同一批 atoms 會被注入兩次。
+   * 此選項設計用於無前置 recall 的情境（子 agent、cron）。
    */
   memoryRecall?: {
     enabled: boolean;
@@ -325,7 +329,7 @@ export async function* agentLoop(
         { vectorSearch: opts.memoryRecall.vectorSearch, vectorTopK: opts.memoryRecall.topK ?? 5 },
       );
       if (recallResult.fragments.length > 0) {
-        const ctx = deps.memoryEngine.buildContext(recallResult.fragments, prompt);
+        const ctx = deps.memoryEngine.buildContext(recallResult.fragments, prompt, recallResult.blindSpot);
         memoryContextBlock = ctx.text;
         log.debug(`[agent-loop] memory recall 注入 ${recallResult.fragments.length} fragments (vectorSearch=${opts.memoryRecall.vectorSearch})`);
       }

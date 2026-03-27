@@ -452,14 +452,14 @@ async function execSubagent(action: {
     ? (providerRegistry.get(providerId) ?? providerRegistry.resolve())
     : providerRegistry.resolve();
 
-  // 確保 cron 系統帳號存在（admin 角色）
+  // 確保 cron 系統帳號存在（developer 角色：public/standard/elevated，不含 admin/owner tier）
   const accountId = config.cron.defaultAccountId ?? "_cron";
   const accountRegistry = getAccountRegistry();
   if (!accountRegistry.get(accountId)) {
     accountRegistry.create({
       accountId,
       displayName: "Cron 系統",
-      role: "admin",
+      role: "developer",
       identities: [],
     });
     log.info(`[cron] 自動建立 cron 帳號：${accountId}`);
@@ -471,7 +471,7 @@ async function execSubagent(action: {
 
   const gen = agentLoop(action.task, {
     platform: "cron",
-    channelId: sessionKey,
+    channelId: "cron",              // 語意佔位，session key 由 _sessionKeyOverride 決定
     accountId,
     provider,
     turnTimeoutMs: action.timeoutMs ?? 300_000,
@@ -498,7 +498,11 @@ async function execSubagent(action: {
       try {
         const ch = await discordClient.channels.fetch(match[1]);
         if (ch && "send" in ch) {
-          const text = (fullText.trim() || "(無輸出)").slice(0, 2000);
+          const trimmed = fullText.trim() || "(無輸出)";
+          const truncated = trimmed.length > 1900;
+          const text = truncated
+            ? trimmed.slice(0, 1900) + "\n…（已截斷，完整輸出共 " + trimmed.length + " 字）"
+            : trimmed;
           await (ch as SendableChannels).send(text);
         }
       } catch (err) {
