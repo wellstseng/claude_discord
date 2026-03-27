@@ -12,10 +12,11 @@
 
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Tool, ToolContext } from "../types.js";
 import { getSubagentRegistry } from "../../core/subagent-registry.js";
-import type { SpawnResult } from "../../core/subagent-registry.js";
+import type { SpawnResult, SubagentRunRecord } from "../../core/subagent-registry.js";
 import { log } from "../../logger.js";
 
 // 延遲 import（防止循環依賴）— 由 runChildAgentLoop 動態取得
@@ -63,7 +64,92 @@ interface ChildRunOpts {
   attachmentsDir?: string;
 }
 
+// ── ACP Runtime（SUB-6）──────────────────────────────────────────────────────
+
+async function runAcpSubagent(opts: ChildRunOpts): Promise<{ text: string; turns: number }> {
+  const { resolveClaudeBin, resolveWorkspaceDir } = await import("../../config.js");
+  const claudeCmd = resolveClaudeBin();
+  const cwd = opts.workspaceDir ?? resolveWorkspaceDir();
+
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-p",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--include-partial-messages",
+      "--dangerously-skip-permissions",
+      "--resume", opts.childSessionKey,
+      opts.task,
+    ];
+
+    log.debug(`[spawn-subagent:acp] spawn: ${claudeCmd} ${args.slice(0, 4).join(" ")} ...`);
+
+    const proc = nodeSpawn(claudeCmd, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+    });
+
+    let fullText = "";
+    let stdout = "";
+
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      // parse stream-json lines for text deltas
+      const lines = stdout.split("\n");
+      stdout = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line) as Record<string, unknown>;
+          if (obj["type"] === "assistant" && obj["message"]) {
+            const msg = obj["message"] as Record<string, unknown>;
+            const content = msg["content"] as Array<Record<string, unknown>> | undefined;
+            if (content) {
+              for (const block of content) {
+                if (block["type"] === "text" && typeof block["text"] === "string") {
+                  fullText = block["text"];
+                }
+              }
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    });
+
+    const timer = setTimeout(() => {
+      proc.kill();
+      reject(new Error("__TIMEOUT__"));
+    }, opts.timeoutMs);
+
+    opts.signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      proc.kill();
+      reject(new Error("killed"));
+    });
+
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0 && !fullText) {
+        reject(new Error(`ACP 子 agent 退出 code=${code}`));
+      } else {
+        resolve({ text: fullText, turns: 1 });
+      }
+    });
+
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
 async function runChildAgentLoop(opts: ChildRunOpts): Promise<{ text: string; turns: number }> {
+  // ACP 路徑走 Claude CLI
+  if (opts.runtime === "acp") {
+    return runAcpSubagent(opts);
+  }
+
   const {
     agentLoop,
     getPlatformSessionManager,
@@ -233,6 +319,21 @@ export const tool: Tool = {
       accountId: ctx.accountId,
     });
 
+    // SUB-5：mode:session → 建立 Discord thread 並綁定
+    if (mode === "session") {
+      const { createSubagentThread } = await import("../../core/subagent-discord-bridge.js");
+      const threadLabel = label ?? `子 agent ${record.runId.slice(0, 8)}`;
+      // 注意：originMessageId 需從 ctx 取得，但 ToolContext 目前沒有，用空字串 fallback
+      const originMsgId = ((ctx as unknown) as Record<string, unknown>)["originMessageId"] as string | undefined ?? "";
+      if (originMsgId) {
+        const threadId = await createSubagentThread(ctx.channelId, originMsgId, threadLabel, record.childSessionKey);
+        if (threadId) {
+          record.discordThreadId = threadId;
+          log.info(`[spawn-subagent] thread created threadId=${threadId} for runId=${record.runId}`);
+        }
+      }
+    }
+
     const runChildFn = async () => {
       try {
         const { text, turns } = await Promise.race([
@@ -296,11 +397,18 @@ export const tool: Tool = {
         return { result: { status: "error", error: msg } };
       }
     } else {
-      // 非同步：背景執行，立即回傳 runId
-      runChildFn().catch(err => {
-        log.warn(`[spawn-subagent] async background error runId=${record.runId}: ${err instanceof Error ? err.message : String(err)}`);
-        // SUB-4 補完 Discord 通知
-      });
+      // 非同步：背景執行，立即回傳 runId（SUB-4）
+      runChildFn()
+        .then(async () => {
+          const { sendSubagentNotification } = await import("../../core/subagent-discord-bridge.js");
+          await sendSubagentNotification(record);
+        })
+        .catch(async (err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.warn(`[spawn-subagent] async background error runId=${record.runId}: ${msg}`);
+          const { sendSubagentNotification } = await import("../../core/subagent-discord-bridge.js");
+          await sendSubagentNotification(record, { error: true });
+        });
 
       return {
         result: {

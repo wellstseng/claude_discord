@@ -51,6 +51,7 @@ import { getProviderRegistry } from "./providers/registry.js";
 import { agentLoop } from "./core/agent-loop.js";
 import { eventBus } from "./core/event-bus.js";
 import { handleAgentLoopReply } from "./core/reply-handler.js";
+import { setDiscordClient, getSubagentThreadBinding } from "./core/subagent-discord-bridge.js";
 
 // ── 訊息去重 ─────────────────────────────────────────────────────────────────
 
@@ -177,6 +178,11 @@ export function createDiscordClient(): Client {
   client.on("messageCreate", (message: Message) => {
     // 每次都讀最新的全域 config，支援 hot-reload
     void handleMessage(message, config);
+  });
+
+  // SUB-5：持久子 agent Discord 通知 + thread 建立用
+  client.once("ready", () => {
+    setDiscordClient(client);
   });
 
   return client;
@@ -358,6 +364,38 @@ async function handleMessage(
       return;
     }
     // ─────────────────────────────────────────────────────────────────────────
+
+    // ── SUB-5：Persistent Subagent Thread 路由 ────────────────────────────
+    // 若此頻道是子 agent 綁定的 thread → 直接路由到子 session，跳過父 session
+    if (isPlatformReady()) {
+      const boundChildKey = getSubagentThreadBinding(firstMessage.channelId);
+      if (boundChildKey) {
+        const { accountId } = resolveDiscordIdentity(
+          firstMessage.author.id,
+          config.admin?.allowedUserIds ?? [],
+        );
+        const providerRegistry = getProviderRegistry();
+        const provider = providerRegistry.resolve();
+        const threadGen = agentLoop(combinedText, {
+          platform: "discord",
+          channelId: firstMessage.channelId,
+          accountId,
+          provider,
+          turnTimeoutMs: config.turnTimeoutMs,
+          showToolCalls: config.showToolCalls as "all" | "summary" | "none",
+          _sessionKeyOverride: boundChildKey,
+          allowSpawn: false,
+        }, {
+          sessionManager: getPlatformSessionManager(),
+          permissionGate: getPlatformPermissionGate(),
+          toolRegistry: getPlatformToolRegistry(),
+          safetyGuard: getPlatformSafetyGuard(),
+          eventBus,
+        });
+        void handleAgentLoopReply(threadGen, firstMessage, config);
+        return;
+      }
+    }
 
     // ── 路由：新平台路徑 vs 舊 Claude CLI 路徑 ────────────────────────────
     if (isPlatformReady()) {

@@ -31,6 +31,7 @@ export interface SubagentRunRecord {
   error?: string;
   abortController: AbortController;
   discordChannelId?: string;       // async 模式通知用
+  discordThreadId?: string;        // mode:session thread 綁定
   keepSession: boolean;
   accountId: string;               // 繼承父 accountId
   createdAt: number;
