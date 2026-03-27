@@ -34,6 +34,46 @@ import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
 
 const MAX_LOOPS = 20;
 
+// ── LLM 呼叫重試 + backoff ────────────────────────────────────────────────────
+
+async function callWithRetry<T>(
+  fn: () => Promise<T>,
+  opts: { maxAttempts: number; baseMs: number; maxMs: number; signal?: AbortSignal },
+): Promise<T> {
+  for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= opts.maxAttempts) throw err;
+      if (opts.signal?.aborted) throw err;
+
+      const msg = err instanceof Error ? err.message : String(err);
+
+      // 判斷是否可重試
+      const statusMatch = msg.match(/HTTP (\d+)/);
+      const status = statusMatch ? parseInt(statusMatch[1]) : 0;
+      if (status >= 400 && status < 500 && status !== 429) throw err; // 4xx 非 rate limit → 不重試
+
+      // 429 → 讀 Retry-After（單位：秒）
+      let delay: number;
+      if (status === 429) {
+        const retryAfterMatch = msg.match(/retry-after[:\s]+(\d+)/i);
+        delay = retryAfterMatch ? parseInt(retryAfterMatch[1]) * 1000 : opts.baseMs;
+      } else {
+        const jitter = Math.random() * opts.baseMs * 0.1;
+        delay = Math.min(opts.baseMs * Math.pow(2, attempt - 1) + jitter, opts.maxMs);
+      }
+
+      log.warn(`[agent-loop] retry attempt=${attempt}/${opts.maxAttempts} status=${status || "network"} wait=${Math.round(delay)}ms`);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, delay);
+        opts.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("aborted")); }, { once: true });
+      });
+    }
+  }
+  throw new Error("unreachable");
+}
+
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
 export interface AgentLoopOpts {
@@ -66,6 +106,12 @@ export interface AgentLoopOpts {
    * 子 agent 傳入 false — 邏輯面過濾，tool list 不含此工具。
    */
   allowSpawn?: boolean;
+  /** LLM 呼叫失敗重試次數（預設 3） */
+  retryMaxAttempts?: number;
+  /** 重試 backoff 基礎毫秒（預設 1000） */
+  retryBaseMs?: number;
+  /** 重試 backoff 最大毫秒（預設 30000） */
+  retryMaxMs?: number;
   /** 子 agent 工作目錄（spawn 時繼承父設定） */
   workspaceDir?: string;
   /**
@@ -252,18 +298,26 @@ export async function* agentLoop(
 
   try {
     while (loopCount++ < MAX_LOOPS) {
-      // ── 5a. LLM 呼叫 ──────────────────────────────────────────────────────
+      // ── 5a. LLM 呼叫（帶重試）────────────────────────────────────────────
       let streamResult;
       try {
-        streamResult = await provider.stream(messages, {
-          systemPrompt: systemPrompt || undefined,
-          tools: toolDefs.length > 0 ? toolDefs.map(d => ({
-            name: d.name,
-            description: d.description,
-            input_schema: d.input_schema,
-          })) : undefined,
-          abortSignal: controller.signal,
-        });
+        streamResult = await callWithRetry(
+          () => provider.stream(messages, {
+            systemPrompt: systemPrompt || undefined,
+            tools: toolDefs.length > 0 ? toolDefs.map(d => ({
+              name: d.name,
+              description: d.description,
+              input_schema: d.input_schema,
+            })) : undefined,
+            abortSignal: controller.signal,
+          }),
+          {
+            maxAttempts: opts.retryMaxAttempts ?? 3,
+            baseMs: opts.retryBaseMs ?? 1000,
+            maxMs: opts.retryMaxMs ?? 30_000,
+            signal: controller.signal,
+          },
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         yield { type: "error", message: `LLM 呼叫失敗：${msg}` };
