@@ -31,14 +31,14 @@ export class OpenAICompatProvider implements LLMProvider {
 
   private baseUrl: string;
   private model: string;
-  private apiKey?: string;
+  private token?: string;
 
   constructor(id: string, entry: ProviderEntry) {
     this.id = id;
     this.name = `OpenAI-Compat (${id})`;
     this.baseUrl = (entry.baseUrl ?? entry.host ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.model = entry.model ?? DEFAULT_MODEL;
-    this.apiKey = entry.apiKey;
+    this.token = entry.token;
     // 預設支援 tool_use（Ollama 新版支援）；可由 config 覆寫
     this.supportsToolUse = (entry as Record<string, unknown>)["supportsToolUse"] !== false;
   }
@@ -99,7 +99,7 @@ export class OpenAICompatProvider implements LLMProvider {
     if (opts.temperature !== undefined) body["temperature"] = opts.temperature;
 
     const headers: Record<string, string> = { "content-type": "application/json" };
-    if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
 
     log.debug(`[openai-compat:${this.id}] POST /v1/chat/completions model=${this.model} msgs=${messages.length}`);
 

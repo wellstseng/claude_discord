@@ -114,8 +114,8 @@ export interface ProviderEntry {
   oauthRefreshUrl?: string;
   /** OAuth client_id（codex-oauth 用，部分 provider 需要） */
   oauthClientId?: string;
-  /** API Key（支援環境變數展開） */
-  apiKey?: string;
+  /** HTTP 認證 Token（支援環境變數展開，如 ${ANTHROPIC_API_KEY}） */
+  token?: string;
   /** 模型 ID */
   model?: string;
   /** OpenAI 相容 baseUrl */

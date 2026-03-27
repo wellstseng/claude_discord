@@ -4,7 +4,7 @@
  *
  * 自己寫 fetch + SSE 解析，不依賴任何 SDK。
  * 認證支援：
- *   - apiKey → `x-api-key` header
+ *   - token → `x-api-key` header
  *   - setupToken → `Authorization: Bearer {token}` + `anthropic-beta: interstitial-1`
  *
  * 未來如需替換底層（@anthropic-ai/sdk 等），只改此檔，介面不變。
@@ -31,19 +31,19 @@ export class ClaudeApiProvider implements LLMProvider {
   readonly supportsToolUse = true;
   readonly maxContextTokens = 200_000;
 
-  private apiKey?: string;
+  private token?: string;
   private model: string;
   private thinkingEnabled: boolean;
 
   constructor(id: string, entry: ProviderEntry) {
     this.id = id;
     this.name = `Claude API (${id})`;
-    this.apiKey = entry.apiKey;
+    this.token = entry.token;
     this.model = entry.model ?? DEFAULT_MODEL;
     this.thinkingEnabled = entry.thinking ?? false;
 
-    if (!this.apiKey) {
-      log.warn(`[claude-api:${id}] 未設定 apiKey，請設定環境變數 ANTHROPIC_API_KEY`);
+    if (!this.token) {
+      log.warn(`[claude-api:${id}] 未設定 token，請在 config 設定 "token": "\${ANTHROPIC_API_KEY}"`);
     }
   }
 
@@ -60,10 +60,10 @@ export class ClaudeApiProvider implements LLMProvider {
       "anthropic-version": API_VERSION,
     };
 
-    if (this.apiKey) {
-      headers["x-api-key"] = this.apiKey;
+    if (this.token) {
+      headers["x-api-key"] = this.token;
     } else {
-      throw new Error(`[claude-api:${this.id}] 無認證資訊（apiKey 未設定）`);
+      throw new Error(`[claude-api:${this.id}] 無認證資訊（token 未設定）`);
     }
 
     const body: Record<string, unknown> = {

@@ -49,12 +49,12 @@
   // 若不填 type，系統依以下順序自動判斷：
   //   entry.wsUrl → openclaw | id=claude-api → claude
   //   id 含 ollama → ollama | entry.host/baseUrl → openai-compat
-  //   entry.apiKey（無 baseUrl）→ claude
+  //   entry.token（無 baseUrl）→ claude
   "providers": {
-    // Claude API：apiKey 使用 ${VAR} 語法引用環境變數
+    // Claude API：token 使用 ${VAR} 語法引用環境變數
     // 需先設定環境變數 ANTHROPIC_API_KEY（export 或 .env）
     "claude-api": {
-      "apiKey": "${ANTHROPIC_API_KEY}",
+      "token": "${ANTHROPIC_API_KEY}",
       "model": "claude-sonnet-4-6"
     },
 
@@ -70,7 +70,7 @@
     // "openai-local": {
     //   "type": "openai-compat",
     //   "baseUrl": "http://localhost:8080",
-    //   "apiKey": "sk-...",
+    //   "token": "sk-...",
     //   "model": "gpt-4o"
     // },
 

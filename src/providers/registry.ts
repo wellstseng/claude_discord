@@ -110,7 +110,7 @@ export async function buildProviderRegistry(
     else if (id === "claude-api") providerType = "claude";
     else if (id === "ollama" || id.startsWith("ollama-")) providerType = "ollama";
     else if (entry.host || entry.baseUrl) providerType = "openai-compat";
-    else if (entry.apiKey)        providerType = "claude";  // 無 baseUrl → 預設 Anthropic
+    else if (entry.token)         providerType = "claude";  // 無 baseUrl → 預設 Anthropic
 
     if (providerType === "codex-oauth") {
       const { CodexOAuthProvider } = await import("./codex-oauth.js");
