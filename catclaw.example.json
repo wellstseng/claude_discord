@@ -49,11 +49,11 @@
   // 若不填 type，系統依以下順序自動判斷：
   //   entry.wsUrl → openclaw | id=claude-api → claude
   //   id 含 ollama → ollama | entry.host/baseUrl → openai-compat
-  //   entry.token（無 baseUrl）→ claude
+  //   entry.token（無 baseUrl）→ claude-oauth
   "providers": {
     // Claude API：token 使用 ${VAR} 語法引用環境變數
     // 需先設定環境變數 ANTHROPIC_TOKEN（export 或 .env）
-    "claude-api": {
+    "claude-oauth": {
       "token": "${ANTHROPIC_TOKEN}",
       "model": "claude-sonnet-4-6"
     },
@@ -92,7 +92,7 @@
   // roles.default 為全域預設（必填）
   "providerRouting": {
     "roles": {
-      "default": "claude-api"
+      "default": "claude-oauth"
     }
     // 範例：特定頻道走 ollama
     // "channels": {
@@ -162,7 +162,7 @@
   "agents": {
     // 主要對話 agent（預設）
     "default": {
-      "provider": "claude-api",
+      "provider": "claude-oauth",
       "systemPrompt": "你是 catclaw，一個整合 Discord 的 AI 助手。"
     }
     // 範例：獨立 agent 給特定頻道或排程任務使用
@@ -198,7 +198,7 @@
     // subagent 任務預設使用的 accountId（不填預設 _cron）
     "defaultAccountId": "_cron",
     // subagent 任務預設 provider（不填則由 providerRouting 決定）
-    "defaultProvider": "claude-api",
+    "defaultProvider": "claude-oauth",
     "jobs": [
       // action.type 可選：
       //   message  → 傳送靜態訊息到指定頻道
@@ -212,7 +212,7 @@
       //   "action": {
       //     "type": "subagent",
       //     "task": "列出今天需要注意的事項並整理成摘要",
-      //     "provider": "claude-api",      // 不填則用 defaultProvider
+      //     "provider": "claude-oauth",      // 不填則用 defaultProvider
       //     "timeoutMs": 120000,
       //     "notify": "<Discord 頻道 ID>" // 任務完成後發送結果
       //   }

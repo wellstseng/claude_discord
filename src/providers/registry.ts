@@ -104,18 +104,18 @@ export async function buildProviderRegistry(
     let provider: LLMProvider | null = null;
 
     // 型別解析優先序：entry.type > wsUrl > id heuristic > field heuristic
-    let providerType: "claude" | "openai-compat" | "codex-oauth" | "openclaw" | "ollama" | null = null;
+    let providerType: "claude-oauth" | "openai-compat" | "codex-oauth" | "openclaw" | "ollama" | null = null;
     if (entry.type)               providerType = entry.type;
     else if (entry.wsUrl)         providerType = "openclaw";
-    else if (id === "claude-api") providerType = "claude";
+    else if (id === "claude-api" || id === "claude-oauth") providerType = "claude-oauth";
     else if (id === "ollama" || id.startsWith("ollama-")) providerType = "ollama";
     else if (entry.host || entry.baseUrl) providerType = "openai-compat";
-    else if (entry.token)         providerType = "claude";  // 無 baseUrl → 預設 Anthropic
+    else if (entry.token)         providerType = "claude-oauth";  // 無 baseUrl → 預設 Anthropic
 
     if (providerType === "codex-oauth") {
       const { CodexOAuthProvider } = await import("./codex-oauth.js");
       provider = new CodexOAuthProvider(id, entry);
-    } else if (providerType === "claude") {
+    } else if (providerType === "claude-oauth") {
       const { ClaudeApiProvider } = await import("./claude-api.js");
       provider = new ClaudeApiProvider(id, entry);
     } else if (providerType === "ollama") {

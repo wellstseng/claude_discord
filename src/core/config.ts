@@ -93,12 +93,12 @@ export interface HistoryConfig {
 export interface ProviderEntry {
   /**
    * Provider 型別（明確指定時優先於自動偵測）
-   * - "claude"        → ClaudeApiProvider（Anthropic Messages API）
+   * - "claude-oauth"  → ClaudeApiProvider（Anthropic Messages API，token 或 OAuth）
    * - "openai-compat" → OpenAICompatProvider（/v1/chat/completions）
    * - "codex-oauth"   → CodexOAuthProvider（OpenAI Codex + OAuth 自動刷新）
    * - "ollama"        → OllamaProvider（/api/chat NDJSON，支援 think 參數）
    */
-  type?: "claude" | "openai-compat" | "codex-oauth" | "ollama";
+  type?: "claude-oauth" | "openai-compat" | "codex-oauth" | "ollama";
   /**
    * Ollama thinking 模式（僅 type=ollama 有效，qwen3 等 thinking 模型使用）
    * true = 送出 think:true 參數，回應包含推理過程
