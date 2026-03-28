@@ -60,7 +60,7 @@ export type CronSchedule =
 
 export type CronAction =
   | { type: "message"; channelId: string; text: string }
-  | { type: "claude"; channelId: string; prompt: string }
+  | { type: "claude-acp"; channelId: string; prompt: string }  // 透過 ACP（Claude CLI spawn）執行 turn
   | { type: "exec"; command: string; channelId?: string; silent?: boolean; timeoutSec?: number; shell?: string; background?: boolean }
   | {
       type: "subagent";

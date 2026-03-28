@@ -5,7 +5,7 @@
  * 核心機制：
  * 1. setTimeout loop 輪詢到期 job（2-60s 間隔）
  * 2. croner 解析 cron 表達式、計算下次執行時間
- * 3. 三種 action：message（直接發訊息）/ claude（spawn Claude turn）/ subagent（新平台 agentLoop）
+ * 3. 四種 action：message / claude-acp（ACP spawn turn）/ exec / subagent（新平台 agentLoop）
  * 4. Job 定義 + 狀態統一持久化到 data/cron-jobs.json
  * 5. fs.watch() 監聽 cron-jobs.json 變更，自動 hot-reload
  * 6. 重試 + 指數退避
@@ -312,7 +312,7 @@ async function execMessage(channelId: string, text: string): Promise<void> {
 }
 
 /**
- * 執行 claude action：spawn Claude turn，收集回覆文字，發送到頻道
+ * 執行 claude-acp action：透過 ACP（Claude CLI spawn）執行 turn，收集回覆文字，發送到頻道
  */
 async function execClaude(channelId: string, prompt: string): Promise<void> {
   if (!discordClient) throw new Error("Discord client 未初始化");
@@ -528,8 +528,10 @@ async function runJob(job: CronJobRuntime): Promise<void> {
       await execCommand(entry.action.command, entry.action.channelId, entry.action.silent, entry.action.timeoutSec, entry.action.shell, entry.action.background);
     } else if (entry.action.type === "subagent") {
       await execSubagent(entry.action);
-    } else {
+    } else if (entry.action.type === "claude-acp") {
       await execClaude(entry.action.channelId, entry.action.prompt);
+    } else {
+      log.warn(`[cron] 未知 action type：${(entry.action as { type: string }).type}，跳過`);
     }
 
     // 成功
