@@ -3,6 +3,21 @@
  * 監聽 signal/ 目錄，寫入 signal/RESTART 觸發重啟
  * dist/ 變更（tsc 編譯）不會觸發重啟
  */
+const { homedir } = require('os');
+const { existsSync, readFileSync } = require('fs');
+const { resolve } = require('path');
+
+// 手動載入 .env（dotenv 未安裝時的替代方案）
+const envPath = resolve(__dirname, '.env');
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
+    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+  }
+}
+
+const expandHome = (p) => p?.replace(/^~/, homedir()) ?? undefined;
+
 module.exports = {
   apps: [{
     name: "catclaw",
@@ -10,11 +25,10 @@ module.exports = {
     watch: ["signal"],
     watch_delay: 1000,
     autorestart: true,
+    merge_logs: true,
     env: {
-      // 允許外部環境變數覆寫，fallback 到 ~/.catclaw 預設值
-      // 用 require('os').homedir() 取得 HOME，避免 PM2 環境 process.env.HOME 為 undefined
-      CATCLAW_CONFIG_DIR: process.env.CATCLAW_CONFIG_DIR || `${require('os').homedir()}/.catclaw`,
-      CATCLAW_WORKSPACE: process.env.CATCLAW_WORKSPACE || `${require('os').homedir()}/.catclaw/workspace`,
+      CATCLAW_CONFIG_DIR: expandHome(process.env.CATCLAW_CONFIG_DIR) || `${homedir()}/.catclaw`,
+      CATCLAW_WORKSPACE: expandHome(process.env.CATCLAW_WORKSPACE) || `${homedir()}/.catclaw/workspace`,
     },
   }]
 };

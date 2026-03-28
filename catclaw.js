@@ -246,9 +246,12 @@ switch (cmd) {
     console.log("🔄 catclaw 已重啟");
     break;
 
-  case "logs":
+  case "logs": {
+    const clearFlag = process.argv.includes("-c");
+    if (clearFlag) run("npx pm2 flush catclaw");
     run("npx pm2 logs catclaw");
     break;
+  }
 
   case "status":
     run("npx pm2 status");
@@ -282,7 +285,8 @@ switch (cmd) {
   }
 
   default:
-    console.log("用法：node catclaw.js [init|start [-f]|stop|restart|logs|status|reset-session [channelId]]");
+    console.log("用法：node catclaw.js [init|start [-f]|stop|restart|logs [-c]|status|reset-session [channelId]]");
     console.log("      start -f  強制 delete + re-register PM2（重構後或跨環境部署時使用）");
+    console.log("      logs -c   清除 log 後再顯示");
     process.exit(1);
 }

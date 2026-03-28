@@ -28,17 +28,26 @@ function shouldLog(level: LogLevel): boolean {
   return LEVELS[level] >= LEVELS[currentLevel];
 }
 
+function ts(): string {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  return `[${hh}:${mm}:${ss}.${ms}]`;
+}
+
 export const log = {
   debug: (...args: unknown[]) => {
-    if (shouldLog("debug")) console.log(...args);
+    if (shouldLog("debug")) console.log(ts(), ...args);
   },
   info: (...args: unknown[]) => {
-    if (shouldLog("info")) console.log(...args);
+    if (shouldLog("info")) console.log(ts(), ...args);
   },
   warn: (...args: unknown[]) => {
-    if (shouldLog("warn")) console.warn(...args);
+    if (shouldLog("warn")) console.warn(ts(), ...args);
   },
   error: (...args: unknown[]) => {
-    if (shouldLog("error")) console.error(...args);
+    if (shouldLog("error")) console.error(ts(), ...args);
   },
 };

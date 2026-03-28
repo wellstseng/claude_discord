@@ -110,7 +110,9 @@ export class OllamaProvider implements LLMProvider {
     };
 
     // think 參數（thinking 模型用）
-    if (this.think) body["think"] = true;
+    // 必須顯式送出，否則 qwen3 等模型對複雜問題會自動進入 thinking mode
+    // → content 為空，text=0字
+    body["think"] = this.think;
 
     // tool_use 支援
     if (opts.tools?.length && this.supportsToolUse) {
