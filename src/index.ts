@@ -33,7 +33,10 @@ setLogLevel(config.logLevel);
 log.info(`[catclaw] 啟動`)
 
 // ── --agent 模式：若有指定 agent，載入合併後設定 ─────────────────────────────
-const catclawDir = resolve(homedir(), ".catclaw");
+// catclawDir 優先讀 CATCLAW_CONFIG_DIR 環境變數，fallback ~/.catclaw
+const catclawDir = process.env.CATCLAW_CONFIG_DIR
+  ? resolve(process.env.CATCLAW_CONFIG_DIR)
+  : resolve(homedir(), ".catclaw");
 const distDir = dirname(fileURLToPath(import.meta.url));
 const agentId = parseAgentArg();
 const platformConfig = agentId
