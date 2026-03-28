@@ -467,6 +467,13 @@ export function resolveWorkspaceDir(): string {
   return resolve(dir);
 }
 
+/** 解析 workspace 目錄（CATCLAW_WORKSPACE，fallback CONFIG_DIR/workspace） */
+export function resolveWorkspaceDirSafe(): string {
+  return process.env.CATCLAW_WORKSPACE
+    ? resolve(process.env.CATCLAW_WORKSPACE)
+    : join(resolveCatclawDir(), "workspace");
+}
+
 export function resolveClaudeBin(): string {
   return process.env.CATCLAW_CLAUDE_BIN ?? "claude";
 }

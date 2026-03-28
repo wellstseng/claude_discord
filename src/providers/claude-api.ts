@@ -12,7 +12,7 @@ import type {
   LLMProvider, Message, ProviderOpts, StreamResult, ProviderEvent, ToolCall,
 } from "./base.js";
 import type { ProviderEntry } from "../core/config.js";
-import { resolveWorkspaceDir, resolveCatclawDir } from "../core/config.js";
+import { resolveWorkspaceDirSafe } from "../core/config.js";
 import { AuthProfileStore, type CooldownReason } from "./auth-profile-store.js";
 
 // ── pi-ai imports ─────────────────────────────────────────────────────────────
@@ -159,9 +159,7 @@ export class ClaudeApiProvider implements LLMProvider {
     this.modelId = entry.model ?? DEFAULT_MODEL;
 
     // 多憑證：從 {workspace}/agents/default/auth-profiles.json 載入
-    let workspaceDir: string;
-    try { workspaceDir = resolveWorkspaceDir(); }
-    catch { workspaceDir = join(resolveCatclawDir(), "workspace"); }
+    const workspaceDir = resolveWorkspaceDirSafe();
 
     const persistPath = join(workspaceDir, "data", "auth-profiles");
     const credentialsFilePath = join(workspaceDir, "agents", "default", "auth-profile.json");

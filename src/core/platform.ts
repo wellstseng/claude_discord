@@ -57,14 +57,17 @@ let _ready = false;
  * 僅在 config.providers 有設定時才啟動（否則 skip，保持舊路徑）。
  *
  * @param config 全域設定
- * @param catclawDir ~/.catclaw 路徑
+ * @param catclawDir CATCLAW_CONFIG_DIR（config/memory/accounts）
  * @param distDir dist/ 路徑（用於 loadFromDirectory）
+ * @param workspaceDir CATCLAW_WORKSPACE（data/agents/CATCLAW.md）
  */
 export async function initPlatform(
   config: BridgeConfig,
   catclawDir: string,
   distDir: string,
+  workspaceDir?: string,
 ): Promise<void> {
+  const wsDir = workspaceDir ?? join(catclawDir, "workspace");
   log.info("[platform] 初始化新平台子系統...");
 
   // ── 1. AccountRegistry ─────────────────────────────────────────────────────
@@ -114,11 +117,11 @@ export async function initPlatform(
     ttlHours: config.sessionTtlHours ?? 168,
     maxHistoryTurns: 50,
     compactAfterTurns: 30,
-    persistPath: join(catclawDir, "workspace", "data", "sessions-v2"),
+    persistPath: join(wsDir, "data", "sessions-v2"),
   };
   _sessionManager = initSessionManager(sessionCfg);
   // V1 → V2 session 檔名遷移（加 platform 前綴，冪等）
-  const sessionPersistDir = join(catclawDir, "workspace", "data", "sessions-v2");
+  const sessionPersistDir = join(wsDir, "data", "sessions-v2");
   renameSessions({ persistDir: sessionPersistDir, platform: "discord" });
   await _sessionManager.init();
 
@@ -127,7 +130,7 @@ export async function initPlatform(
   initIdentityLinker(_accountRegistry);
 
   // ── 8. Project Manager ─────────────────────────────────────────────────────
-  _projectManager = initProjectManager(join(catclawDir, "workspace", "data"));
+  _projectManager = initProjectManager(join(wsDir, "data"));
 
   // ── 9. Memory Engine ───────────────────────────────────────────────────────
   // HomeClaudeCode：若啟用，globalPath 改指向 ~/.claude/memory/global
@@ -191,14 +194,14 @@ export async function initPlatform(
   log.info("[platform] SubagentRegistry 初始化完成");
 
   // ── 9.7 Turn Audit Log + Tool Log Store ────────────────────────────────────
-  const auditDataDir = join(catclawDir, "workspace", "data");
+  const auditDataDir = join(wsDir, "data");
   initTurnAuditLog(auditDataDir);
   initToolLogStore(auditDataDir);
   initInboundHistoryStore(auditDataDir);
   initSessionSnapshotStore(auditDataDir);
 
   // ── 10. Workflow Engine ─────────────────────────────────────────────────────
-  const workflowDataDir = join(catclawDir, "workspace", "data", "workflow");
+  const workflowDataDir = join(wsDir, "data", "workflow");
   const memoryDir = join(catclawDir, "memory");
   initWorkflow(
     config.workflow,

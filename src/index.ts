@@ -14,7 +14,7 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { config, watchConfig, resolveCatclawDir } from "./core/config.js";
+import { config, watchConfig, resolveCatclawDir, resolveWorkspaceDirSafe } from "./core/config.js";
 import { setLogLevel } from "./logger.js";
 import { log } from "./logger.js";
 import { createDiscordClient } from "./discord.js";
@@ -42,7 +42,8 @@ const platformConfig = agentId
 if (agentId) log.info(`[bridge] Agent 模式：${agentId}`);
 
 // ── 新平台子系統初始化（僅當 config.providers 有設定時啟用）──────────────────
-await initPlatform(platformConfig, catclawDir, distDir);
+const workspaceDir = resolveWorkspaceDirSafe();
+await initPlatform(platformConfig, catclawDir, distDir, workspaceDir);
 
 // 從磁碟載入上次的 session 快取（重啟後延續對話上下文）
 loadSessions();
