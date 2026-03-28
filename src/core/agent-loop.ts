@@ -30,6 +30,7 @@ import { getToolLogStore, ToolLogStore } from "./tool-log-store.js";
 import { getSessionSnapshotStore } from "./session-snapshot.js";
 import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
 import type { MemoryEngine } from "../memory/engine.js";
+import { createApproval } from "./exec-approval.js";
 
 // ── 常數 ─────────────────────────────────────────────────────────────────────
 
@@ -141,6 +142,19 @@ export interface AgentLoopOpts {
    * 正常流程不使用此欄位。
    */
   _sessionKeyOverride?: string;
+  /**
+   * 執行指令前 DM 確認設定。
+   * 啟用時，run_command 執行前會送 DM 給指定使用者等待確認。
+   * 回呼由呼叫端提供（需整合 discord client）。
+   */
+  execApproval?: {
+    enabled: boolean;
+    /** 送出 DM 的非同步函式，呼叫端負責整合 discord client */
+    sendDm: (dmUserId: string, content: string) => Promise<void>;
+    dmUserId: string;
+    timeoutMs?: number;
+  };
+
   /**
    * 記憶 Recall 選項。
    * 啟用時於 LLM 呼叫前注入向量搜尋結果到 system prompt。
@@ -366,6 +380,8 @@ export async function* agentLoop(
 
   eventBus.emit("turn:before", { accountId, channelId, sessionKey, prompt, projectId });
 
+  log.debug(`[agent-loop] turn start sessionKey=${sessionKey} turnCount=${session.turnCount} accountId=${accountId} history=${processedHistory.length} msgs systemPrompt=${systemPrompt.length} chars`);
+
   try {
     while (loopCount++ < MAX_LOOPS) {
       // ── 5a. LLM 呼叫（帶重試）────────────────────────────────────────────
@@ -390,7 +406,13 @@ export async function* agentLoop(
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        yield { type: "error", message: `LLM 呼叫失敗：${msg}` };
+        log.warn(`[agent-loop] LLM 呼叫失敗 provider=${provider.id} loop=${loopCount}: ${msg}`);
+        // 辨識「所有憑證耗盡」→ 不重試，直接回報
+        if (msg.includes("所有 API 憑證都在 cooldown")) {
+          yield { type: "error", message: msg };
+          return;
+        }
+        yield { type: "error", message: `LLM 呼叫失敗：[${provider.id}] ${msg}` };
         eventBus.emit("provider:error", provider.id, err instanceof Error ? err : new Error(msg));
         return;
       }
@@ -505,6 +527,36 @@ export async function* agentLoop(
           continue;
         }
 
+        // ── Exec Approval（run_command DM 確認）──────────────────────────────
+        if (call.name === "run_command" && opts.execApproval?.enabled) {
+          const command = String((hookResult.params as Record<string, unknown>)["command"] ?? "");
+          const timeoutMs = opts.execApproval.timeoutMs ?? 60_000;
+          const [approvalId, approvalPromise] = createApproval(command, channelId, timeoutMs);
+          const dmContent = [
+            `🔐 **CatClaw 執行確認**`,
+            `頻道：<#${channelId}>`,
+            `指令：\`\`\`\n${command}\n\`\`\``,
+            `回覆 \`✅ ${approvalId}\` 允許，\`❌ ${approvalId}\` 拒絕（${Math.round(timeoutMs / 1000)}s 後自動拒絕）`,
+          ].join("\n");
+          try {
+            await opts.execApproval.sendDm(opts.execApproval.dmUserId, dmContent);
+            log.info(`[agent-loop] exec-approval 等待確認 approvalId=${approvalId} command="${command.slice(0, 60)}"`);
+          } catch (err) {
+            log.warn(`[agent-loop] exec-approval 送 DM 失敗，自動拒絕：${err instanceof Error ? err.message : String(err)}`);
+            toolResults.push({ tool_use_id: call.id, content: "錯誤：DM 確認失敗，指令未執行", is_error: true });
+            yield { type: "tool_blocked", name: call.name, reason: "DM 確認失敗" };
+            continue;
+          }
+          const approved = await approvalPromise;
+          if (!approved) {
+            log.info(`[agent-loop] exec-approval 拒絕 approvalId=${approvalId}`);
+            toolResults.push({ tool_use_id: call.id, content: "錯誤：使用者拒絕執行（或確認逾時）", is_error: true });
+            yield { type: "tool_blocked", name: call.name, reason: "使用者拒絕執行指令" };
+            continue;
+          }
+          log.info(`[agent-loop] exec-approval 允許 approvalId=${approvalId}`);
+        }
+
         if (opts.showToolCalls !== "none") {
           yield { type: "tool_start", name: call.name, id: call.id, params: hookResult.params };
         }
@@ -525,12 +577,16 @@ export async function* agentLoop(
         }
 
         tracker.recordToolCall(call.name, hookResult.params, toolResult.result, toolResult.error, durationMs);
+        log.debug(`[agent-loop] tool ${call.name} ${toolResult.error ? "error" : "ok"} ${durationMs}ms`);
 
         const rawResultText = toolResult.error
           ? `錯誤：${toolResult.error}`
           : JSON.stringify(toolResult.result ?? null);
         const cap = toolRegistry.get(call.name)?.resultTokenCap ?? DEFAULT_RESULT_TOKEN_CAP;
         const resultText = truncateToolResult(rawResultText, cap);
+        if (resultText.length < rawResultText.length) {
+          log.debug(`[agent-loop] tool ${call.name} result truncated ${rawResultText.length} → ${resultText.length} chars`);
+        }
 
         toolResults.push({
           tool_use_id: call.id,

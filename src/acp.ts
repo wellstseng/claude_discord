@@ -13,12 +13,11 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log } from "./logger.js";
 import { resolveWorkspaceDir, resolveClaudeBin, config } from "./core/config.js";
-import { buildSkillsPrompt } from "./skills/registry.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -114,30 +113,6 @@ export async function* runClaudeTurn(
     "--dangerously-skip-permissions",
   ];
 
-  // ── System Prompt（AGENTS.md）──────────────────────────────────────────────
-  // 從 workspace 根目錄讀取 AGENTS.md 作為 system prompt
-  // 檔案不存在時跳過，不強制（讓 Claude 用預設行為）
-  const agentsPath = join(cwd, "AGENTS.md");
-  let systemPrompt = "";
-  if (existsSync(agentsPath)) {
-    try {
-      systemPrompt = readFileSync(agentsPath, "utf-8");
-      log.debug(`[acp] 載入 AGENTS.md: ${agentsPath} (${systemPrompt.length} 字)`);
-    } catch (err) {
-      log.warn(`[acp] 讀取 AGENTS.md 失敗：${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  // 注入 Prompt-type Skill 系統提示
-  const skillsPrompt = buildSkillsPrompt();
-  if (skillsPrompt) {
-    systemPrompt += skillsPrompt;
-    log.debug(`[acp] 注入 skills prompt (+${skillsPrompt.length} 字)`);
-  }
-
-  if (systemPrompt) {
-    args.push("--system-prompt", systemPrompt);
-  }
 
   // ── MCP Discord Tool（Phase 0 過渡，S4/S5 完成後可移除）──────────────────
   // 在 workspace 根目錄寫入 .mcp.json，Claude CLI 啟動時自動載入

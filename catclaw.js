@@ -92,7 +92,7 @@ function ensureInitialized() {
     : join(homedir(), ".catclaw", "workspace");
 
   const catclawJsonPath = join(configDir, "catclaw.json");
-  const agentsPath = join(workspace, "AGENTS.md");
+  const catclawMdPath = join(workspace, "CATCLAW.md");
   const dataDir = join(workspace, "data");
   const activeTurnsDir = join(dataDir, "active-turns");
 
@@ -136,9 +136,9 @@ function ensureInitialized() {
     }
   }
 
-  // 建立最小 AGENTS.md（若不存在）
-  if (!existsSync(agentsPath)) {
-    const defaultAgents = `# AGENTS.md — CatClaw Bot 行為規則
+  // 建立預設 CATCLAW.md（若不存在）
+  if (!existsSync(catclawMdPath)) {
+    const defaultCatclaw = `# CATCLAW.md — CatClaw Bot 行為規則
 
 你是 CatClaw，一個專案知識代理人。
 
@@ -167,8 +167,8 @@ function ensureInitialized() {
 你的工作目錄是 \`${workspace}\`。
 專案原始碼在 \`${__dirname}\`。
 `;
-    writeFileSync(agentsPath, defaultAgents, "utf-8");
-    console.log(`📝 建立 AGENTS.md：${agentsPath}`);
+    writeFileSync(catclawMdPath, defaultCatclaw, "utf-8");
+    console.log(`📝 建立 CATCLAW.md：${catclawMdPath}`);
     created = true;
   }
 
