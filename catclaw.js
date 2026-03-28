@@ -22,6 +22,24 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** String-aware JSONC comment stripper（跳過字串內的 //，如 URL） */
+function stripJsoncComments(text) {
+  let result = "";
+  let inString = false;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "\\" && inString) { result += ch + (text[i + 1] ?? ""); i += 2; continue; }
+    if (ch === '"') { inString = !inString; result += ch; i++; continue; }
+    if (!inString && ch === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+    result += ch; i++;
+  }
+  return result;
+}
 const run = (cmd) => {
   try {
     execSync(cmd, { cwd: __dirname, stdio: "inherit" });
@@ -106,7 +124,7 @@ function ensureInitialized() {
   } else {
     // 檢查 token 是否還是 placeholder
     try {
-      const raw = readFileSync(catclawJsonPath, "utf-8").replace(/\/\/.*$/gm, "");
+      const raw = stripJsoncComments(readFileSync(catclawJsonPath, "utf-8"));
       const cfg = JSON.parse(raw);
       if (!cfg.discord?.token || cfg.discord.token === "your_discord_bot_token_here" || cfg.discord.token === "") {
         console.warn(`⚠️  ${catclawJsonPath} 中 discord.token 尚未設定`);
