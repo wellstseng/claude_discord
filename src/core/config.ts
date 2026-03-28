@@ -13,7 +13,8 @@
  * - CATCLAW_CLAUDE_BIN：Claude CLI binary 路徑（可選，預設 "claude"）
  */
 
-import { readFileSync, watch } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, watch } from "node:fs";
+import { join } from "node:path";
 import { resolve } from "node:path";
 import type { LogLevel } from "../logger.js";
 import { setLogLevel, log } from "../logger.js";
@@ -202,6 +203,15 @@ export interface SafetyConfig {
   filesystem: {
     protectedPaths: string[];
     credentialPatterns: string[];
+  };
+  /** 執行指令前 DM 確認 */
+  execApproval?: {
+    /** 是否啟用（預設 false） */
+    enabled: boolean;
+    /** 接收確認請求的 Discord User ID */
+    dmUserId: string;
+    /** 等待回覆超時毫秒（預設 60000） */
+    timeoutMs?: number;
   };
 }
 
@@ -454,6 +464,54 @@ export function resolveWorkspaceDir(): string {
 
 export function resolveClaudeBin(): string {
   return process.env.CATCLAW_CLAUDE_BIN ?? "claude";
+}
+
+/**
+ * 讀取 workspace 根目錄的 CATCLAW.md 作為 base system prompt。
+ * 若不存在，自動產生預設 CATCLAW.md 並回傳其內容。
+ * 供所有 channel handler 共用，新增頻道直接呼叫即可。
+ */
+export function loadBaseSystemPrompt(): string {
+  let workspaceDir: string;
+  try { workspaceDir = resolveWorkspaceDir(); } catch { return ""; }
+  const p = join(workspaceDir, "CATCLAW.md");
+  if (existsSync(p)) {
+    try { return readFileSync(p, "utf-8"); } catch { /* fall through */ }
+  }
+  // 自動產生預設 CATCLAW.md
+  const defaultContent = `# CATCLAW.md — CatClaw Bot 行為規則
+
+你是 CatClaw，一個專案知識代理人。
+
+## 重啟機制
+
+當使用者要求重啟 bot 時，依序執行：
+
+1. 編譯程式碼（若有修改）：
+   \`\`\`bash
+   npx tsc
+   \`\`\`
+
+2. 寫入重啟信號（帶入頻道 ID，讓重啟後可回報）：
+   \`\`\`bash
+   node catclaw.js restart
+   \`\`\`
+   或直接寫 signal file：
+   \`\`\`bash
+   echo '{"channelId":"'$CATCLAW_CHANNEL_ID'","time":"'$(date -Iseconds)'"}' > signal/RESTART
+   \`\`\`
+
+重啟完成後，bot 會自動在觸發頻道發送 \`[CatClaw] 已重啟（時間）\`。
+
+## 工作目錄
+
+你的工作目錄是 \`${workspaceDir}\`。
+`;
+  try {
+    writeFileSync(p, defaultContent, "utf-8");
+    log.info(`[config] 已產生預設 CATCLAW.md：${p}`);
+  } catch { /* ignore write error, still return content */ }
+  return defaultContent;
 }
 
 // ── 解析工具 ──────────────────────────────────────────────────────────────────

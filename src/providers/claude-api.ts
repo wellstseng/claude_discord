@@ -1,29 +1,148 @@
 /**
  * @file providers/claude-api.ts
- * @description Claude API Provider — HTTP POST + SSE stream
+ * @description Claude API Provider — 使用 @mariozechner/pi-ai streamSimpleAnthropic
  *
- * 自己寫 fetch + SSE 解析，不依賴任何 SDK。
- * 認證支援：
- *   - token → `x-api-key` header
- *   - setupToken → `Authorization: Bearer {token}` + `anthropic-beta: interstitial-1`
- *
- * 未來如需替換底層（@anthropic-ai/sdk 等），只改此檔，介面不變。
+ * 自動偵測憑證類型（API key / OAuth），pi-ai 負責正確設定 headers。
+ * 多憑證：從 {workspace}/agents/default/auth-profiles.json 載入。
  */
 
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { log } from "../logger.js";
 import type {
   LLMProvider, Message, ProviderOpts, StreamResult, ProviderEvent, ToolCall,
 } from "./base.js";
 import type { ProviderEntry } from "../core/config.js";
+import { resolveWorkspaceDir } from "../core/config.js";
+import { AuthProfileStore, type CooldownReason } from "./auth-profile-store.js";
+
+// ── pi-ai imports ─────────────────────────────────────────────────────────────
+
+import { streamSimpleAnthropic } from "@mariozechner/pi-ai";
+import { getModel } from "@mariozechner/pi-ai";
+import { Type } from "@mariozechner/pi-ai";
+import type {
+  Context as PiContext,
+  Message as PiMessage,
+  UserMessage,
+  AssistantMessage as PiAssistantMessage,
+  ToolResultMessage,
+  TextContent,
+  ToolCall as PiToolCall,
+  AssistantMessageEvent,
+  Tool as PiTool,
+} from "@mariozechner/pi-ai";
 
 // ── 常數 ─────────────────────────────────────────────────────────────────────
 
-const API_BASE = "https://api.anthropic.com";
-const API_VERSION = "2023-06-01";
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_TOKENS = 8192;
 
-// ── Claude API Provider ───────────────────────────────────────────────────────
+// ── 型別轉換：catclaw Message → pi-ai Message ─────────────────────────────────
+
+/** 建立 tool_use_id → toolName 的反查表（從歷史 assistant 訊息） */
+function buildToolNameMap(messages: Message[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const msg of messages) {
+    if (msg.role === "assistant" && Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.type === "tool_use") {
+          map.set(block.id, block.name);
+        }
+      }
+    }
+  }
+  return map;
+}
+
+function toPiMessages(messages: Message[]): PiMessage[] {
+  const toolNameMap = buildToolNameMap(messages);
+  const result: PiMessage[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      if (typeof msg.content === "string") {
+        // 純文字 user 訊息
+        result.push({ role: "user", content: msg.content, timestamp: 0 } satisfies UserMessage);
+      } else {
+        // 有 content blocks：分離 tool_result 和文字
+        const toolResults = msg.content.filter(b => b.type === "tool_result");
+        const textBlocks = msg.content.filter(b => b.type === "text");
+
+        for (const b of toolResults) {
+          if (b.type !== "tool_result") continue;
+          result.push({
+            role: "toolResult",
+            toolCallId: b.tool_use_id,
+            toolName: toolNameMap.get(b.tool_use_id) ?? "unknown",
+            content: [{ type: "text", text: b.content }],
+            isError: b.is_error ?? false,
+            timestamp: 0,
+          } satisfies ToolResultMessage);
+        }
+        if (textBlocks.length > 0) {
+          const text = textBlocks.map(b => b.type === "text" ? b.text : "").join("\n");
+          result.push({ role: "user", content: text, timestamp: 0 } satisfies UserMessage);
+        }
+      }
+    } else if (msg.role === "assistant") {
+      // assistant 訊息
+      const content: PiAssistantMessage["content"] = [];
+      const rawContent = typeof msg.content === "string"
+        ? [{ type: "text" as const, text: msg.content }]
+        : msg.content;
+
+      for (const block of rawContent) {
+        if (block.type === "text") {
+          content.push({ type: "text", text: block.text } satisfies TextContent);
+        } else if (block.type === "tool_use") {
+          content.push({
+            type: "toolCall",
+            id: block.id,
+            name: block.name,
+            arguments: block.input as Record<string, unknown>,
+          } satisfies PiToolCall);
+        }
+      }
+
+      result.push({
+        role: "assistant",
+        content,
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: DEFAULT_MODEL,
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: "stop",
+        timestamp: 0,
+      } satisfies PiAssistantMessage);
+    }
+  }
+  return result;
+}
+
+/** catclaw ToolDefinition → pi-ai Tool */
+function toPiTools(tools: ProviderOpts["tools"]): PiTool[] | undefined {
+  if (!tools?.length) return undefined;
+  return tools.map(t => ({
+    name: t.name,
+    description: t.description,
+    // 用 Type.Unsafe 包裝既有 JSON Schema，避免重新建構 typebox schema
+    parameters: Type.Unsafe(t.input_schema),
+  }));
+}
+
+// ── HTTP 錯誤分類 ─────────────────────────────────────────────────────────────
+
+function classifyError(errorMessage: string): CooldownReason | null {
+  const msg = errorMessage.toLowerCase();
+  if (msg.includes("429") || msg.includes("rate limit"))  return "rate_limit";
+  if (msg.includes("503") || msg.includes("overload"))    return "overloaded";
+  if (msg.includes("402") || msg.includes("billing") || msg.includes("credit")) return "billing";
+  if (msg.includes("401") || msg.includes("403") || msg.includes("auth"))       return "auth";
+  return null;
+}
+
+// ── ClaudeApiProvider ─────────────────────────────────────────────────────────
 
 export class ClaudeApiProvider implements LLMProvider {
   readonly id: string;
@@ -32,118 +151,122 @@ export class ClaudeApiProvider implements LLMProvider {
   readonly maxContextTokens = 200_000;
 
   private token?: string;
-  private model: string;
-  private thinkingEnabled: boolean;
+  private modelId: string;
+  private _store?: AuthProfileStore;
 
   constructor(id: string, entry: ProviderEntry) {
     this.id = id;
     this.name = `Claude API (${id})`;
-    this.token = entry.token;
-    this.model = entry.model ?? DEFAULT_MODEL;
-    this.thinkingEnabled = entry.thinking ?? false;
+    this.modelId = entry.model ?? DEFAULT_MODEL;
 
-    if (!this.token) {
-      log.warn(`[claude-api:${id}] 未設定 token，請在 config 設定 "token": "\${ANTHROPIC_TOKEN}"`);
+    // 多憑證：從 {workspace}/agents/default/auth-profiles.json 載入
+    let workspaceDir: string;
+    try { workspaceDir = resolveWorkspaceDir(); }
+    catch { workspaceDir = join(homedir(), ".catclaw", "workspace"); }
+
+    const persistPath = join(workspaceDir, "data", "auth-profiles");
+    const credentialsFilePath = join(workspaceDir, "agents", "default", "auth-profile.json");
+    this._store = new AuthProfileStore({ providerId: id, persistPath, credentialsFilePath });
+    this._store.load();
+
+    if (this._store.getAvailableCount() > 0) {
+      log.info(`[claude-api:${id}] 多憑證模式，${this._store.getAvailableCount()} 組可用`);
+    } else {
+      this.token = entry.token;
+      if (!this.token) {
+        log.warn(`[claude-api:${id}] 憑證檔 ${credentialsFilePath} 為空且未設定 token`);
+      }
     }
   }
 
-  // ── SSE 串流 ─────────────────────────────────────────────────────────────────
+  /** 取得目前可用憑證數 */
+  getAvailableCredentialCount(): number {
+    return this._store?.getAvailableCount() ?? (this.token ? 1 : 0);
+  }
+
+  /** 取得最快可用時間（所有憑證 cooldown 中時） */
+  getEarliestAvailableTime(): number | null {
+    return this._store?.getEarliestAvailableTime() ?? null;
+  }
+
+  // ── stream ────────────────────────────────────────────────────────────────────
 
   async stream(messages: Message[], opts: ProviderOpts = {}): Promise<StreamResult> {
-    const controller = new AbortController();
-    if (opts.abortSignal) {
-      opts.abortSignal.addEventListener("abort", () => controller.abort());
-    }
+    // ── 憑證選取 ──────────────────────────────────────────────────────────────
+    let credential: string;
+    let activeProfileId: string | undefined;
 
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      "anthropic-version": API_VERSION,
-    };
-
-    if (this.token) {
-      headers["x-api-key"] = this.token;
+    const storeProfile = this._store?.pick() ?? null;
+    if (storeProfile) {
+      credential = storeProfile.credential;
+      activeProfileId = storeProfile.id;
+    } else if (this._store && this._store.list().length > 0) {
+      const availAt = this._store.getEarliestAvailableTime();
+      const waitMsg = availAt
+        ? `最快 ${Math.ceil((availAt - Date.now()) / 60000)} 分鐘後可用`
+        : "所有憑證已永久停用，請聯絡管理員";
+      throw new Error(`[claude-api:${this.id}] 所有 API 憑證都在 cooldown 中（${waitMsg}）`);
+    } else if (this.token) {
+      credential = this.token;
     } else {
-      throw new Error(`[claude-api:${this.id}] 無認證資訊（token 未設定）`);
+      throw new Error(`[claude-api:${this.id}] 無認證資訊`);
     }
 
-    const body: Record<string, unknown> = {
-      model: this.model,
-      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-      messages,
-      stream: true,
+    // ── pi-ai 呼叫 ────────────────────────────────────────────────────────────
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const model = getModel("anthropic", this.modelId as any);
+    const context: PiContext = {
+      systemPrompt: opts.systemPrompt,
+      messages: toPiMessages(messages),
+      tools: toPiTools(opts.tools),
     };
-    if (opts.systemPrompt) body["system"] = opts.systemPrompt;
-    if (opts.tools?.length)  body["tools"] = opts.tools;
-    if (opts.temperature !== undefined) body["temperature"] = opts.temperature;
 
-    // Extended thinking（需要 interstitial-1 beta header）
-    let useThinking = this.thinkingEnabled;
-    if (useThinking) {
-      headers["anthropic-beta"] = "interstitial-1";
-      body["thinking"] = { type: "enabled", budget_tokens: 10000 };
-    }
+    log.debug(`[claude-api:${this.id}] POST model=${this.modelId} msgs=${messages.length} tools=${context.tools?.length ?? 0} profile=${activeProfileId ?? "token"}`);
 
-    log.debug(`[claude-api:${this.id}] POST /v1/messages model=${this.model} msgs=${messages.length} thinking=${useThinking}`);
-
-    let response = await fetch(`${API_BASE}/v1/messages`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    // Thinking level failover：400 且錯誤訊息提到 thinking → 降級重試
-    if (!response.ok && response.status === 400) {
-      const errText = await response.text().catch(() => "");
-      if (useThinking && errText.toLowerCase().includes("thinking")) {
-        log.warn(`[claude-api:${this.id}] thinking not supported，降級重試（無 thinking）`);
-        useThinking = false;
-        delete headers["anthropic-beta"];
-        delete body["thinking"];
-        response = await fetch(`${API_BASE}/v1/messages`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          const errText2 = await response.text().catch(() => "");
-          throw new Error(`[claude-api:${this.id}] HTTP ${response.status}: ${errText2.slice(0, 200)}`);
-        }
-      } else {
-        throw new Error(`[claude-api:${this.id}] HTTP ${response.status}: ${errText.slice(0, 200)}`);
-      }
-    } else if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      throw new Error(`[claude-api:${this.id}] HTTP ${response.status}: ${errText.slice(0, 200)}`);
-    }
-
-    if (!response.body) throw new Error(`[claude-api:${this.id}] 無 response body`);
-
-    // ── 建立 StreamResult（lazy AsyncGenerator） ──
+    // ── 事件收集 ──────────────────────────────────────────────────────────────
     const events: ProviderEvent[] = [];
+    const toolCalls: ToolCall[] = [];
     let finalText = "";
     let finalStopReason: "end_turn" | "tool_use" = "end_turn";
-    const toolCalls: ToolCall[] = [];
 
-    // 解析 SSE，收集所有事件
-    await parseSseStream(response.body, (sseEvent) => {
-      const event = processAnthropicEvent(sseEvent, toolCalls);
-      if (event) {
-        events.push(event);
-        if (event.type === "done") {
-          finalText = event.text;
-          finalStopReason = event.stopReason;
-        }
+    try {
+      const stream = streamSimpleAnthropic(model, context, {
+        apiKey: credential,
+        maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+        signal: opts.abortSignal,
+        temperature: opts.temperature,
+      });
+
+      for await (const event of stream) {
+        const pev = this._convertEvent(event, toolCalls);
+        if (pev) events.push(pev);
       }
-    });
 
-    // 回傳 StreamResult
-    async function* makeIterable(): AsyncIterable<ProviderEvent> {
-      yield* events;
+      // 最後一個事件帶最終文字和 stopReason
+      const lastEvent = events[events.length - 1];
+      if (lastEvent?.type === "done") {
+        finalText = lastEvent.text;
+        finalStopReason = lastEvent.stopReason;
+      }
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`[claude-api:${this.id}] 呼叫失敗 profile=${activeProfileId ?? "token"}: ${msg}`);
+
+      // Cooldown 判斷
+      if (activeProfileId && this._store) {
+        const reason = classifyError(msg);
+        if (reason) this._store.setCooldown(activeProfileId, reason);
+      }
+
+      throw new Error(`[claude-api:${this.id}] ${msg}`);
     }
 
     log.debug(`[claude-api:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字`);
+
+    async function* makeIterable(): AsyncIterable<ProviderEvent> {
+      yield* events;
+    }
 
     return {
       events: makeIterable(),
@@ -152,139 +275,39 @@ export class ClaudeApiProvider implements LLMProvider {
       text: finalText,
     };
   }
-}
 
-// ── SSE 解析 ─────────────────────────────────────────────────────────────────
+  // ── pi-ai event → catclaw ProviderEvent ──────────────────────────────────────
 
-interface SseEvent {
-  event?: string;
-  data?: string;
-}
+  private _convertEvent(event: AssistantMessageEvent, toolCalls: ToolCall[]): ProviderEvent | null {
+    switch (event.type) {
+      case "text_delta":
+        return { type: "text_delta", text: event.delta };
 
-async function parseSseStream(
-  body: ReadableStream<Uint8Array>,
-  onEvent: (e: SseEvent) => void
-): Promise<void> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let currentEvent: SseEvent = {};
+      case "thinking_delta":
+        return { type: "thinking_delta", thinking: event.delta };
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // SSE 行解析
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";  // 最後一段可能不完整
-
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          currentEvent.event = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          currentEvent.data = line.slice(6).trim();
-        } else if (line === "") {
-          // 空行 = 事件結束
-          if (currentEvent.data) onEvent({ ...currentEvent });
-          currentEvent = {};
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-// ── Anthropic SSE 事件轉換 ────────────────────────────────────────────────────
-
-// tool_use 輸入累積（input_json_delta 是分段 JSON）
-const _toolInputAccum = new Map<number, { id: string; name: string; json: string }>();
-
-function processAnthropicEvent(sseEvent: SseEvent, toolCalls: ToolCall[]): ProviderEvent | null {
-  if (!sseEvent.data || sseEvent.data === "[DONE]") return null;
-
-  let payload: Record<string, unknown>;
-  try {
-    payload = JSON.parse(sseEvent.data);
-  } catch {
-    return null;
-  }
-
-  const type = payload["type"] as string;
-
-  switch (type) {
-    case "content_block_start": {
-      const index = payload["index"] as number;
-      const block = payload["content_block"] as Record<string, unknown>;
-      if (block?.["type"] === "tool_use") {
-        _toolInputAccum.set(index, {
-          id: block["id"] as string,
-          name: block["name"] as string,
-          json: "",
-        });
-      }
-      return null;
-    }
-
-    case "content_block_delta": {
-      const index = payload["index"] as number;
-      const delta = payload["delta"] as Record<string, unknown>;
-
-      if (delta?.["type"] === "text_delta") {
-        return { type: "text_delta", text: delta["text"] as string };
-      }
-      if (delta?.["type"] === "thinking_delta") {
-        return { type: "thinking_delta", thinking: delta["thinking"] as string };
-      }
-      if (delta?.["type"] === "input_json_delta") {
-        const accum = _toolInputAccum.get(index);
-        if (accum) accum.json += delta["partial_json"] as string ?? "";
-      }
-      return null;
-    }
-
-    case "content_block_stop": {
-      const index = payload["index"] as number;
-      const accum = _toolInputAccum.get(index);
-      if (accum) {
-        let params: object = {};
-        try { params = JSON.parse(accum.json || "{}"); } catch { /* ignore */ }
-        const call: ToolCall = { id: accum.id, name: accum.name, params };
+      case "toolcall_end": {
+        const tc = event.toolCall;
+        const call: ToolCall = { id: tc.id, name: tc.name, params: tc.arguments };
         toolCalls.push(call);
-        _toolInputAccum.delete(index);
         return { type: "tool_use", id: call.id, name: call.name, params: call.params };
       }
-      return null;
-    }
 
-    case "message_delta": {
-      const delta = payload["delta"] as Record<string, unknown>;
-      const stopReason = delta?.["stop_reason"] as string;
-      if (stopReason === "tool_use") {
-        return {
-          type: "tool_result_needed",
-          stopReason: "tool_use",
-          toolCalls: [...toolCalls],
-        };
+      case "done": {
+        const msg = event.message;
+        const isToolUse = msg.stopReason === "toolUse";
+        const text = msg.content
+          .filter((c): c is { type: "text"; text: string } => c.type === "text")
+          .map(c => c.text).join("");
+        return { type: "done", stopReason: isToolUse ? "tool_use" : "end_turn", text };
       }
-      return null;
-    }
 
-    case "message_stop": {
-      // 由呼叫端決定 stopReason（已在 message_delta 處理）
-      return null;
-    }
+      case "error":
+        return { type: "error", message: event.error.errorMessage ?? "unknown error" };
 
-    case "error": {
-      const err = payload["error"] as Record<string, unknown>;
-      return { type: "error", message: (err?.["message"] as string) ?? "unknown error" };
+      default:
+        return null;
     }
-
-    default:
-      return null;
   }
 }
 

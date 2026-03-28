@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { BridgeConfig } from "./core/config.js";
-import { config, getChannelAccess } from "./core/config.js";
+import { config, getChannelAccess, loadBaseSystemPrompt } from "./core/config.js";
 import { enqueue } from "./session.js";
 import { createReplyHandler } from "./reply.js";
 import { matchSkill } from "./skills/registry.js";
@@ -52,6 +52,7 @@ import { agentLoop } from "./core/agent-loop.js";
 import { eventBus } from "./core/event-bus.js";
 import { handleAgentLoopReply } from "./core/reply-handler.js";
 import { setDiscordClient, getSubagentThreadBinding } from "./core/subagent-discord-bridge.js";
+import { parseApprovalReply, resolveApproval } from "./core/exec-approval.js";
 
 // ── 訊息去重 ─────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,21 @@ async function handleMessage(
   }
   processedMessages.add(message.id);
   if (processedMessages.size > 1000) processedMessages.clear();
+
+  // ── exec-approval：DM 確認回覆攔截 ──────────────────────────────────────────
+  // DM 訊息且符合「✅/❌ ABCDEF」格式 → 嘗試解析為確認回覆，不進入一般處理
+  if (message.channel.type === ChannelType.DM) {
+    const parsed = parseApprovalReply(message.content);
+    if (parsed) {
+      const found = resolveApproval(parsed.approvalId, parsed.approved);
+      if (found) {
+        const emoji = parsed.approved ? "✅" : "❌";
+        log.info(`[discord] exec-approval ${emoji} approvalId=${parsed.approvalId} from=${message.author.tag}`);
+        await message.react(emoji).catch(() => {});
+        return;
+      }
+    }
+  }
 
   // 查詢 per-channel 存取設定（含繼承鏈：Thread → Parent → Guild）
   const guildId = message.guild?.id ?? null;
@@ -469,6 +485,10 @@ async function handleMessage(
       const isGroupChannel = !!firstMessage.guild;
       const prompt = combinedText;
 
+      // ── Base System Prompt（CATCLAW.md → AGENTS.md，共用函式） ──────────
+      const baseSystemPrompt = loadBaseSystemPrompt();
+      if (baseSystemPrompt) log.debug(`[discord] 載入 base system prompt (${baseSystemPrompt.length} 字)`);
+
       // ── 記憶 Recall（三層：全域+專案+個人） ─────────────────────────────
       let systemPromptFromMemory = "";
       const memEngine = getPlatformMemoryEngine();
@@ -490,7 +510,8 @@ async function handleMessage(
       }
 
       // ── Inbound History 注入 ─────────────────────────────────────────────
-      let combinedSystemPrompt = systemPromptFromMemory;
+      // 組合順序：base（CATCLAW.md）→ 記憶 recall → inbound history
+      let combinedSystemPrompt = [baseSystemPrompt, systemPromptFromMemory].filter(Boolean).join("\n\n");
       const inboundStore = getInboundHistoryStore();
       const inboundCfg = (config as unknown as Record<string, unknown>).inboundHistory as Record<string, unknown> | undefined;
       if (inboundStore && inboundCfg?.enabled !== false) {
@@ -530,6 +551,17 @@ async function handleMessage(
         systemPrompt: combinedSystemPrompt || undefined,
         turnTimeoutMs: config.turnTimeoutMs,
         showToolCalls: config.showToolCalls as "all" | "summary" | "none",
+        ...(config.safety?.execApproval?.enabled && config.safety.execApproval.dmUserId ? {
+          execApproval: {
+            enabled: true,
+            dmUserId: config.safety.execApproval.dmUserId,
+            timeoutMs: config.safety.execApproval.timeoutMs,
+            sendDm: async (dmUserId: string, content: string) => {
+              const dmUser = await message.client.users.fetch(dmUserId);
+              await dmUser.send(content);
+            },
+          },
+        } : {}),
       }, {
         sessionManager: getPlatformSessionManager(),
         permissionGate: getPlatformPermissionGate(),
