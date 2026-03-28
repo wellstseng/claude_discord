@@ -14,9 +14,9 @@
  */
 
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { log } from "../logger.js";
 import type { BridgeConfig } from "./config.js";
+import { resolveCatclawDir } from "./config.js";
 import { deepMerge } from "./agent-registry.js";
 
 // ── CLI 解析 ──────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ export function parseAgentArg(argv: string[] = process.argv): string | undefined
 // ── Per-agent 路徑工具 ────────────────────────────────────────────────────────
 
 export function resolveAgentDataDir(agentId: string, catclawDir?: string): string {
-  const base = catclawDir ?? join(homedir(), ".catclaw");
+  const base = catclawDir ?? resolveCatclawDir();
   return join(base, "agents", agentId);
 }
 

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readdirSync } from "node:fs";
 import { log } from "../../logger.js";
+import { resolveCatclawDir } from "../../core/config.js";
 
 // ── 子命令 ────────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ async function handleImport(args: string): Promise<SkillResult> {
   const dryRun = args.includes("--dry-run");
 
   const sourcePath = join(homedir(), ".claude", "memory");
-  const destPath = join(homedir(), ".catclaw", "memory", "global");
+  const destPath = join(resolveCatclawDir(), "memory", "global");
 
   if (!existsSync(sourcePath)) {
     return { text: `❌ 來源路徑不存在：\`${sourcePath}\``, isError: true };
@@ -51,7 +52,7 @@ async function handleRebuild(args: string): Promise<SkillResult> {
   const dryRun = args.includes("--dry-run");
   const customDir = args.trim().replace("--dry-run", "").trim();
 
-  const memoryDir = customDir || join(homedir(), ".catclaw", "memory", "global");
+  const memoryDir = customDir || join(resolveCatclawDir(), "memory", "global");
 
   try {
     const { rebuildIndex } = await import("../../migration/rebuild-index.js");
@@ -71,7 +72,7 @@ async function handleRebuild(args: string): Promise<SkillResult> {
 
 function handleStatus(): SkillResult {
   const claudeMemory = join(homedir(), ".claude", "memory");
-  const catclawMemory = join(homedir(), ".catclaw", "memory", "global");
+  const catclawMemory = join(resolveCatclawDir(), "memory", "global");
 
   const countMd = (dir: string): number => {
     if (!existsSync(dir)) return 0;

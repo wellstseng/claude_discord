@@ -14,7 +14,7 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { config, watchConfig } from "./core/config.js";
+import { config, watchConfig, resolveCatclawDir } from "./core/config.js";
 import { setLogLevel } from "./logger.js";
 import { log } from "./logger.js";
 import { createDiscordClient } from "./discord.js";
@@ -26,17 +26,13 @@ import { loadBuiltinSkills, loadPromptSkills } from "./skills/registry.js";
 import { initPlatform } from "./core/platform.js";
 import type { BridgeConfig as CoreBridgeConfig } from "./core/config.js";
 import { parseAgentArg, loadAgentConfig } from "./core/agent-loader.js";
-import { homedir } from "node:os";
 
 // 在其他模組開始 log 前設定層級
 setLogLevel(config.logLevel);
 log.info(`[catclaw] 啟動`)
 
 // ── --agent 模式：若有指定 agent，載入合併後設定 ─────────────────────────────
-// catclawDir 優先讀 CATCLAW_CONFIG_DIR 環境變數，fallback ~/.catclaw
-const catclawDir = process.env.CATCLAW_CONFIG_DIR
-  ? resolve(process.env.CATCLAW_CONFIG_DIR)
-  : resolve(homedir(), ".catclaw");
+const catclawDir = resolveCatclawDir();
 const distDir = dirname(fileURLToPath(import.meta.url));
 const agentId = parseAgentArg();
 const platformConfig = agentId

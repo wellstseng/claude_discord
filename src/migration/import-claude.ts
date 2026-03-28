@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSy
 import { join, relative, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
+import { resolveCatclawDir } from "../core/config.js";
 
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
@@ -175,7 +176,7 @@ if (process.argv[1]?.endsWith("import-claude.js") || process.argv[1]?.endsWith("
   const sourcePath = args.find(a => a.startsWith("--source="))?.slice(9)
     ?? join(homedir(), ".claude", "memory");
   const destPath = args.find(a => a.startsWith("--dest="))?.slice(7)
-    ?? join(homedir(), ".catclaw", "memory", "global");
+    ?? join(resolveCatclawDir(), "memory", "global");
 
   console.log(`[import-claude] source=${sourcePath}  dest=${destPath}  force=${force}  dryRun=${dryRun}`);
 

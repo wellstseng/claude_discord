@@ -13,8 +13,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, basename } from "node:path";
-import { homedir } from "node:os";
 import { log } from "../logger.js";
+import { resolveCatclawDir } from "../core/config.js";
 
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ if (process.argv[1]?.endsWith("rebuild-index.js") || process.argv[1]?.endsWith("
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const memoryDir = args.find(a => !a.startsWith("--"))
-    ?? join(homedir(), ".catclaw", "memory", "global");
+    ?? join(resolveCatclawDir(), "memory", "global");
 
   console.log(`[rebuild-index] memoryDir=${memoryDir}  dryRun=${dryRun}`);
 

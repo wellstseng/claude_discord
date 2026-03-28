@@ -14,8 +14,8 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, watch } from "node:fs";
-import { join } from "node:path";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 import type { LogLevel } from "../logger.js";
 import { setLogLevel, log } from "../logger.js";
 
@@ -454,6 +454,11 @@ function resolveConfigPath(): string {
   const dir = process.env.CATCLAW_CONFIG_DIR;
   if (!dir) throw new Error("環境變數 CATCLAW_CONFIG_DIR 未設定，無法定位 catclaw.json");
   return resolve(dir, "catclaw.json");
+}
+
+/** 解析 catclaw 根目錄（~/.catclaw 或 CATCLAW_CONFIG_DIR） */
+export function resolveCatclawDir(): string {
+  return resolve(process.env.CATCLAW_CONFIG_DIR ?? join(homedir(), ".catclaw"));
 }
 
 export function resolveWorkspaceDir(): string {
