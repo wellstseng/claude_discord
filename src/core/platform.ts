@@ -29,6 +29,7 @@ import { initRegistrationManager } from "../accounts/registration.js";
 import { initIdentityLinker } from "../accounts/identity-linker.js";
 import { initProjectManager, type ProjectManager } from "../projects/manager.js";
 import { initMemoryEngine, type MemoryEngine } from "../memory/engine.js";
+import { initOllamaClient } from "../ollama/client.js";
 import { initRateLimiter, getRateLimiter, type RateLimiter } from "./rate-limiter.js";
 import { renameSessions } from "../migration/rename-sessions.js";
 import { initTurnAuditLog } from "./turn-audit-log.js";
@@ -131,6 +132,12 @@ export async function initPlatform(
 
   // ── 8. Project Manager ─────────────────────────────────────────────────────
   _projectManager = initProjectManager(join(wsDir, "data"));
+
+  // ── 8.5 Ollama Client（供 embedding 使用）─────────────────────────────────
+  if (config.ollama?.enabled !== false && config.ollama) {
+    initOllamaClient(config.ollama);
+    log.info(`[platform] OllamaClient 初始化：${config.ollama.primary?.host ?? "http://localhost:11434"}`);
+  }
 
   // ── 9. Memory Engine ───────────────────────────────────────────────────────
   // HomeClaudeCode：若啟用，globalPath 改指向 ~/.claude/memory/global
