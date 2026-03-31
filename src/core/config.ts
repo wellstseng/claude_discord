@@ -335,6 +335,8 @@ export interface BridgeConfig {
   agents?: AgentsConfig;
   /** Subagent 設定 */
   subagents?: SubagentsConfig;
+  /** Token Usage Dashboard 設定 */
+  dashboard?: { enabled: boolean; port: number };
 }
 
 // ── 環境變數展開 ──────────────────────────────────────────────────────────────
@@ -418,6 +420,7 @@ interface RawConfig {
   rateLimit?: RateLimitConfig;
   homeClaudeCode?: Partial<HomeClaudeCodeConfig>;
   agents?: AgentsConfig;
+  dashboard?: { enabled?: boolean; port?: number };
 }
 
 // ── 路徑解析 ──────────────────────────────────────────────────────────────────
@@ -707,6 +710,10 @@ function loadConfig(): BridgeConfig {
       path: raw.homeClaudeCode.path,
     } : undefined,
     agents: raw.agents,
+    dashboard: raw.dashboard?.enabled ? {
+      enabled: true,
+      port: raw.dashboard.port ?? 8088,
+    } : undefined,
   };
 }
 

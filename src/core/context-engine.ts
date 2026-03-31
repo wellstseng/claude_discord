@@ -93,8 +93,14 @@ export function repairToolPairing(messages: Message[]): Message[] {
 // ── Token 估算（~4 chars/token 粗估） ────────────────────────────────────────
 
 export function estimateTokens(messages: Message[]): number {
-  let chars = 0;
+  let total = 0;
   for (const m of messages) {
+    // 優先使用 per-message 精確 token 數
+    if (m.tokens != null) {
+      total += m.tokens;
+      continue;
+    }
+    let chars = 0;
     if (typeof m.content === "string") {
       chars += m.content.length;
     } else {
@@ -104,8 +110,9 @@ export function estimateTokens(messages: Message[]): number {
         else if (b.type === "tool_use") chars += JSON.stringify(b.input).length;
       }
     }
+    total += Math.ceil(chars / 4);
   }
-  return Math.ceil(chars / 4);
+  return total;
 }
 
 // ── CompactionStrategy ────────────────────────────────────────────────────────

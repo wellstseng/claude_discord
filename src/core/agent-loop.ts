@@ -311,6 +311,10 @@ export async function* agentLoop(
       sessionKey,
       turnIndex: session.turnCount,
     });
+    // S2: 有 strategy 觸發 → 把壓縮後的 messages 寫回 session（含備份原始）
+    if (contextEngine.lastBuildBreakdown.strategiesApplied.length > 0) {
+      sessionManager.replaceMessages(sessionKey, processedHistory);
+    }
   } else {
     processedHistory = rawHistory;
   }
@@ -377,6 +381,8 @@ export async function* agentLoop(
   const tracker = new TurnTracker();
   let loopCount = 0;
   const turnStartMs = Date.now();
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   eventBus.emit("turn:before", { accountId, channelId, sessionKey, prompt, projectId });
 
@@ -428,6 +434,9 @@ export async function* agentLoop(
         }
       }
 
+      totalInputTokens += streamResult.usage.input;
+      totalOutputTokens += streamResult.usage.output;
+
       if (streamResult.stopReason === "end_turn") break;
       if (streamResult.stopReason !== "tool_use") break;
       if (streamResult.toolCalls.length === 0) break;
@@ -436,7 +445,7 @@ export async function* agentLoop(
       log.debug(`[agent-loop] [loop=${loopCount}] 執行 ${streamResult.toolCalls.length} 個 tool: ${streamResult.toolCalls.map(t => t.name).join(", ")}`);
       const toolResults: Array<{ tool_use_id: string; content: string; is_error: boolean }> = [];
 
-      // 先把 assistant 的 tool_use 加入 messages
+      // 先把 assistant 的 tool_use 加入 messages（B: 標記 token 數）
       messages.push({
         role: "assistant",
         content: streamResult.toolCalls.map(tc => ({
@@ -445,6 +454,7 @@ export async function* agentLoop(
           name: tc.name,
           input: tc.params as object,
         })),
+        tokens: streamResult.usage.output > 0 ? streamResult.usage.output : undefined,
       });
 
       // spawn_subagent 並行：同一輪多個 spawn_subagent → Promise.all（其他 tool 維持串行）
@@ -646,10 +656,12 @@ export async function* agentLoop(
     }
   }
 
-  // 儲存 turn 到 session
+  // 儲存 turn 到 session（B: 標記 per-message token 數）
+  const promptTokens = Math.ceil(prompt.length / 4);
+  const responseTokens = totalOutputTokens > 0 ? totalOutputTokens : Math.ceil(fullResponse.length / 4);
   sessionManager.addMessages(sessionKey, [
-    { role: "user", content: prompt },
-    { role: "assistant", content: fullResponse },
+    { role: "user", content: prompt, tokens: promptTokens },
+    { role: "assistant", content: fullResponse, tokens: responseTokens },
     ...extraMessages,
   ]);
 
@@ -683,6 +695,8 @@ export async function* agentLoop(
       ceApplied: ceBreakdown?.strategiesApplied ?? [],
       tokensBeforeCE: ceBreakdown?.tokensBeforeCE,
       tokensAfterCE: ceBreakdown?.tokensAfterCE,
+      inputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
+      outputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
       toolCalls: tracker.toolCalls.length,
       toolLogPath: toolLogPath ?? undefined,
       durationMs: Date.now() - turnStartMs,

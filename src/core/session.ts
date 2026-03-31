@@ -111,6 +111,49 @@ export class SessionManager {
     return this.sessions.get(sessionKey)?.messages ?? [];
   }
 
+  /**
+   * CE 壓縮後，將精簡版 messages 寫回 session（取代原始內容）。
+   * 寫入前備份原始 session 至 _ce_backups/{key}_{ts}.json，保留最近 3 份。
+   */
+  replaceMessages(sessionKey: string, messages: Message[]): void {
+    const session = this.sessions.get(sessionKey);
+    if (!session) return;
+
+    // 備份原始 session
+    this._backupBeforeReplace(session);
+
+    session.messages = messages;
+    session.lastActiveAt = Date.now();
+    this.persist(session);
+    log.debug(`[session] replaceMessages ${sessionKey} → ${messages.length} messages`);
+  }
+
+  private _backupBeforeReplace(session: Session): void {
+    try {
+      const backupDir = join(this.persistDir, "_ce_backups");
+      mkdirSync(backupDir, { recursive: true });
+
+      const safe = session.sessionKey.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const ts = Date.now();
+      const backupPath = join(backupDir, `${safe}_${ts}.json`);
+      writeFileSync(backupPath, JSON.stringify(session, null, 2), "utf-8");
+
+      // 保留最近 3 份，刪除最舊的
+      const prefix = `${safe}_`;
+      const files = readdirSync(backupDir)
+        .filter(f => f.startsWith(prefix) && f.endsWith(".json"))
+        .sort();  // 字典序 = 時間序（timestamp 前綴）
+
+      if (files.length > 3) {
+        for (const f of files.slice(0, files.length - 3)) {
+          try { unlinkSync(join(backupDir, f)); } catch { /* 靜默 */ }
+        }
+      }
+    } catch (err) {
+      log.warn(`[session] CE backup 失敗 ${session.sessionKey}：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   delete(sessionKey: string): void {
     this.sessions.delete(sessionKey);
     const filePath = this.sessionPath(sessionKey);

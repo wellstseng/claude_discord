@@ -42,6 +42,8 @@ interface OllamaChunk {
     tool_calls?: Array<{ function: { name: string; arguments: object } }>;
   };
   done: boolean;
+  prompt_eval_count?: number;
+  eval_count?: number;
 }
 
 // ── OllamaProvider ────────────────────────────────────────────────────────────
@@ -151,6 +153,8 @@ export class OllamaProvider implements LLMProvider {
     let finalText = "";
     let finalStopReason: "end_turn" | "tool_use" = "end_turn";
     const toolCalls: ToolCall[] = [];
+    let promptEvalCount = 0;
+    let evalCount = 0;
 
     await parseNdjsonStream(response.body, (chunk: OllamaChunk) => {
       const content = chunk.message?.content ?? "";
@@ -174,6 +178,8 @@ export class OllamaProvider implements LLMProvider {
       }
 
       if (chunk.done) {
+        promptEvalCount = chunk.prompt_eval_count ?? 0;
+        evalCount = chunk.eval_count ?? 0;
         events.push({ type: "done", stopReason: finalStopReason, text: finalText });
       }
     });
@@ -192,13 +198,16 @@ export class OllamaProvider implements LLMProvider {
       yield* events;
     }
 
-    log.debug(`[ollama:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 tools=${toolCalls.length}`);
+    const inputTokens = promptEvalCount > 0 ? promptEvalCount : Math.round(finalText.length / 4);
+    const outputTokens = evalCount > 0 ? evalCount : Math.round(finalText.length / 4);
+    log.debug(`[ollama:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 tools=${toolCalls.length} inputTokens=${inputTokens} outputTokens=${outputTokens}`);
 
     return {
       events: makeIterable(),
       stopReason: finalStopReason,
       toolCalls,
       text: finalText,
+      usage: { input: inputTokens, output: outputTokens, totalTokens: inputTokens + outputTokens },
     };
   }
 }

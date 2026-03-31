@@ -207,6 +207,12 @@ export async function initPlatform(
   initInboundHistoryStore(auditDataDir);
   initSessionSnapshotStore(auditDataDir);
 
+  // ── 9.8 Token Usage Dashboard（可選）──────────────────────────────────────
+  if (config.dashboard?.enabled) {
+    const { initDashboard } = await import("./dashboard.js");
+    initDashboard(config.dashboard.port ?? 8088);
+  }
+
   // ── 10. Workflow Engine ─────────────────────────────────────────────────────
   const workflowDataDir = join(wsDir, "data", "workflow");
   const memoryDir = join(catclawDir, "memory");

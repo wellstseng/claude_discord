@@ -40,6 +40,8 @@ export interface Message {
   role: MessageRole;
   /** 純文字 or content blocks（tool_use / tool_result） */
   content: string | ContentBlock[];
+  /** 此訊息的 token 數（LLM 回傳 or 字元數÷4 估算），CE 用來做精準 cost 計算 */
+  tokens?: number;
 }
 
 // ── Tool 定義 ─────────────────────────────────────────────────────────────────
@@ -86,6 +88,13 @@ export type ProviderEvent =
   | { type: "done";                stopReason: "end_turn" | "tool_use"; text: string; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number } }
   | { type: "error";               message: string };
 
+/** Provider 回傳的 token 用量（必填，無法取得時用估算值） */
+export interface ProviderUsage {
+  input: number;
+  output: number;
+  totalTokens: number;
+}
+
 // ── StreamResult ──────────────────────────────────────────────────────────────
 
 export interface StreamResult {
@@ -93,7 +102,8 @@ export interface StreamResult {
   stopReason: "end_turn" | "tool_use";
   toolCalls: ToolCall[];
   text: string;
-  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number };
+  /** 實際 token 用量（無法取得時為估算值，input/output 由字元數 ÷4 估算） */
+  usage: ProviderUsage;
 }
 
 // ── LLMProvider 介面 ──────────────────────────────────────────────────────────

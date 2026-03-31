@@ -265,13 +265,15 @@ export class CodexOAuthProvider implements LLMProvider {
       yield* events;
     }
 
-    log.debug(`[codex-oauth:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字`);
+    const estTokens = Math.round(finalText.length / 4);
+    log.debug(`[codex-oauth:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 ~outputTokens=${estTokens}`);
 
     return {
       events: makeIterable(),
       stopReason: finalStopReason,
       toolCalls,
       text: finalText,
+      usage: { input: 0, output: estTokens, totalTokens: estTokens },
     };
   }
 }

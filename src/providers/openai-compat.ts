@@ -122,8 +122,16 @@ export class OpenAICompatProvider implements LLMProvider {
     let finalText = "";
     let finalStopReason: "end_turn" | "tool_use" = "end_turn";
     const toolCalls: ToolCall[] = [];
+    let usageInput = 0;
+    let usageOutput = 0;
 
     await parseOpenAISseStream(response.body, (chunk) => {
+      // 部分端點在串流最後一個 chunk 帶 usage
+      if ((chunk as Record<string, unknown>)["usage"]) {
+        const u = (chunk as Record<string, unknown>)["usage"] as Record<string, number>;
+        usageInput = u["prompt_tokens"] ?? 0;
+        usageOutput = u["completion_tokens"] ?? 0;
+      }
       const event = processOpenAIChunk(chunk, toolCalls);
       if (event) {
         events.push(event);
@@ -135,17 +143,22 @@ export class OpenAICompatProvider implements LLMProvider {
     // 若有 tool calls → stopReason = tool_use
     if (toolCalls.length > 0) finalStopReason = "tool_use";
 
+    // 端點未回傳 usage 時用估算
+    const inputTokens = usageInput > 0 ? usageInput : Math.round(finalText.length / 4);
+    const outputTokens = usageOutput > 0 ? usageOutput : Math.round(finalText.length / 4);
+
     async function* makeIterable(): AsyncIterable<ProviderEvent> {
       yield* events;
     }
 
-    log.debug(`[openai-compat:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字`);
+    log.debug(`[openai-compat:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 inputTokens=${inputTokens} outputTokens=${outputTokens}`);
 
     return {
       events: makeIterable(),
       stopReason: finalStopReason,
       toolCalls,
       text: finalText,
+      usage: { input: inputTokens, output: outputTokens, totalTokens: inputTokens + outputTokens },
     };
   }
 }

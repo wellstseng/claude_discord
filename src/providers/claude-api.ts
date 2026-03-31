@@ -273,11 +273,14 @@ export class ClaudeApiProvider implements LLMProvider {
       throw new Error(`[claude:${this.id}] ${msg}`);
     }
 
+    const resolvedUsage = finalUsage
+      ? { input: finalUsage.input, output: finalUsage.output, totalTokens: finalUsage.totalTokens }
+      : { input: 0, output: Math.round(finalText.length / 4), totalTokens: Math.round(finalText.length / 4) };
+
     if (finalUsage) {
       log.debug(`[claude:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 inputTokens=${finalUsage.input} outputTokens=${finalUsage.output} cacheRead=${finalUsage.cacheRead} cacheWrite=${finalUsage.cacheWrite} total=${finalUsage.totalTokens}`);
     } else {
-      const estOutputTokens = Math.round(finalText.length / 4);
-      log.debug(`[claude:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 ~outputTokens=${estOutputTokens}`);
+      log.debug(`[claude:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 ~outputTokens=${resolvedUsage.output}`);
     }
 
     async function* makeIterable(): AsyncIterable<ProviderEvent> {
@@ -289,7 +292,7 @@ export class ClaudeApiProvider implements LLMProvider {
       stopReason: finalStopReason,
       toolCalls,
       text: finalText,
-      usage: finalUsage,
+      usage: resolvedUsage,
     };
   }
 
