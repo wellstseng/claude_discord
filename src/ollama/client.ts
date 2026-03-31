@@ -94,9 +94,11 @@ export class OllamaClient {
   private readonly backends: OllamaBackend[];
   private readonly states = new Map<string, BackendState>();
   private readonly healthCache = new Map<string, { healthy: boolean; ts: number }>();
+  readonly defaultEmbedTimeoutMs: number;
 
-  constructor(backends: OllamaBackend[]) {
+  constructor(backends: OllamaBackend[], opts: { embedTimeoutMs?: number } = {}) {
     this.backends = [...backends].sort((a, b) => a.priority - b.priority);
+    this.defaultEmbedTimeoutMs = opts.embedTimeoutMs ?? 60_000;
   }
 
   // ── 公開 API ───────────────────────────────────────────────────────────────
@@ -155,7 +157,7 @@ export class OllamaClient {
    * 失敗回傳空陣列
    */
   async embed(texts: string[], opts: EmbedOpts = {}): Promise<number[][]> {
-    const { model, timeout = 60_000 } = opts;
+    const { model, timeout = this.defaultEmbedTimeoutMs } = opts;
     const backend = this.pickBackend("embedding");
     if (!backend) return [];
 
@@ -401,8 +403,8 @@ export function getOllamaClient(): OllamaClient {
 }
 
 export function initOllamaClient(cfg: OllamaConfig): OllamaClient {
-  _instance = new OllamaClient(buildBackendsFromConfig(cfg));
-  log.info(`[ollama] 初始化完成，${_instance["backends"].length} 個 backend`);
+  _instance = new OllamaClient(buildBackendsFromConfig(cfg), { embedTimeoutMs: cfg.timeout });
+  log.info(`[ollama] 初始化完成，${_instance["backends"].length} 個 backend，embedTimeout=${_instance.defaultEmbedTimeoutMs}ms`);
   return _instance;
 }
 
