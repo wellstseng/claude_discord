@@ -237,6 +237,7 @@ export class ClaudeApiProvider implements LLMProvider {
     const toolCalls: ToolCall[] = [];
     let finalText = "";
     let finalStopReason: "end_turn" | "tool_use" = "end_turn";
+    let finalUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number } | undefined;
 
     try {
       const stream = streamSimpleAnthropic(model, context, {
@@ -256,6 +257,7 @@ export class ClaudeApiProvider implements LLMProvider {
       if (lastEvent?.type === "done") {
         finalText = lastEvent.text;
         finalStopReason = lastEvent.stopReason;
+        finalUsage = lastEvent.usage;
       }
 
     } catch (err) {
@@ -271,8 +273,12 @@ export class ClaudeApiProvider implements LLMProvider {
       throw new Error(`[claude:${this.id}] ${msg}`);
     }
 
-    const estOutputTokens = Math.round(finalText.length / 4);
-    log.debug(`[claude:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 ~outputTokens=${estOutputTokens}`);
+    if (finalUsage) {
+      log.debug(`[claude:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 inputTokens=${finalUsage.input} outputTokens=${finalUsage.output} cacheRead=${finalUsage.cacheRead} cacheWrite=${finalUsage.cacheWrite} total=${finalUsage.totalTokens}`);
+    } else {
+      const estOutputTokens = Math.round(finalText.length / 4);
+      log.debug(`[claude:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 ~outputTokens=${estOutputTokens}`);
+    }
 
     async function* makeIterable(): AsyncIterable<ProviderEvent> {
       yield* events;
@@ -283,6 +289,7 @@ export class ClaudeApiProvider implements LLMProvider {
       stopReason: finalStopReason,
       toolCalls,
       text: finalText,
+      usage: finalUsage,
     };
   }
 
@@ -309,7 +316,7 @@ export class ClaudeApiProvider implements LLMProvider {
         const text = msg.content
           .filter((c): c is { type: "text"; text: string } => c.type === "text")
           .map(c => c.text).join("");
-        return { type: "done", stopReason: isToolUse ? "tool_use" : "end_turn", text };
+        return { type: "done", stopReason: isToolUse ? "tool_use" : "end_turn", text, usage: msg.usage };
       }
 
       case "error":

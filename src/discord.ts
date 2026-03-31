@@ -344,7 +344,7 @@ async function handleMessage(
     });
 
     // ── Skill 攔截層（Phase 0） ────────────────────────────────────────────
-    // 比對 skill trigger，有匹配直接執行，不送 Claude CLI
+    // 比對 skill trigger，有匹配直接執行，不送 LLM
     const skillMatch = matchSkill(combinedText);
     if (skillMatch) {
       const { skill, args } = skillMatch;

@@ -83,7 +83,7 @@ export type ProviderEvent =
   | { type: "thinking_delta";      thinking: string }
   | { type: "tool_use";            id: string; name: string; params: object }
   | { type: "tool_result_needed";  stopReason: "tool_use"; toolCalls: ToolCall[] }
-  | { type: "done";                stopReason: "end_turn" | "tool_use"; text: string }
+  | { type: "done";                stopReason: "end_turn" | "tool_use"; text: string; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number } }
   | { type: "error";               message: string };
 
 // ── StreamResult ──────────────────────────────────────────────────────────────
@@ -93,6 +93,7 @@ export interface StreamResult {
   stopReason: "end_turn" | "tool_use";
   toolCalls: ToolCall[];
   text: string;
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number };
 }
 
 // ── LLMProvider 介面 ──────────────────────────────────────────────────────────

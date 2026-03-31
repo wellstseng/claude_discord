@@ -70,6 +70,44 @@ async function handleRebuild(args: string): Promise<SkillResult> {
   }
 }
 
+async function handleSeed(args: string): Promise<SkillResult> {
+  const dryRun = args.includes("--dry-run");
+  const { getPlatformMemoryEngine } = await import("../../core/platform.js");
+  const engine = getPlatformMemoryEngine();
+  if (!engine) {
+    return { text: "❌ MemoryEngine 未啟動（平台模式未啟用）", isError: true };
+  }
+
+  const { resolveCatclawDir } = await import("../../core/config.js");
+  const catclawDir = resolveCatclawDir();
+  const { join: pathJoin } = await import("node:path");
+  const globalDir = pathJoin(catclawDir, "memory", "global");
+
+  if (dryRun) {
+    const { existsSync, readdirSync } = await import("node:fs");
+    if (!existsSync(globalDir)) {
+      return { text: `❌ 記憶目錄不存在：\`${globalDir}\``, isError: true };
+    }
+    const mdCount = readdirSync(globalDir).filter(f => f.endsWith(".md") && f !== "MEMORY.md").length;
+    return { text: `**[Dry Run] seed 預覽**\n• 目錄：\`${globalDir}\`\n• 預計 embed：${mdCount} 個 atom（namespace=global）` };
+  }
+
+  try {
+    const result = await engine.seedFromDir(globalDir, "global");
+    return {
+      text: [
+        "**記憶 Seed 完成**",
+        `• 目錄：\`${globalDir}\``,
+        `• Embedded：${result.seeded} 個`,
+        `• 錯誤：${result.errors} 個`,
+        result.errors > 0 ? "⚠️ 有錯誤，請查看 log" : "✅ Ollama embedding 服務需已啟動",
+      ].join("\n"),
+    };
+  } catch (err) {
+    return { text: `❌ ${err instanceof Error ? err.message : String(err)}`, isError: true };
+  }
+}
+
 function handleStatus(): SkillResult {
   const claudeMemory = join(homedir(), ".claude", "memory");
   const catclawMemory = join(resolveCatclawDir(), "memory", "global");
@@ -125,6 +163,7 @@ export const skill: Skill = {
     switch (sub) {
       case "import":  return handleImport(rest);
       case "rebuild": return handleRebuild(rest);
+      case "seed":    return handleSeed(rest);
       case "status":  return handleStatus();
       default:
         return {
@@ -132,6 +171,7 @@ export const skill: Skill = {
             "**`/migrate` 子命令**",
             "• `import [--force] [--dry-run]` — 從 `~/.claude/memory/` 匯入記憶",
             "• `rebuild [<memoryDir>] [--dry-run]` — 重建 `MEMORY.md` 索引",
+            "• `seed [--dry-run]` — 將記憶目錄 atom 嵌入至 LanceDB",
             "• `status` — 查看遷移狀態",
           ].join("\n"),
         };

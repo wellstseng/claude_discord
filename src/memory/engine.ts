@@ -219,6 +219,64 @@ export class MemoryEngine {
     };
   }
 
+  /**
+   * 掃描記憶目錄下所有 atom .md 檔，嵌入並寫入 LanceDB
+   * 用途：首次安裝或手動複製 atom 後補跑 embedding
+   */
+  async seedFromDir(dir: string, namespace: string): Promise<{ seeded: number; skipped: number; errors: number }> {
+    const { readAtom } = await import("./atom.js");
+    const { readdirSync, statSync, existsSync } = await import("node:fs");
+    const { join: pathJoin, basename } = await import("node:path");
+
+    let seeded = 0, skipped = 0, errors = 0;
+
+    const resolvedDir = dir.startsWith("~") ? dir.replace("~", (await import("node:os")).homedir()) : dir;
+    if (!existsSync(resolvedDir)) {
+      log.warn(`[memory-engine] seedFromDir: 目錄不存在 ${resolvedDir}`);
+      return { seeded, skipped, errors };
+    }
+
+    // 遞迴掃描，排除 _ 前綴目錄和非 .md 檔
+    const SKIP_DIRS = new Set(["_vectordb", "episodic", "_staging", "_reference"]);
+    function walkMd(d: string): string[] {
+      const results: string[] = [];
+      for (const entry of readdirSync(d)) {
+        if (entry.startsWith("_") || SKIP_DIRS.has(entry)) continue;
+        const full = pathJoin(d, entry);
+        if (statSync(full).isDirectory()) {
+          results.push(...walkMd(full));
+        } else if (entry.endsWith(".md") && entry !== "MEMORY.md") {
+          results.push(full);
+        }
+      }
+      return results;
+    }
+
+    const files = walkMd(resolvedDir);
+    log.info(`[memory-engine] seedFromDir: 掃描到 ${files.length} 個 atom，namespace=${namespace}`);
+
+    const { getVectorService } = await import("../vector/lancedb.js");
+    const vs = getVectorService();
+
+    for (const filePath of files) {
+      const atomName = basename(filePath, ".md");
+      try {
+        const atom = readAtom(filePath);
+        if (!atom) { skipped++; continue; }
+        const text = `${atom.description ?? atomName}\n${atom.content}`;
+        await vs.upsert(atomName, text, namespace, { path: filePath });
+        seeded++;
+        log.debug(`[memory-engine] seed ${atomName} → ${namespace}`);
+      } catch (err) {
+        errors++;
+        log.warn(`[memory-engine] seed 失敗 ${atomName}：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    log.info(`[memory-engine] seedFromDir 完成：seeded=${seeded} skipped=${skipped} errors=${errors}`);
+    return { seeded, skipped, errors };
+  }
+
   /** 重建向量索引（rebuild 指定 namespace） */
   async rebuildIndex(namespace: string): Promise<void> {
     try {

@@ -3,12 +3,32 @@
 - Scope: project
 - Confidence: [固]
 - Trigger: 架構, 資料流, 目錄結構, session 策略, config, 環境變數, restart, cron, 安全, PM2, hot-reload, catclaw.json, CATCLAW_WORKSPACE, pi-ai, OAuth, provider, credentials
-- Last-used: 2026-03-28
-- Confirmations: 14
+- Last-used: 2026-03-31
+- Confirmations: 15
 
 # catclaw 架構
 
 **雙模式**：`config.providers` 有設定 → 新平台路徑（AgentLoop + HTTP API）；否則 → 舊 Claude CLI 路徑（向下相容）。
+
+> **⚠️ 注意（2026-03-31 確認）**：catclaw-test（`~/.catclaw-test/catclaw.json`）已是完整平台模式，包含 providers + CE + inboundHistory + memory。`~/.catclaw/catclaw.json`（舊生產設定）無 providers，為舊 CLI 模式。兩份設定不同，診斷問題時必須確認使用的是哪一份。
+
+## catclaw-test 完整設定（2026-03-31 確認）
+
+```jsonc
+// ~/.catclaw-test/catclaw.json 關鍵欄位
+providers: { "claude-oauth": {...}, "codex": {...}, "ollama-local": {...} }
+providerRouting.roles.default: "ollama-local"
+agents.default.provider: "claude-oauth"
+session: { persistPath: "~/.catclaw-test/workspace/data/sessions-v2", maxHistoryTurns: 50 }
+contextEngineering: { enabled: true, compaction(haiku), budgetGuard(0.8), slidingWindow(off) }
+inboundHistory: { enabled: true, fullWindowHours: 24, decayWindowHours: 168 }
+memory: { globalPath: "~/.catclaw-test/memory/global", vectorDbPath: "~/.catclaw-test/memory/_vectordb" }
+ollama: { embeddingModel: "qwen3-embedding:8b" }
+```
+
+**已知坑（2026-03-31）**：
+- `platform.ts` defaultMemoryCfg 裡 `recall.vectorSearch: false`，catclaw.json 若只設 globalPath/vectorDbPath 不會覆寫 recall；需明確加 `"recall": { "vectorSearch": true, ... }` 到 catclaw.json 的 memory 段
+- vectorDB 首次使用前需跑 `/migrate seed` 將既有 atoms embed 進 LanceDB（init() 不自動 seed）
 
 ## 新平台子系統（S1-S14，2026-03-26 完成，branch: platform-rebuild）
 
