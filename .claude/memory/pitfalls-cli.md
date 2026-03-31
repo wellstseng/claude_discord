@@ -1,9 +1,18 @@
 ---
 name: pitfalls-cli
-description: catclaw 開發陷阱速查（25 項）+ Claude CLI 指令參考（stdio/stream-json/event 格式）
+description: catclaw 開發陷阱速查（26 項）+ Claude CLI 指令參考（stdio/stream-json/event 格式）
 type: project
 code-version: 2026-03-31
 ---
+
+## 測試環境 vs 正式環境
+
+| 環境 | config dir | branch |
+|------|-----------|--------|
+| 測試 | `~/.catclaw-test` | `platform-rebuild` |
+| 正式 | `~/.catclaw` | `origin/main` 或其他 |
+
+切 branch 時 catclaw.json 的 `memory.root`, `vectorDbPath`, `session.persistPath` 路徑都要跟著換。
 
 ## Claude CLI 指令格式
 
@@ -136,3 +145,9 @@ GTX 1050 Ti 4GB 同時只能載一個模型；qwen3:14b 在記憶體時，embed 
 60s 預設 timeout 不足，觸發 AbortController → `This operation was aborted` → embedding 失敗
 症狀：`/migrate seed` 全部 skip，vectorDB 仍空；`/api/embed` 有回應但被 abort
 修正：catclaw.json `ollama.timeout`: 300000（5 分鐘）；OllamaClient `embed()` 使用 `cfg.timeout` 作為預設
+
+### 26. memory.root = atoms 根目錄，無 global/ 子目錄（2026-03-31 確認）
+catclaw.json `memory.root` 指向記憶根目錄，atoms 直接放在 root 下（不是 root/global/）
+引擎內 `globalDir()` = `memRoot()` = root 本身
+子目錄結構：root/failures/, root/unity/, root/projects/, root/accounts/, root/episodic/, root/_vectordb/
+錯誤：不要在 root 下多建 global/ 再把 atoms 放進去

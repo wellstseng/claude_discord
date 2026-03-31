@@ -15,3 +15,5 @@
 | smoke-test-gaps | smoke-test-gaps.md | smoke test, 未覆蓋, failover, E2E, 測試缺口 | [臨] |
 | feedback-merge-confirm | feedback-merge-confirm.md | merge, git merge, 合併, 上GIT, push main | [固] |
 | feedback-discord-report | feedback-discord-report.md | 完成, 回報, Discord, 主動 | [固] |
+| feedback-language | feedback-language.md | 日文, Japanese, 語言, 中文, 回應語言 | [固] |
+| pitfalls-migrate-skill | pitfalls-migrate-skill.md | migrate, countMd, statSync, require, ESM, /migrate status, atom count, 0 個 atom, typing 卡住 | [固] |

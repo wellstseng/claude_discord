@@ -9,7 +9,7 @@
  * Blind-Spot：所有層結果為空 → blindSpot=true（R9）
  */
 
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { log } from "../logger.js";
 import { readAtom, touchAtom, type Atom } from "./atom.js";
@@ -89,11 +89,6 @@ function setCache(channelId: string | undefined, prompt: string, result: RecallR
 }
 
 // ── 工具 ─────────────────────────────────────────────────────────────────────
-
-/** ~/.catclaw/memory/global → ~/.catclaw/memory */
-function memoryRoot(globalDir: string): string {
-  return dirname(globalDir);
-}
 
 /** 根據 layer + context 推算 namespace（LanceDB 向量搜尋用） */
 function layerToNs(layer: MemoryLayer, ctx: RecallContext): string {

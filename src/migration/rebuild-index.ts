@@ -131,7 +131,7 @@ if (process.argv[1]?.endsWith("rebuild-index.js") || process.argv[1]?.endsWith("
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const memoryDir = args.find(a => !a.startsWith("--"))
-    ?? join(resolveCatclawDir(), "memory", "global");
+    ?? join(resolveCatclawDir(), "memory");
 
   console.log(`[rebuild-index] memoryDir=${memoryDir}  dryRun=${dryRun}`);
 

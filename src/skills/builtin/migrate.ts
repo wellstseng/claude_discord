@@ -14,7 +14,7 @@
 import type { Skill, SkillContext, SkillResult } from "../types.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { log } from "../../logger.js";
 import { resolveCatclawDir } from "../../core/config.js";
 
@@ -25,7 +25,7 @@ async function handleImport(args: string): Promise<SkillResult> {
   const dryRun = args.includes("--dry-run");
 
   const sourcePath = join(homedir(), ".claude", "memory");
-  const destPath = join(resolveCatclawDir(), "memory", "global");
+  const destPath = join(resolveCatclawDir(), "memory");
 
   if (!existsSync(sourcePath)) {
     return { text: `❌ 來源路徑不存在：\`${sourcePath}\``, isError: true };
@@ -55,7 +55,7 @@ async function handleRebuild(args: string): Promise<SkillResult> {
   const dryRun = args.includes("--dry-run");
   const customDir = args.trim().replace("--dry-run", "").trim();
 
-  const memoryDir = customDir || join(resolveCatclawDir(), "memory", "global");
+  const memoryDir = customDir || join(resolveCatclawDir(), "memory");
 
   try {
     const { rebuildIndex } = await import("../../migration/rebuild-index.js");
@@ -123,7 +123,7 @@ function handleStatus(): SkillResult {
           if (entry.startsWith("_")) continue;
           const full = join(d, entry);
           try {
-            const stat = require("node:fs").statSync(full);
+            const stat = statSync(full);
             if (stat.isDirectory()) scan(full);
             else if (entry.endsWith(".md") && entry !== "MEMORY.md") n++;
           } catch { /* skip */ }
