@@ -193,12 +193,12 @@ export class LanceVectorService implements VectorService {
         .limit(topK * 2)          // 多取再 filter，避免 minScore 後數量不足
         .toArray();
 
-      // LanceDB 回傳 _distance（越小越近），轉換成 cosine 相似度
+      // LanceDB 預設 L2 metric，對 unit-normalized 向量：cosine_sim = 1 - d²/2
       const results: SearchResult[] = rawResults
         .map(r => ({
           id: r["id"] as string,
           text: r["text"] as string,
-          score: 1 - (r["_distance"] as number ?? 0),
+          score: 1 - ((r["_distance"] as number ?? 0) ** 2) / 2,
           path: (r["path"] as string) || undefined,
           meta: (r["meta"] as string) || undefined,
         }))
