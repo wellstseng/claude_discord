@@ -94,14 +94,16 @@ async function handleSeed(args: string): Promise<SkillResult> {
 
   try {
     const result = await engine.seedFromDir(globalDir, "global");
+    const ok = result.errors === 0 && result.skipped === 0;
     return {
       text: [
         "**記憶 Seed 完成**",
         `• 目錄：\`${globalDir}\``,
         `• Embedded：${result.seeded} 個`,
-        `• 錯誤：${result.errors} 個`,
-        result.errors > 0 ? "⚠️ 有錯誤，請查看 log" : "✅ Ollama embedding 服務需已啟動",
-      ].join("\n"),
+        result.skipped > 0 ? `• Skip（embedding 失敗）：${result.skipped} 個` : null,
+        result.errors > 0 ? `• 錯誤：${result.errors} 個` : null,
+        ok ? "✅ 完成" : result.skipped > 0 ? "⚠️ 有 skip — Ollama embedding 是否正常？執行 `/migrate search <query>` 確認" : "⚠️ 有錯誤，請查看 log",
+      ].filter(Boolean).join("\n"),
     };
   } catch (err) {
     return { text: `❌ ${err instanceof Error ? err.message : String(err)}`, isError: true };
@@ -109,8 +111,8 @@ async function handleSeed(args: string): Promise<SkillResult> {
 }
 
 function handleStatus(): SkillResult {
-  const claudeMemory = join(homedir(), ".claude", "memory", "global");
-  const catclawMemory = join(resolveCatclawDir(), "memory", "global");
+  const claudeMemory = join(homedir(), ".claude", "memory");
+  const catclawMemory = join(resolveCatclawDir(), "memory");
 
   const countMd = (dir: string): number => {
     if (!existsSync(dir)) return 0;
@@ -139,7 +141,7 @@ function handleStatus(): SkillResult {
     text: [
       "**遷移狀態**",
       `• \`~/.claude/memory/\` → ${src} 個 atom${existsSync(claudeMemory) ? "" : "（路徑不存在）"}`,
-      `• \`~/.catclaw/memory/global/\` → ${dst} 個 atom${existsSync(catclawMemory) ? "" : "（路徑不存在）"}`,
+      `• \`${catclawMemory}/\` → ${dst} 個 atom${existsSync(catclawMemory) ? "" : "（路徑不存在）"}`,
       src > dst ? `\n提示：執行 \`/migrate import\` 遷移 ~${src - dst} 個尚未複製的 atom` : null,
     ].filter(Boolean).join("\n"),
   };

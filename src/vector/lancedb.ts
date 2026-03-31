@@ -43,7 +43,7 @@ export interface SearchOpts {
 
 export interface VectorService {
   init(): Promise<void>;
-  upsert(id: string, text: string, namespace: string, opts?: { path?: string; meta?: object }): Promise<void>;
+  upsert(id: string, text: string, namespace: string, opts?: { path?: string; meta?: object }): Promise<boolean>;
   search(query: string | number[], opts: SearchOpts): Promise<SearchResult[]>;
   delete(id: string, namespace: string): Promise<void>;
   rebuild(namespace: string): Promise<void>;
@@ -123,14 +123,14 @@ export class LanceVectorService implements VectorService {
     text: string,
     namespace: string,
     opts: { path?: string; meta?: object } = {}
-  ): Promise<void> {
+  ): Promise<boolean> {
     validateNamespace(namespace);
-    if (!this.db) { log.debug("[lancedb] upsert skip — not initialized"); return; }
+    if (!this.db) { log.debug("[lancedb] upsert skip — not initialized"); return false; }
 
     const { vectors, dim } = await embedTexts([text]);
     if (!vectors.length || !dim) {
       log.debug(`[lancedb] upsert ${id} skip — embedding not available`);
-      return;
+      return false;
     }
 
     const record: Record<string, unknown> = {
@@ -156,8 +156,10 @@ export class LanceVectorService implements VectorService {
         await this.deleteFromTable(table, id);
         await table.add([record]);
       }
+      return true;
     } catch (err) {
       log.warn(`[lancedb] upsert ${id} 失敗：${err instanceof Error ? err.message : String(err)}`);
+      return false;
     }
   }
 

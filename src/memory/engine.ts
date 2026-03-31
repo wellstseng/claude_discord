@@ -271,9 +271,14 @@ export class MemoryEngine {
         const atom = readAtom(filePath);
         if (!atom) { skipped++; continue; }
         const text = `${atom.description ?? atomName}\n${atom.content}`;
-        await vs.upsert(atomName, text, namespace, { path: filePath });
-        seeded++;
-        log.debug(`[memory-engine] seed ${atomName} → ${namespace}`);
+        const written = await vs.upsert(atomName, text, namespace, { path: filePath });
+        if (written) {
+          seeded++;
+          log.debug(`[memory-engine] seed ${atomName} → ${namespace}`);
+        } else {
+          skipped++;
+          log.debug(`[memory-engine] seed ${atomName} skip — embedding unavailable`);
+        }
       } catch (err) {
         errors++;
         log.warn(`[memory-engine] seed 失敗 ${atomName}：${err instanceof Error ? err.message : String(err)}`);
