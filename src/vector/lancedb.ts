@@ -93,6 +93,29 @@ export class LanceVectorService implements VectorService {
     return this.initialized && this.db !== null;
   }
 
+  /** isReady alias（供 skill 直接呼叫） */
+  isReady(): boolean {
+    return this.isAvailable();
+  }
+
+  /** 回傳所有 table 的向量數 */
+  async stats(): Promise<{ tables: { name: string; count: number }[] } | null> {
+    if (!this.db) return null;
+    try {
+      const tableNames = await this.db.tableNames();
+      const tables: { name: string; count: number }[] = [];
+      for (const name of tableNames) {
+        const table = await this.db.openTable(name);
+        const count = await table.countRows();
+        tables.push({ name, count });
+      }
+      return { tables };
+    } catch (err) {
+      log.warn(`[lancedb] stats 失敗：${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
   // ── Upsert ──────────────────────────────────────────────────────────────────
 
   async upsert(

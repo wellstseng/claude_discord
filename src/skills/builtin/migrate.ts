@@ -5,7 +5,10 @@
  * 子命令：
  *   /migrate import [--force] [--dry-run]  — 從 ~/.claude 匯入記憶
  *   /migrate rebuild [<memoryDir>]          — 重建 MEMORY.md 索引
+ *   /migrate seed [--dry-run]              — 將 atom 嵌入至 LanceDB
  *   /migrate status                         — 顯示遷移狀態
+ *   /migrate search <query>                — 直查 LanceDB（不過 LLM）
+ *   /migrate stats                          — LanceDB 向量數 + table 清單
  */
 
 import type { Skill, SkillContext, SkillResult } from "../types.js";
@@ -145,6 +148,38 @@ function handleStatus(): SkillResult {
   };
 }
 
+async function handleSearch(args: string): Promise<SkillResult> {
+  const dryRun = args.includes("--dry-run");
+  const query = args.replace("--dry-run", "").trim();
+  if (!query) return { text: "用法：`/migrate search <查詢文字>`" };
+
+  const { getVectorService } = await import("../../vector/lancedb.js");
+  const vs = getVectorService();
+  if (!vs.isReady()) return { text: "LanceDB 未初始化（bot 是否完全啟動？）" };
+
+  if (dryRun) return { text: `[dry-run] 會搜尋 namespace=global，query="${query}"` };
+
+  const results = await vs.search(query, { namespace: "global", topK: 5, minScore: 0 });
+  if (!results.length) return { text: `**向量搜尋**：無命中（namespace=global）` };
+
+  const lines = results.map((r, i) =>
+    `${i + 1}. \`${r.id}\` score=${r.score.toFixed(4)}\n   ${r.text.slice(0, 80).replace(/\n/g, " ")}…`
+  );
+  return { text: `**向量搜尋** query="${query}"\n${lines.join("\n")}` };
+}
+
+async function handleStats(): Promise<SkillResult> {
+  const { getVectorService } = await import("../../vector/lancedb.js");
+  const vs = getVectorService();
+  if (!vs.isReady()) return { text: "LanceDB 未初始化" };
+
+  const info = await vs.stats();
+  if (!info) return { text: "stats 不可用" };
+
+  const lines = info.tables.map(t => `• \`${t.name}\` — ${t.count} 筆向量`);
+  return { text: `**LanceDB 狀態**\n${lines.join("\n") || "（無 table）"}` };
+}
+
 // ── Skill 定義 ────────────────────────────────────────────────────────────────
 
 export const skill: Skill = {
@@ -165,6 +200,8 @@ export const skill: Skill = {
       case "rebuild": return handleRebuild(rest);
       case "seed":    return handleSeed(rest);
       case "status":  return handleStatus();
+      case "search":  return handleSearch(rest);
+      case "stats":   return handleStats();
       default:
         return {
           text: [
@@ -173,6 +210,8 @@ export const skill: Skill = {
             "• `rebuild [<memoryDir>] [--dry-run]` — 重建 `MEMORY.md` 索引",
             "• `seed [--dry-run]` — 將記憶目錄 atom 嵌入至 LanceDB",
             "• `status` — 查看遷移狀態",
+            "• `search <query>` — 直查 LanceDB（不過 LLM，minScore=0 顯示原始 score）",
+            "• `stats` — LanceDB table 清單 + 向量數",
           ].join("\n"),
         };
     }
