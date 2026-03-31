@@ -140,17 +140,17 @@ export async function initPlatform(
   }
 
   // ── 9. Memory Engine ───────────────────────────────────────────────────────
-  // HomeClaudeCode：若啟用，globalPath 改指向 ~/.claude/memory/global
+  // HomeClaudeCode：若啟用，root 改指向 ~/.claude/memory
   const memoryConfig = { ...(config.memory ?? {}) };
   if (config.homeClaudeCode?.enabled) {
-    const claudePath = config.homeClaudeCode.path ?? join(homedir(), ".claude", "memory", "global");
-    memoryConfig.globalPath = claudePath;
-    log.info(`[platform] HomeClaudeCode 模式：globalPath=${claudePath}`);
+    const claudeRoot = config.homeClaudeCode.path ?? join(homedir(), ".claude", "memory");
+    memoryConfig.root = claudeRoot;
+    log.info(`[platform] HomeClaudeCode 模式：memoryRoot=${claudeRoot}`);
   }
 
   const defaultMemoryCfg = {
     enabled: true,
-    globalPath: join(catclawDir, "memory", "global"),
+    root: join(catclawDir, "memory"),
     vectorDbPath: join(catclawDir, "memory", "_vectordb"),
     contextBudget: 3000,
     contextBudgetRatio: { global: 0.3, project: 0.4, account: 0.3 },

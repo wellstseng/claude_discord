@@ -6,7 +6,7 @@
  * 觸發點：EventBus 事件（turn:before, turn:after, session:idle, platform:shutdown）
  */
 
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
@@ -28,16 +28,24 @@ function resolvePath(p: string): string {
   return p.startsWith("~") ? p.replace("~", homedir()) : p;
 }
 
-function projectDir(globalPath: string, projectId: string): string {
-  return join(dirname(resolvePath(globalPath)), "projects", projectId);
+function memRoot(cfg: MemoryConfig): string {
+  return resolvePath(cfg.root);
 }
 
-function accountDir(globalPath: string, accountId: string): string {
-  return join(dirname(resolvePath(globalPath)), "accounts", accountId);
+function globalDir(cfg: MemoryConfig): string {
+  return join(memRoot(cfg), "global");
 }
 
-function episodicDir(globalPath: string): string {
-  return join(dirname(resolvePath(globalPath)), "episodic");
+function projectDir(cfg: MemoryConfig, projectId: string): string {
+  return join(memRoot(cfg), "projects", projectId);
+}
+
+function accountDir(cfg: MemoryConfig, accountId: string): string {
+  return join(memRoot(cfg), "accounts", accountId);
+}
+
+function episodicDir(cfg: MemoryConfig): string {
+  return join(memRoot(cfg), "episodic");
 }
 
 // ── MemoryEngine ─────────────────────────────────────────────────────────────
@@ -63,11 +71,11 @@ export class MemoryEngine {
   async init(): Promise<void> {
     if (this.initialized) return;
 
-    const globalPath = resolvePath(this.cfg.globalPath);
+    const gDir = globalDir(this.cfg);
     const vectorDbPath = resolvePath(this.cfg.vectorDbPath);
 
     // 確保目錄存在
-    mkdirSync(globalPath, { recursive: true });
+    mkdirSync(gDir, { recursive: true });
     mkdirSync(vectorDbPath, { recursive: true });
 
     // 初始化 Vector Service
@@ -79,7 +87,7 @@ export class MemoryEngine {
     }
 
     this.initialized = true;
-    log.info(`[memory-engine] 初始化完成：global=${globalPath}`);
+    log.info(`[memory-engine] 初始化完成：global=${gDir}`);
   }
 
   async shutdown(): Promise<void> {
@@ -97,11 +105,10 @@ export class MemoryEngine {
     overrides?: { vectorSearch?: boolean; vectorTopK?: number }
   ): Promise<import("./recall.js").RecallResult> {
     const { recall } = await import("./recall.js");
-    const globalPath = resolvePath(this.cfg.globalPath);
     const paths: import("./recall.js").RecallPaths = {
-      globalDir: globalPath,
-      projectDir: ctx.projectId ? projectDir(this.cfg.globalPath, ctx.projectId) : undefined,
-      accountDir: ctx.accountId ? accountDir(this.cfg.globalPath, ctx.accountId) : undefined,
+      globalDir: globalDir(this.cfg),
+      projectDir: ctx.projectId ? projectDir(this.cfg, ctx.projectId) : undefined,
+      accountDir: ctx.accountId ? accountDir(this.cfg, ctx.accountId) : undefined,
     };
     const opts = overrides ? { ...this.cfg.recall, ...overrides } : this.cfg.recall;
     return recall(prompt, ctx, paths, opts);
@@ -160,8 +167,8 @@ export class MemoryEngine {
     memoryDir?: string
   ): Promise<import("./consolidate.js").ConsolidateResult> {
     const { consolidate } = await import("./consolidate.js");
-    const dir = memoryDir ?? resolvePath(this.cfg.globalPath);
-    const stagingDir = join(dirname(dir), "_staging");
+    const dir = memoryDir ?? globalDir(this.cfg);
+    const stagingDir = join(memRoot(this.cfg), "_staging");
     return consolidate(dir, {
       autoPromoteThreshold: this.cfg.consolidate.autoPromoteThreshold,
       suggestPromoteThreshold: this.cfg.consolidate.suggestPromoteThreshold,
@@ -179,7 +186,7 @@ export class MemoryEngine {
     if (!this.cfg.episodic.enabled) return null;
     const { generateEpisodic } = await import("./episodic.js");
     return generateEpisodic(stats, {
-      episodicDir: episodicDir(this.cfg.globalPath),
+      episodicDir: episodicDir(this.cfg),
       ttlDays: this.cfg.episodic.ttlDays,
     });
   }
@@ -187,7 +194,7 @@ export class MemoryEngine {
   async detectRutPatterns(): Promise<import("./episodic.js").RutWarning[]> {
     if (!this.cfg.rutDetection.enabled) return [];
     const { detectRutPatterns } = await import("./episodic.js");
-    return detectRutPatterns(episodicDir(this.cfg.globalPath));
+    return detectRutPatterns(episodicDir(this.cfg));
   }
 
   // ── 狀態 ─────────────────────────────────────────────────────────────────────
@@ -198,9 +205,9 @@ export class MemoryEngine {
       vectorAvailable = getVectorService().isAvailable();
     } catch { /* not initialized */ }
 
-    const globalPath = resolvePath(this.cfg.globalPath);
-    const projectsDir = join(dirname(globalPath), "projects");
-    const accountsDir = join(dirname(globalPath), "accounts");
+    const gDir = globalDir(this.cfg);
+    const projectsDir = join(memRoot(this.cfg), "projects");
+    const accountsDir = join(memRoot(this.cfg), "accounts");
 
     let projectCount = 0, accountCount = 0;
     try {
@@ -213,7 +220,7 @@ export class MemoryEngine {
     return {
       initialized: this.initialized,
       vectorAvailable,
-      globalDir: globalPath,
+      globalDir: gDir,
       projectCount,
       accountCount,
     };

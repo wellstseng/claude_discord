@@ -81,10 +81,7 @@ async function handleSeed(args: string): Promise<SkillResult> {
     return { text: "❌ MemoryEngine 未啟動（平台模式未啟用）", isError: true };
   }
 
-  const { resolveCatclawDir } = await import("../../core/config.js");
-  const catclawDir = resolveCatclawDir();
-  const { join: pathJoin } = await import("node:path");
-  const globalDir = pathJoin(catclawDir, "memory", "global");
+  const globalDir = engine.getStatus().globalDir;
 
   if (dryRun) {
     const { existsSync, readdirSync } = await import("node:fs");
@@ -112,7 +109,7 @@ async function handleSeed(args: string): Promise<SkillResult> {
 }
 
 function handleStatus(): SkillResult {
-  const claudeMemory = join(homedir(), ".claude", "memory");
+  const claudeMemory = join(homedir(), ".claude", "memory", "global");
   const catclawMemory = join(resolveCatclawDir(), "memory", "global");
 
   const countMd = (dir: string): number => {

@@ -152,7 +152,10 @@ export interface SessionConfig {
 /** 記憶系統設定 */
 export interface MemoryConfig {
   enabled: boolean;
-  globalPath: string;
+  /** 記憶根目錄（global atoms 放在 root/global/）*/
+  root: string;
+  /** @deprecated 舊欄位，解析時自動轉換為 root */
+  globalPath?: string;
   vectorDbPath: string;
   /** context window 記憶預算（tokens） */
   contextBudget: number;
@@ -538,9 +541,11 @@ function parseShowToolCalls(value: string | boolean | undefined): "all" | "summa
 
 function defaultMemoryConfig(raw: Partial<MemoryConfig> | undefined, workspaceDir: string): MemoryConfig {
   const r = raw ?? {};
+  // backward compat：舊 globalPath 是 root/global，自動推導 root
+  const root = r.root ?? (r.globalPath ? r.globalPath.replace(/\/global\/?$/, "") : "~/.catclaw/memory");
   return {
     enabled:        r.enabled ?? true,
-    globalPath:     r.globalPath ?? "~/.catclaw/memory/global",
+    root,
     vectorDbPath:   r.vectorDbPath ?? "~/.catclaw/memory/_vectordb",
     contextBudget:  r.contextBudget ?? 3000,
     contextBudgetRatio: r.contextBudgetRatio ?? { global: 0.3, project: 0.4, account: 0.3 },
