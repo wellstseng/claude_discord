@@ -19,6 +19,10 @@ import { log } from "../logger.js";
 import type { Message } from "../providers/base.js";
 import type { SessionConfig } from "./config.js";
 
+type SessionEventBus = {
+  emit(event: "session:end", sessionId: string): boolean;
+};
+
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
 export interface Session {
@@ -53,10 +57,12 @@ export class SessionManager {
   private queues   = new Map<string, TurnRequest[]>();
   private cfg: SessionConfig;
   private persistDir: string;
+  private eventBus?: SessionEventBus;
 
-  constructor(cfg: SessionConfig) {
+  constructor(cfg: SessionConfig, eventBus?: SessionEventBus) {
     this.cfg = cfg;
     this.persistDir = resolvePath(cfg.persistPath);
+    this.eventBus = eventBus;
   }
 
   // ── 初始化 ───────────────────────────────────────────────────────────────────
@@ -159,6 +165,7 @@ export class SessionManager {
     const filePath = this.sessionPath(sessionKey);
     try { if (existsSync(filePath)) unlinkSync(filePath); } catch { /* 靜默 */ }
     log.debug(`[session] 刪除 ${sessionKey}`);
+    this.eventBus?.emit("session:end", sessionKey);
   }
 
   list(): Session[] {
@@ -296,10 +303,11 @@ export class SessionManager {
         const filePath = join(this.persistDir, f);
         try {
           const raw = readFileSync(filePath, "utf-8");
-          const { lastActiveAt } = JSON.parse(raw) as Session;
+          const { lastActiveAt, sessionKey } = JSON.parse(raw) as Session;
           if (lastActiveAt < cutoff) {
             unlinkSync(filePath);
             log.debug(`[session] 清除過期 ${f}`);
+            this.eventBus?.emit("session:end", sessionKey);
           }
         } catch { /* 損壞，刪除 */
           try { unlinkSync(filePath); } catch { /* 靜默 */ }
@@ -332,8 +340,8 @@ function resolvePath(p: string): string {
 
 let _manager: SessionManager | null = null;
 
-export function initSessionManager(cfg: SessionConfig): SessionManager {
-  _manager = new SessionManager(cfg);
+export function initSessionManager(cfg: SessionConfig, eventBus?: SessionEventBus): SessionManager {
+  _manager = new SessionManager(cfg, eventBus);
   return _manager;
 }
 

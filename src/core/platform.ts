@@ -23,6 +23,7 @@ import { ToolRegistry, initToolRegistry } from "../tools/registry.js";
 import { PermissionGate, initPermissionGate } from "../accounts/permission-gate.js";
 import { SafetyGuard, initSafetyGuard } from "../safety/guard.js";
 import { SessionManager, initSessionManager } from "./session.js";
+import { eventBus } from "./event-bus.js";
 import { buildProviderRegistry, initProviderRegistry } from "../providers/registry.js";
 import { initWorkflow } from "../workflow/bootstrap.js";
 import { initRegistrationManager } from "../accounts/registration.js";
@@ -121,7 +122,7 @@ export async function initPlatform(
     compactAfterTurns: 30,
     persistPath: join(wsDir, "data", "sessions-v2"),
   };
-  _sessionManager = initSessionManager(sessionCfg);
+  _sessionManager = initSessionManager(sessionCfg, eventBus);
   // V1 → V2 session 檔名遷移（加 platform 前綴，冪等）
   const sessionPersistDir = join(wsDir, "data", "sessions-v2");
   renameSessions({ persistDir: sessionPersistDir, platform: "discord" });

@@ -83,6 +83,11 @@ export function initFileTracker(eventBus: EventBus): void {
     void path;
   });
 
+  eventBus.on("session:end", (sessionId) => {
+    clearSession(sessionId);
+    log.debug(`[file-tracker] session:end 清除 ${sessionId}`);
+  });
+
   log.info("[file-tracker] 初始化完成");
 }
 

@@ -16,6 +16,7 @@ import { initWisdomEngine } from "./wisdom-engine.js";
 import { initFailureDetector } from "./failure-detector.js";
 import { initAidocsManager } from "./aidocs-manager.js";
 import { initMemoryExtractor } from "./memory-extractor.js";
+import { scheduleConsolidate } from "./consolidate-scheduler.js";
 
 export interface WorkflowConfig {
   enabled?: boolean;
@@ -79,6 +80,9 @@ export function initWorkflow(
 
     // ── 8. Memory Extractor
     initMemoryExtractor(eventBus);
+
+    // ── 9. Consolidate Scheduler
+    scheduleConsolidate();
 
     log.info("[workflow] 工作流引擎初始化完成");
   } catch (err) {
