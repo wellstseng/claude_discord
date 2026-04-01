@@ -59,46 +59,17 @@ function buildExtractPrompt(
 ): string {
   const emphasis = INTENT_EMPHASIS[intent] ?? INTENT_EMPHASIS.general;
   const crossCtx = crossSessionContext
-    ? `\n\n# 跨 Session 觀察（向量搜尋已命中以下相似知識，請避免重複）\n${crossSessionContext}`
+    ? `\n# 已有類似知識（避免重複）\n${crossSessionContext}\n`
     : "";
 
-  return `你是知識萃取 AI。從以下 AI 回應中提取可操作、長期有價值的知識片段。
-
-# 萃取標準
-- 可操作性：未來遇到類似問題能直接參考
-- 具體性：包含路徑、數值、決策理由（避免泛泛而談）
-- 去噪：跳過暫時性資訊（「正在做…」「已完成…」）
-- ${emphasis}
-
-# 6 種知識類型
-1. factual — 事實性知識（函式名稱、設定值、版本）
-2. architectural — 架構決策（設計選擇及理由）
-3. procedural — 操作步驟（SOP、指令序列）
-4. decision — 決策理由（為何選 X 而非 Y）
-5. pitfall — 陷阱 / 錯誤（遇到的 bug、錯誤配置）
-6. preference — 使用者偏好（風格、工作習慣）
-
-# 知識歸屬層（tier）
-- company：公司 / 團隊共用知識 → 建議寫入全域記憶
-- project：專案特定知識 → 寫入目前專案記憶
-- personal：個人偏好 / 習慣 → 寫入個人記憶
-- unknown：不確定 → 預設個人記憶（安全預設）
-${crossCtx}
-
-# AI 回應
+  return `知識萃取：從以下回應提取可操作、長期有價值的片段（0-5 項）。${emphasis}
+類型：factual|architectural|procedural|decision|pitfall|preference
+層級：company→全域 / project→專案 / personal|unknown→個人${crossCtx}
+# 回應
 ${response.slice(0, 20000)}
 
-# 輸出格式（JSON array，0-5 項；無值得萃取則輸出 []）
-[
-  {
-    "type": "factual|architectural|procedural|decision|pitfall|preference",
-    "tier": "company|project|personal|unknown",
-    "content": "具體知識內容（1-3 句）",
-    "triggers": ["關鍵詞1", "關鍵詞2"]
-  }
-]
-
-只輸出 JSON，不要其他文字。`;
+輸出 JSON array（僅 JSON）：
+[{"type":"factual","tier":"project","content":"具體內容1-3句","triggers":["詞1"]}]`;
 }
 
 // ── 分流邏輯（E8） ────────────────────────────────────────────────────────────
@@ -187,7 +158,8 @@ interface ExtractTask {
 let _queue: ExtractTask[] = [];
 let _running = false;
 const EXTRACT_COOLDOWN_MS = 120_000;
-let _lastExtractAt = 0;
+// per-session cooldown（key = namespace），避免全域鎖阻塞無關 session
+const _cooldownMap = new Map<string, number>();
 
 async function runQueue() {
   if (_running) return;
@@ -205,16 +177,33 @@ async function runQueue() {
 }
 
 async function doExtract(task: ExtractTask): Promise<KnowledgeItem[]> {
+  // Pre-LLM 相似度跳過：輸入 embedding 高度相似已有知識 → 直接跳過 LLM 呼叫
+  try {
+    const { getVectorService } = await import("../vector/lancedb.js");
+    const vsvc = getVectorService();
+    if (vsvc.isAvailable()) {
+      const hits = await vsvc.search(task.response.slice(0, 500), {
+        namespace: task.namespace,
+        topK: 1,
+        minScore: 0.92,
+      });
+      if (hits.length > 0 && hits[0].score >= 0.92) {
+        log.debug(`[extract] 跳過 LLM — 輸入相似度 ${hits[0].score.toFixed(3)} ≥ 0.92`);
+        return [];
+      }
+    }
+  } catch { /* vector 不可用，繼續 */ }
+
   // 跨 session 觀察（E5）
   const crossCtx = await getCrossSessionContext(task.response.slice(0, 500), task.namespace);
 
-  // Ollama generate
+  // Ollama generate（最多 2048 token 輸出，0-5 項 JSON 足夠）
   let raw: string;
   try {
     const { getOllamaClient } = await import("../ollama/client.js");
     const client = getOllamaClient();
     const prompt = buildExtractPrompt(task.response, task.intent, crossCtx);
-    raw = await client.generate(prompt, { think: "auto", numPredict: 8192 });
+    raw = await client.generate(prompt, { think: "auto", numPredict: 2048 });
   } catch (err) {
     log.debug(`[extract] Ollama 不可用，跳過：${err instanceof Error ? err.message : String(err)}`);
     return [];
@@ -251,12 +240,14 @@ export function extractPerTurn(
     return Promise.resolve([]);
   }
 
-  // cooldown 120s
-  if (Date.now() - _lastExtractAt < EXTRACT_COOLDOWN_MS) {
-    log.debug("[extract] cooldown 中，跳過");
+  // per-session cooldown（以 namespace 為 key）
+  const cooldownKey = opts.namespace ?? opts.accountId;
+  const lastAt = _cooldownMap.get(cooldownKey) ?? 0;
+  if (Date.now() - lastAt < EXTRACT_COOLDOWN_MS) {
+    log.debug(`[extract] cooldown 中，跳過（key=${cooldownKey}）`);
     return Promise.resolve([]);
   }
-  _lastExtractAt = Date.now();
+  _cooldownMap.set(cooldownKey, Date.now());
 
   return new Promise<KnowledgeItem[]>((resolve, reject) => {
     _queue.push({
@@ -302,7 +293,11 @@ export async function extractFullScan(
   });
 }
 
-/** 重置 extract cooldown（測試用） */
-export function resetExtractCooldown(): void {
-  _lastExtractAt = 0;
+/** 重置 extract cooldown（測試用）；傳入 namespace 僅清除該 session，不傳則清全部 */
+export function resetExtractCooldown(namespace?: string): void {
+  if (namespace) {
+    _cooldownMap.delete(namespace);
+  } else {
+    _cooldownMap.clear();
+  }
 }
