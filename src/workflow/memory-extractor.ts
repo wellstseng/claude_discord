@@ -56,6 +56,7 @@ export function initMemoryExtractor(eventBus: EventBus): void {
               description: item.content.slice(0, 60),
               confidence: "[臨]",
               scope: item.targetLayer,
+              namespace: ns,
               triggers: item.triggers,
               content: item.content,
             });

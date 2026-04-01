@@ -195,6 +195,8 @@ export function writeAtom(dir: string, name: string, opts: {
   triggers?: string[];
   related?: string[];
   content: string;
+  /** 向量搜尋 namespace（應匹配 recall layerToNs，e.g. "project/id", "account/id"） */
+  namespace?: string;
 }): string {
   mkdirSync(dir, { recursive: true });
   const today = new Date().toISOString().slice(0, 10);
@@ -239,7 +241,7 @@ export function writeAtom(dir: string, name: string, opts: {
   }
 
   // 自動 seed 進 LanceDB（fire-and-forget，vector service 不可用時靜默略過）
-  const namespace = opts.scope ?? "global";
+  const namespace = opts.namespace ?? opts.scope ?? "global";
   const embedText = `${opts.description ?? name}\n${opts.content}`;
   import("../vector/lancedb.js").then(({ getVectorService }) => {
     try {
