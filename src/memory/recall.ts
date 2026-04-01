@@ -3,8 +3,8 @@
  * @description 三層記憶檢索（global + project + account）
  *
  * 管線（R1-R14）：
- *   Trigger 匹配 → Vector Search → Related-Edge BFS(depth=1) → 合併去重
- * 降級：Ollama / Vector 離線 → 純 keyword（R10）
+ *   Trigger 匹配 → Vector Search → Related-Edge BFS(depth=1) → 合併去重 → LLM 選擇
+ * 降級：Ollama / Vector 離線 → 純 keyword（R10）；LLM 選擇失敗 → score 排序前 N
  * 快取：同頻道 60s 內 Jaccard ≥ 0.7 直接回傳（F7）
  * Blind-Spot：所有層結果為空 → blindSpot=true（R9）
  */
@@ -214,6 +214,57 @@ function recallKeyword(
   return fragments;
 }
 
+// ── LLM 記憶選擇（參考 Claude Code findRelevantMemories） ─────────────────────
+
+const LLM_SELECT_SYSTEM = `你是一個記憶選擇器。根據使用者的查詢，從可用的記憶 atom 清單中選出最相關的 atom（最多 5 個）。
+只選擇明確有幫助的 atom。不確定的跳過。若無相關 atom，回傳空陣列。
+回傳 JSON 格式：{"selected": ["id1", "id2", ...]}`;
+
+/**
+ * 用 Ollama LLM 從候選 fragments 中選出最相關的（最多 maxSelect 個）。
+ * 失敗或 Ollama 離線時，fallback 到 score 排序前 maxSelect 個。
+ */
+async function llmSelectAtoms(
+  prompt: string,
+  fragments: AtomFragment[],
+  maxSelect = 5
+): Promise<AtomFragment[]> {
+  if (fragments.length <= maxSelect) return fragments;
+
+  try {
+    const { getOllamaClient } = await import("../ollama/client.js");
+    const client = getOllamaClient();
+
+    const manifest = fragments
+      .map(f => `${f.id}: ${f.atom.description ?? f.atom.name}`)
+      .join("\n");
+
+    const raw = await client.chat(
+      [{ role: "user", content: `Query: ${prompt.slice(0, 300)}\n\nAvailable atoms:\n${manifest}` }],
+      { system: LLM_SELECT_SYSTEM, timeout: 8_000 }
+    );
+
+    // 從回應中萃取 JSON
+    const match = raw.match(/\{[\s\S]*"selected"[\s\S]*\}/);
+    if (!match) throw new Error("no JSON in response");
+    const parsed: { selected: string[] } = JSON.parse(match[0]);
+    if (!Array.isArray(parsed.selected)) throw new Error("invalid selected");
+
+    const validIds = new Set(fragments.map(f => f.id));
+    const selectedIds = parsed.selected.filter(id => validIds.has(id)).slice(0, maxSelect);
+    if (selectedIds.length === 0) throw new Error("no valid ids selected");
+
+    const byId = new Map(fragments.map(f => [f.id, f]));
+    const selected = selectedIds.map(id => byId.get(id)!).filter(Boolean);
+
+    log.debug(`[recall] LLM 選擇：${fragments.length} → ${selected.length} atoms`);
+    return selected;
+  } catch (err) {
+    log.debug(`[recall] LLM 選擇失敗，fallback score 排序：${err instanceof Error ? err.message : String(err)}`);
+    return fragments.sort((a, b) => b.score - a.score).slice(0, maxSelect);
+  }
+}
+
 // ── 公開 API ─────────────────────────────────────────────────────────────────
 
 /**
@@ -234,6 +285,8 @@ export async function recall(
     relatedEdgeSpreading: boolean;
     vectorMinScore: number;
     vectorTopK: number;
+    llmSelect?: boolean;
+    llmSelectMax?: number;
   }
 ): Promise<RecallResult> {
   // ── Cache 檢查 ──
@@ -288,23 +341,28 @@ export async function recall(
   }
   const fragments = Array.from(best.values());
 
+  // ── LLM 選擇（fragments > llmSelectMax 時啟用） ──
+  const finalFragments = (opts.llmSelect !== false && fragments.length > (opts.llmSelectMax ?? 5))
+    ? await llmSelectAtoms(prompt, fragments, opts.llmSelectMax ?? 5)
+    : fragments;
+
   // ── C1: touchAtom（recall 命中 → confirmations +1） ──
-  for (const f of fragments) {
+  for (const f of finalFragments) {
     try { touchAtom(f.atom.path); } catch { /* 靜默 */ }
   }
 
   // ── R9: Blind-Spot 偵測 ──
-  const blindSpot = fragments.length === 0;
+  const blindSpot = finalFragments.length === 0;
   if (blindSpot) {
     log.debug("[recall] BlindSpot — 所有層均無命中");
   }
 
-  const result: RecallResult = { fragments, blindSpot, degraded };
+  const result: RecallResult = { fragments: finalFragments, blindSpot, degraded };
 
   // ── 存入 Cache ──
   setCache(ctx.channelId, prompt, result);
 
-  log.debug(`[recall] 命中 ${fragments.length} 個 atom（degraded=${degraded}）`);
+  log.debug(`[recall] 命中 ${finalFragments.length} 個 atom（degraded=${degraded}）`);
   return result;
 }
 

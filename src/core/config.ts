@@ -167,6 +167,8 @@ export interface MemoryConfig {
     relatedEdgeSpreading: boolean;
     vectorMinScore: number;
     vectorTopK: number;
+    llmSelect: boolean;
+    llmSelectMax: number;
   };
   extract: {
     enabled: boolean;
@@ -553,9 +555,14 @@ function defaultMemoryConfig(raw: Partial<MemoryConfig> | undefined, workspaceDi
     contextBudget:  r.contextBudget ?? 3000,
     contextBudgetRatio: r.contextBudgetRatio ?? { global: 0.3, project: 0.4, account: 0.3 },
     writeGate:      r.writeGate ?? { enabled: true, dedupThreshold: 0.80 },
-    recall: r.recall ?? {
-      triggerMatch: true, vectorSearch: true, relatedEdgeSpreading: true,
-      vectorMinScore: 0.65, vectorTopK: 10,
+    recall: {
+      triggerMatch: r.recall?.triggerMatch ?? true,
+      vectorSearch: r.recall?.vectorSearch ?? true,
+      relatedEdgeSpreading: r.recall?.relatedEdgeSpreading ?? true,
+      vectorMinScore: r.recall?.vectorMinScore ?? 0.65,
+      vectorTopK: r.recall?.vectorTopK ?? 10,
+      llmSelect: r.recall?.llmSelect ?? true,
+      llmSelectMax: r.recall?.llmSelectMax ?? 5,
     },
     extract: r.extract ?? {
       enabled: true, perTurn: true, onSessionEnd: true,
