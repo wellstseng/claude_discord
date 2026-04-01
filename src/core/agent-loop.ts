@@ -325,6 +325,18 @@ export async function* agentLoop(
 
   // ── 2. Session + messages ──────────────────────────────────────────────────
   const sessionKey = opts._sessionKeyOverride ?? `${platform}:ch:${channelId}`;
+
+  // Turn Queue：序列化同一 session 的並發 turn，防止歷史交錯
+  try {
+    await sessionManager.enqueueTurn({ sessionKey, accountId, prompt, signal: opts.signal });
+  } catch (err) {
+    yield { type: "error", message: `session 佇列：${err instanceof Error ? err.message : String(err)}` };
+    return;
+  }
+
+  // ── 以下受 Turn Queue 保護（讀 session → 執行 → 寫回 → dequeueTurn）──────
+  try {
+
   const session = sessionManager.getOrCreate(sessionKey, accountId, channelId, opts.provider.id);
 
   // Session Snapshot（turn 開始前快照）
@@ -778,4 +790,9 @@ export async function* agentLoop(
 
   yield { type: "done", text: fullResponse, turnCount: loopCount };
   log.debug(`[agent-loop] ── turn 完成 ── accountId=${accountId} channelId=${channelId} loops=${loopCount} tools=${tracker.toolCalls.length}`);
+
+  } finally {
+    // Turn Queue 釋放：無論成功、錯誤、或 abort，都讓下一個 turn 繼續
+    sessionManager.dequeueTurn(sessionKey);
+  }
 }
