@@ -396,6 +396,20 @@ export interface BridgeConfig {
     /** 單一 tool 執行超時毫秒（預設 30000，0 = 無限制） */
     toolTimeoutMs?: number;
   };
+  /**
+   * 外部 MCP Server 設定表。
+   * 每個 server 以 key 作為 serverName，tools 命名為 mcp_{serverName}_{toolName}。
+   */
+  mcpServers?: Record<string, {
+    /** 執行指令（如 "node"、"python"） */
+    command: string;
+    /** 指令參數 */
+    args?: string[];
+    /** 額外環境變數（支援 ${ENV_VAR} 展開） */
+    env?: Record<string, string>;
+    /** 此 server 所有 tools 的 tier（預設 elevated） */
+    tier?: "public" | "standard" | "elevated" | "admin" | "owner";
+  }>;
 }
 
 // ── 環境變數展開 ──────────────────────────────────────────────────────────────

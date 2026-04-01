@@ -236,6 +236,18 @@ export async function initPlatform(
     process.cwd(),
   );
 
+  // ── 11. MCP Servers ─────────────────────────────────────────────────────────
+  if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
+    const { McpClient } = await import("../mcp/client.js");
+    for (const [name, srvCfg] of Object.entries(config.mcpServers)) {
+      const client = new McpClient(name, srvCfg, _toolRegistry!);
+      client.start().catch(err =>
+        log.warn(`[platform] MCP server ${name} 啟動失敗：${err instanceof Error ? err.message : String(err)}`)
+      );
+    }
+    log.info(`[platform] MCP servers 啟動：${Object.keys(config.mcpServers).join(",")}`);
+  }
+
   _ready = true;
   log.info(`[platform] 初始化完成 providers=${Object.keys(config.providers).join(",")}`);
 }

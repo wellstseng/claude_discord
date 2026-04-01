@@ -165,7 +165,32 @@ export const rollbackSkill: Skill = {
   },
 };
 
+// ── /clear ────────────────────────────────────────────────────────────────────
+
+export const clearSkill: Skill = {
+  name: "clear",
+  description: "清除當前頻道的 session 歷史（保留 session，清空 messages）",
+  tier: "standard",
+  trigger: ["/clear"],
+
+  async execute({ channelId }) {
+    const sessionManager = getPlatformSessionManager();
+    const sessions = sessionManager.list();
+    const session = sessions.find(s => s.channelId === channelId);
+
+    if (!session) {
+      return { text: "ℹ️ 此頻道尚無 session 歷史。" };
+    }
+
+    const msgCount = session.messages.length;
+    session.messages = [];
+    session.turnCount = 0;
+
+    return { text: `🧹 Session 已清除（${msgCount} 條訊息已刪除）。` };
+  },
+};
+
 // ── exports（registry 支援 skill + skills 兩種格式）────────────────────────
 
 export const skill = stopSkill;
-export const skills = [queueSkill, rollbackSkill];
+export const skills = [queueSkill, rollbackSkill, clearSkill];
