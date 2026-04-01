@@ -8,7 +8,7 @@
  * - LLM context 只存 "[工具記錄] op×N → path" 摘要，不佔大量 token
  */
 
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, readdirSync, statSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
@@ -76,6 +76,28 @@ export class ToolLogStore {
     }
 
     return relativePath;
+  }
+
+  /**
+   * 清除超過 retentionDays 天未修改的 tool log 目錄
+   * 預設保留 7 天（對齊 session TTL 預設值）
+   */
+  cleanup(retentionDays = 7): void {
+    const cutoff = Date.now() - retentionDays * 86_400_000;
+    try {
+      const dirs = readdirSync(this.logDir, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .map(e => join(this.logDir, e.name));
+      for (const dir of dirs) {
+        try {
+          const mtime = statSync(dir).mtimeMs;
+          if (mtime < cutoff) {
+            rmSync(dir, { recursive: true, force: true });
+            log.debug(`[tool-log] 清除過期目錄：${dir}`);
+          }
+        } catch { /* 靜默 */ }
+      }
+    } catch { /* logDir 不存在 */ }
   }
 
   /**

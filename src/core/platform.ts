@@ -32,12 +32,12 @@ import { initMemoryEngine, type MemoryEngine } from "../memory/engine.js";
 import { initOllamaClient } from "../ollama/client.js";
 import { initRateLimiter, getRateLimiter, type RateLimiter } from "./rate-limiter.js";
 import { renameSessions } from "../migration/rename-sessions.js";
-import { initTurnAuditLog } from "./turn-audit-log.js";
+import { initTurnAuditLog, getTurnAuditLog } from "./turn-audit-log.js";
 import { initContextEngine } from "./context-engine.js";
 import { initSubagentRegistry } from "./subagent-registry.js";
-import { initToolLogStore } from "./tool-log-store.js";
+import { initToolLogStore, getToolLogStore } from "./tool-log-store.js";
 import { initInboundHistoryStore } from "../discord/inbound-history.js";
-import { initSessionSnapshotStore } from "./session-snapshot.js";
+import { initSessionSnapshotStore, getSessionSnapshotStore } from "./session-snapshot.js";
 
 // ── 子系統實例（module-level singleton） ─────────────────────────────────────
 
@@ -208,6 +208,16 @@ export async function initPlatform(
   initToolLogStore(auditDataDir);
   initInboundHistoryStore(auditDataDir);
   initSessionSnapshotStore(auditDataDir);
+
+  // 啟動時執行一次清理，並每 24h 自動滾動（防止日誌無限累積）
+  function runDataCleanup() {
+    try { getTurnAuditLog()?.cleanup(); } catch { /* 靜默 */ }
+    try { getToolLogStore()?.cleanup(); } catch { /* 靜默 */ }
+    try { getSessionSnapshotStore()?.cleanup(); } catch { /* 靜默 */ }
+    log.debug("[platform] 日誌滾動清理完成");
+  }
+  runDataCleanup();
+  setInterval(runDataCleanup, 24 * 3600_000).unref(); // unref：不阻止 process 退出
 
   // ── 9.8 Token Usage Dashboard（可選）──────────────────────────────────────
   if (config.dashboard?.enabled) {
