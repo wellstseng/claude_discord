@@ -255,7 +255,8 @@ export class OllamaClient {
     const url = backend.host.replace(/\/$/, "") + endpoint;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timerFired = false;
+    const timer = setTimeout(() => { timerFired = true; controller.abort(); }, timeoutMs);
 
     try {
       const resp = await fetch(url, {
@@ -270,7 +271,10 @@ export class OllamaClient {
       }
       return await resp.json() as Record<string, unknown>;
     } catch (err) {
-      log.warn(`[ollama] ${backend.name} ${endpoint} 失敗：${err instanceof Error ? err.message : String(err)}`);
+      const msg = timerFired
+        ? `timeout(${timeoutMs}ms)`
+        : (err instanceof Error ? err.message : String(err));
+      log.warn(`[ollama] ${backend.name} ${endpoint} 失敗：${msg}`);
       return null;
     } finally {
       clearTimeout(timer);

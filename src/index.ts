@@ -11,8 +11,8 @@
  * 6. 監聽 process 結束信號，優雅關閉
  */
 
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config, watchConfig, resolveCatclawDir, resolveWorkspaceDirSafe } from "./core/config.js";
 import { setLogLevel } from "./logger.js";
@@ -30,6 +30,28 @@ import { parseAgentArg, loadAgentConfig } from "./core/agent-loader.js";
 // 在其他模組開始 log 前設定層級
 setLogLevel(config.logLevel);
 log.info(`[catclaw] 啟動`)
+
+// ── Crash Log 路徑 ──────────────────────────────────────────────────────────
+const _crashLogPath = join(
+  process.env.CATCLAW_WORKSPACE ?? process.cwd(),
+  "data",
+  "last-crash.json"
+);
+
+// 捕捉未處理的 exception → 寫入 crash log，讓下次啟動時可讀取
+process.on("uncaughtException", (err) => {
+  log.error(`[bridge] uncaughtException: ${err.message}`);
+  try {
+    mkdirSync(dirname(_crashLogPath), { recursive: true });
+    writeFileSync(_crashLogPath, JSON.stringify({
+      time: new Date().toISOString(),
+      message: err.message,
+      stack: (err.stack ?? "").slice(0, 3000),
+      type: "uncaughtException",
+    }), "utf-8");
+  } catch { /* 靜默 */ }
+  process.exit(1);
+});
 
 // ── --agent 模式：若有指定 agent，載入合併後設定 ─────────────────────────────
 const catclawDir = resolveCatclawDir();
@@ -123,6 +145,18 @@ bot.once("ready", (c) => {
     }
   }
 
+  // ── 上次 crash 原因記錄 ────────────────────────────────────────────────────
+  if (existsSync(_crashLogPath)) {
+    try {
+      const crash = JSON.parse(readFileSync(_crashLogPath, "utf-8")) as {
+        time?: string; message?: string; stack?: string; type?: string;
+      };
+      log.warn(`[bridge] 上次因 crash 重啟 — ${crash.time ?? "?"} ${crash.message ?? ""}`);
+      if (crash.stack) log.warn(`[bridge] crash stack: ${crash.stack.split("\n").slice(0, 3).join(" | ")}`);
+      unlinkSync(_crashLogPath);
+    } catch { /* 靜默 */ }
+  }
+
   // ── Crash recovery：掃描被中斷的 turn，排除有意重啟的頻道 ──
   const interruptedTurns = scanAndCleanActiveTurns(10 * 60_000); // 10 分鐘內的才接續
   for (const { channelId: chId, record } of interruptedTurns) {
@@ -159,9 +193,10 @@ function shutdown(signal: string): void {
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-// 捕捉未處理的 Promise rejection，避免 Node.js 靜默忽略
+// 捕捉未處理的 Promise rejection（記錄但不 crash）
 process.on("unhandledRejection", (reason) => {
-  log.error("[bridge] unhandledRejection:", reason);
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  log.error(`[bridge] unhandledRejection: ${msg}`);
 });
 
 // 登入 Discord
