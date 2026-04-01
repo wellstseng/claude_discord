@@ -15,6 +15,7 @@
 import { writeFileSync, readFileSync, existsSync, readdirSync, unlinkSync, mkdirSync, renameSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { log } from "../logger.js";
 import type { Message } from "../providers/base.js";
 import type { SessionConfig } from "./config.js";
@@ -274,7 +275,10 @@ export class SessionManager {
     try {
       const filePath = this.sessionPath(session.sessionKey);
       const tmpPath  = filePath + ".tmp";
-      writeFileSync(tmpPath, JSON.stringify(session, null, 2), "utf-8");
+      const sessionJson = JSON.stringify(session);
+      const checksum = createHash("sha256").update(sessionJson).digest("hex");
+      const withChecksum = JSON.stringify({ ...session, _checksum: checksum }, null, 2);
+      writeFileSync(tmpPath, withChecksum, "utf-8");
       renameSync(tmpPath, filePath);  // atomic write
     } catch (err) {
       log.warn(`[session] persist 失敗 ${session.sessionKey}：${err instanceof Error ? err.message : String(err)}`);
@@ -285,9 +289,23 @@ export class SessionManager {
     try {
       const files = readdirSync(this.persistDir).filter(f => f.endsWith(".json"));
       for (const f of files) {
+        const filePath = join(this.persistDir, f);
         try {
-          const raw = readFileSync(join(this.persistDir, f), "utf-8");
-          const session = JSON.parse(raw) as Session;
+          const raw = readFileSync(filePath, "utf-8");
+          const parsed = JSON.parse(raw) as Session & { _checksum?: string };
+          const { _checksum, ...sessionData } = parsed;
+          if (_checksum) {
+            const expected = createHash("sha256").update(JSON.stringify(sessionData)).digest("hex");
+            if (expected !== _checksum) {
+              const bakPath = filePath + ".bak";
+              try { if (existsSync(bakPath)) unlinkSync(bakPath); } catch { /* 靜默 */ }
+              try { renameSync(filePath, bakPath); } catch { /* 靜默 */ }
+              log.warn(`[session] checksum 驗證失敗，已備份：${filePath}`);
+              continue;
+            }
+          }
+          // 通過驗證或無 _checksum（舊格式向下相容）
+          const session = sessionData as Session;
           this.sessions.set(session.sessionKey, session);
         } catch { /* 損壞的 session 檔，跳過 */ }
       }
