@@ -50,6 +50,7 @@ let _permissionGate: PermissionGate | null = null;
 let _safetyGuard: SafetyGuard | null = null;
 let _sessionManager: SessionManager | null = null;
 let _ready = false;
+let _memoryRoot: string | null = null;
 
 // ── 初始化 ────────────────────────────────────────────────────────────────────
 
@@ -163,6 +164,7 @@ export async function initPlatform(
     oscillation: { enabled: false },
   };
   const resolvedMemoryCfg = { ...defaultMemoryCfg, ...memoryConfig };
+  _memoryRoot = resolvedMemoryCfg.root;
 
   if (resolvedMemoryCfg.enabled !== false) {
     _memoryEngine = initMemoryEngine(resolvedMemoryCfg);
@@ -270,6 +272,10 @@ export function getPlatformRateLimiter(): RateLimiter | null {
 export function getPlatformSessionManager(): SessionManager {
   if (!_sessionManager) throw new Error("[platform] SessionManager 尚未初始化");
   return _sessionManager;
+}
+
+export function getPlatformMemoryRoot(): string | null {
+  return _memoryRoot;
 }
 
 // ── 身份解析（S6 暫時版）─────────────────────────────────────────────────────

@@ -44,6 +44,7 @@ import {
   getPlatformMemoryEngine,
   getPlatformProjectManager,
   getPlatformRateLimiter,
+  getPlatformMemoryRoot,
 } from "./core/platform.js";
 import { getInboundHistoryStore, type InboundEntry } from "./discord/inbound-history.js";
 import { resolveProvider, getChannelAccess as getCoreChannelAccess } from "./core/config.js";
@@ -540,6 +541,7 @@ async function handleMessage(
       // ── Ack Reaction：⏳ queued ──────────────────────────────────────────
       void firstMessage.react("⏳").catch(() => { /* 無 permission 時靜默 */ });
 
+      const memoryRoot = getPlatformMemoryRoot();
       const gen = agentLoop(prompt, {
         platform: "discord",
         channelId: firstMessage.channelId,
@@ -551,6 +553,14 @@ async function handleMessage(
         systemPrompt: combinedSystemPrompt || undefined,
         turnTimeoutMs: config.turnTimeoutMs,
         showToolCalls: config.showToolCalls as "all" | "summary" | "none",
+        ...(memoryRoot && config.memory.sessionMemory?.enabled !== false ? {
+          sessionMemory: {
+            enabled: true,
+            intervalTurns: config.memory.sessionMemory?.intervalTurns ?? 10,
+            maxHistoryTurns: config.memory.sessionMemory?.maxHistoryTurns ?? 15,
+            memoryDir: memoryRoot,
+          },
+        } : {}),
         ...(config.safety?.execApproval?.enabled && config.safety.execApproval.dmUserId ? {
           execApproval: {
             enabled: true,

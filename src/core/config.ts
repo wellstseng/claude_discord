@@ -186,6 +186,11 @@ export interface MemoryConfig {
   episodic: { enabled: boolean; ttlDays: number };
   rutDetection: { enabled: boolean; windowSize: number; minOccurrences: number };
   oscillation: { enabled: boolean };
+  sessionMemory: {
+    enabled: boolean;
+    intervalTurns: number;
+    maxHistoryTurns: number;
+  };
 }
 
 /** Ollama 雙 Backend 設定 */
@@ -575,6 +580,7 @@ function defaultMemoryConfig(raw: Partial<MemoryConfig> | undefined, workspaceDi
     episodic:     r.episodic ?? { enabled: true, ttlDays: 24 },
     rutDetection: r.rutDetection ?? { enabled: true, windowSize: 3, minOccurrences: 2 },
     oscillation:  r.oscillation ?? { enabled: true },
+    sessionMemory: r.sessionMemory ?? { enabled: true, intervalTurns: 10, maxHistoryTurns: 15 },
   };
 }
 

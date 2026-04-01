@@ -31,6 +31,7 @@ import { getSessionSnapshotStore } from "./session-snapshot.js";
 import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
 import type { MemoryEngine } from "../memory/engine.js";
 import { createApproval } from "./exec-approval.js";
+import { getSessionNote, checkAndSaveNote } from "../memory/session-memory.js";
 
 // ── 常數 ─────────────────────────────────────────────────────────────────────
 
@@ -153,6 +154,18 @@ export interface AgentLoopOpts {
     sendDm: (dmUserId: string, content: string) => Promise<void>;
     dmUserId: string;
     timeoutMs?: number;
+  };
+
+  /**
+   * Session Memory 選項（對話筆記）。
+   * 注入：每次 turn 開始前讀取並前置到 system prompt。
+   * 萃取：每 intervalTurns 輪 fire-and-forget 萃取一次。
+   */
+  sessionMemory?: {
+    enabled: boolean;
+    intervalTurns: number;
+    maxHistoryTurns: number;
+    memoryDir: string;
   };
 
   /**
@@ -382,6 +395,15 @@ export async function* agentLoop(
     if (nudge) {
       systemPrompt = systemPrompt ? `${systemPrompt}\n\n${nudge}` : nudge;
       log.debug(`[agent-loop] token-budget-nudge ratio=${ratio.toFixed(2)} appended`);
+    }
+  }
+
+  // ── 4c. Session Note 注入（參考 Claude Code SessionMemory）───────────────────
+  if (opts.sessionMemory?.enabled) {
+    const note = getSessionNote(opts.sessionMemory.memoryDir, channelId);
+    if (note) {
+      systemPrompt = note + (systemPrompt ? `\n\n${systemPrompt}` : "");
+      log.debug(`[agent-loop] session-note 已注入 channelId=${channelId.slice(-8)}`);
     }
   }
 
@@ -692,6 +714,18 @@ export async function* agentLoop(
       snapshotStore.delete(sessionKey, session.turnCount);
     }
     // CE 壓縮時快照在 save 時已設定 expiresAt=48h，不需額外操作
+  }
+
+  // ── Session Note 萃取（fire-and-forget）────────────────────────────────────
+  if (opts.sessionMemory?.enabled) {
+    const sessionAfterForNote = sessionManager.get(sessionKey) ?? session;
+    const turnCountForNote = sessionAfterForNote.turnCount;
+    const historyForNote = sessionManager.getHistory(sessionKey);
+    checkAndSaveNote(channelId, turnCountForNote, historyForNote, opts.sessionMemory.memoryDir, {
+      enabled: true,
+      intervalTurns: opts.sessionMemory.intervalTurns,
+      maxHistoryTurns: opts.sessionMemory.maxHistoryTurns,
+    }).catch(() => { /* 靜默 */ });
   }
 
   // Turn Audit Log 記錄
