@@ -42,18 +42,26 @@ export function initMemoryExtractor(eventBus: EventBus): void {
 
         for (const item of items) {
           try {
+            const ns = item.targetLayer === "global" ? "global"
+              : item.targetLayer === "project" ? `project/${ctx.projectId ?? "default"}`
+              : `account/${ctx.accountId}`;
+            const gate = await engine.checkWrite(item.content, ns);
+            if (!gate.allowed) {
+              log.debug(`[memory-extractor] write-gate 阻擋 (${gate.reason})：${item.content.slice(0, 40)}`);
+              continue;
+            }
             const name = `ext_${Date.now()}_${safeName(item.content)}`;
             const dir = layerDir(globalDir, item.targetLayer, { projectId: ctx.projectId, accountId: ctx.accountId });
             writeAtom(dir, name, {
               description: item.content.slice(0, 60),
               confidence: "[臨]",
-              scope: item.targetLayer === "global" ? "global" : item.targetLayer === "project" ? "project" : "account",
+              scope: item.targetLayer,
               triggers: item.triggers,
               content: item.content,
             });
             log.debug(`[memory-extractor] 寫入 ${name} → ${dir}`);
           } catch (err) {
-            log.debug(`[memory-extractor] writeAtom 失敗：${err instanceof Error ? err.message : String(err)}`);
+            log.debug(`[memory-extractor] 失敗：${err instanceof Error ? err.message : String(err)}`);
           }
         }
       } catch (err) {
