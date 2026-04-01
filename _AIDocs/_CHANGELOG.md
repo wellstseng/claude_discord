@@ -3,6 +3,8 @@
 > 知識庫變更紀錄（最新在上，超過 8 筆觸發滾動淘汰）
 
 | 日期 | 變更 | 影響文件 |
+| 2026-04-02 | **fix(memory): Sprint 2 記憶管線修復** — ①接線 memory-extractor.ts（turn:after→extractPerTurn→writeAtom）②補 write-gate dedup+injection 保護 ③修正 llmSelect config 預設 false（opt-in）④修正 writeAtom vector namespace mismatch（project→project/id）⑤spawn-subagent namespace 同步修正 | memory-extractor.ts(new), atom.ts, config.ts, spawn-subagent.ts, workflow/bootstrap.ts |
+| 2026-04-01 | **perf(memory): recall+context 省 token** — ACT-R 排序 overflow 填充、LLM select opt-in、CE compaction 保留工具上下文、交替工具迴圈偵測 | recall.ts, context-builder.ts, agent-loop.ts, context-engine.ts, extract.ts |
 | 2026-03-28 | **feat: pi-ai OAuth provider + /configure skill** — claude-api.ts 全面改用 @mariozechner/pi-ai streamSimpleAnthropic（OAuth token 自動處理）；新增 auth-profile-store.ts（credentials/state 分離，路徑 agents/default/auth-profile.json）；移除 ProviderEntry.profiles[]；新增 /configure skill（model/provider 切換 hot-reload） | claude-api.ts, auth-profile-store.ts, config.ts, discord.ts, skills/configure.ts, modules/providers.md, modules/skills.md |
 |------|------|---------|
 | 2026-03-27 | **feat(v4-6): cron subagent action** — CronAction 新增 subagent type（task/provider/timeoutMs/notify），CronConfig 新增 defaultAccountId/defaultProvider，cron.ts 新增 execSubagent() | cron.ts, config.ts, core/config.ts |
