@@ -2,8 +2,9 @@
  * @file core/reply-handler.ts
  * @description AgentLoopEvent async generator → Discord 分段回覆
  *
- * 邏輯與 reply.ts 對齊（chunking / code fence / MEDIA token / typing indicator）
- * 差別：輸入是 AsyncGenerator<AgentLoopEvent>，非 AcpEvent callback。
+ * 兩種回覆模式：
+ * - streaming（預設）：每條訊息建立後 live-edit，體驗類似 ChatGPT 串流
+ * - chunk（fallback）：逐段發送新訊息（fileMode / 超閾值時自動切換）
  */
 
 import { AttachmentBuilder, type Message, type SendableChannels } from "discord.js";
@@ -15,7 +16,8 @@ import { log } from "../logger.js";
 
 // Discord 字數上限
 const TEXT_LIMIT = 2000;
-const FLUSH_DELAY_MS = 3000;
+const FLUSH_DELAY_MS = 3000;   // chunk 模式：靜默多久後送出
+const EDIT_INTERVAL_MS = 800;  // streaming 模式：最快 edit 間隔
 
 // ── 工具函式 ──────────────────────────────────────────────────────────────────
 
@@ -47,15 +49,15 @@ function extractMediaTokens(raw: string): { text: string; mediaPaths: string[] }
 
 async function uploadMediaFile(filePath: string, originalMessage: Message, isFirst: boolean): Promise<boolean> {
   try {
-    const buffer = await readFile(filePath);
-    const attachment = new AttachmentBuilder(buffer, { name: basename(filePath) });
+    const buf = await readFile(filePath);
+    const attachment = new AttachmentBuilder(buf, { name: basename(filePath) });
     const payload = { files: [attachment] };
     if (isFirst) {
       await originalMessage.reply(payload);
     } else {
       await (originalMessage.channel as SendableChannels).send(payload);
     }
-    log.info(`[reply-handler] 已上傳附件：${basename(filePath)} (${buffer.length} bytes)`);
+    log.info(`[reply-handler] 已上傳附件：${basename(filePath)} (${buf.length} bytes)`);
     return true;
   } catch (err) {
     log.warn(`[reply-handler] 附件上傳失敗：${filePath} — ${err instanceof Error ? err.message : String(err)}`);
@@ -106,8 +108,65 @@ export async function handleAgentLoopReply(
   const threshold = bridgeConfig.fileUploadThreshold;
   const toolMode = bridgeConfig.showToolCalls;
   const threadChannel = opts?.threadChannel;
+  const useStreamEdit = (bridgeConfig.streamingReply !== false);
 
-  // 決定送出目標：若有 threadChannel，一律 send 到該 channel；否則第一則 reply，後續 send
+  // ── Streaming edit 狀態 ───────────────────────────────────────────────────
+  let editMsg: Message | null = null;   // 目前正在被 live-edit 的訊息
+  let editTimer: ReturnType<typeof setTimeout> | null = null;
+  let editBusy = false;  // 正在 await edit，避免重疊
+
+  async function doEdit(): Promise<void> {
+    if (!editMsg || !buffer.trim() || editBusy) return;
+    const content = closeFenceIfOpen(buffer);
+    const safeContent = content.length > TEXT_LIMIT ? content.slice(0, TEXT_LIMIT - 3) + "…" : content;
+    try {
+      editBusy = true;
+      await editMsg.edit(safeContent);
+    } catch { /* rate-limited 或訊息被刪，靜默 */ }
+    finally { editBusy = false; }
+  }
+
+  function scheduleEdit(): void {
+    if (editTimer) return;
+    editTimer = setTimeout(() => {
+      editTimer = null;
+      void doEdit();
+    }, EDIT_INTERVAL_MS);
+  }
+
+  function cancelEditTimer(): void {
+    if (editTimer) { clearTimeout(editTimer); editTimer = null; }
+  }
+
+  /** 等待正在進行的 edit 完成（最多 500ms） */
+  async function waitEditDone(): Promise<void> {
+    let wait = 0;
+    while (editBusy && wait < 500) {
+      await new Promise(r => setTimeout(r, 50));
+      wait += 50;
+    }
+  }
+
+  /** 建立新的 edit 目標訊息（並立刻把 buffer 寫入） */
+  async function initEditMsg(initialContent = "💭"): Promise<void> {
+    try {
+      let msg: Message;
+      if (threadChannel) {
+        msg = await threadChannel.send(initialContent);
+      } else if (isFirst) {
+        msg = await originalMessage.reply(initialContent);
+        stopTyping();
+        isFirst = false;
+      } else {
+        msg = await (originalMessage.channel as SendableChannels).send(initialContent);
+      }
+      editMsg = msg;
+    } catch (err) {
+      log.debug(`[reply-handler] initEditMsg 失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // ── 決定送出目標（chunk 模式 or tool/error 臨時 send） ─────────────────────
   async function send(content: string): Promise<void> {
     if (!content.trim()) return;
     if (threadChannel) {
@@ -127,7 +186,7 @@ export async function handleAgentLoopReply(
   }, 8_000);
   const stopTyping = () => clearInterval(typingInterval);
 
-  // Flush timer
+  // ── Chunk 模式：flush timer ───────────────────────────────────────────────
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let flushing = false;
 
@@ -172,23 +231,61 @@ export async function handleAgentLoopReply(
     let remaining = toSend;
     while (remaining.length > 0) {
       await send(remaining.slice(0, TEXT_LIMIT));
+      if (isFirst) stopTyping();
       isFirst = false;
       remaining = remaining.slice(TEXT_LIMIT);
     }
     thinkingBuffer = "";
   }
 
+  // ── Streaming edit：文字累積後 live-edit ────────────────────────────────
+  const STREAM_SPLIT_THRESHOLD = TEXT_LIMIT - 100; // 1900
+
+  async function streamEditTextDelta(text: string): Promise<void> {
+    buffer += text;
+
+    // 首次：建立 edit 目標訊息
+    if (!editMsg) {
+      await initEditMsg("💭");
+    }
+
+    // 超過安全上限 → 終結目前段，開新訊息
+    if (buffer.length >= STREAM_SPLIT_THRESHOLD) {
+      cancelEditTimer();
+      await waitEditDone();
+      await doEdit();           // 最終 edit 目前段
+      editMsg = null;           // 重置，下次 initEditMsg 時開新訊息
+      buffer = "";              // 清空已發送部分
+      // 剩餘 text 已在 buffer（此次 call 全部 += 進去），實際上此 branch
+      // 只會發生在 text 本身很短的情況，所以 buffer 已清空沒有 residue
+    } else {
+      scheduleEdit();
+    }
+  }
+
+  async function finalizeStreamEdit(): Promise<void> {
+    cancelEditTimer();
+    await waitEditDone();
+    if (buffer.trim()) {
+      await doEdit();
+    }
+    editMsg = null;
+    buffer = "";
+  }
+
+  // ── 主事件迴圈 ───────────────────────────────────────────────────────────
+
   try {
     for await (const event of gen) {
       if (event.type === "thinking") {
         if (bridgeConfig.showThinking) {
           thinkingBuffer += event.thinking;
-          scheduleFlush();
+          if (!useStreamEdit) scheduleFlush();
         }
 
       } else if (event.type === "text_delta") {
         if (thinkingBuffer.length > 0) {
-          cancelFlushTimer();
+          if (useStreamEdit) { cancelEditTimer(); } else { cancelFlushTimer(); }
           await flushThinking();
         }
         totalText += event.text;
@@ -197,46 +294,59 @@ export async function handleAgentLoopReply(
 
         if (threshold > 0 && totalText.length > threshold) {
           fileMode = true;
-          cancelFlushTimer();
+          if (useStreamEdit) {
+            cancelEditTimer();
+            await finalizeStreamEdit();
+          } else {
+            cancelFlushTimer();
+          }
           buffer = "";
           continue;
         }
 
-        buffer += event.text;
-        if (buffer.length >= TEXT_LIMIT) {
-          cancelFlushTimer();
-          await flush(false);
+        if (useStreamEdit) {
+          await streamEditTextDelta(event.text);
         } else {
-          scheduleFlush();
+          buffer += event.text;
+          if (buffer.length >= TEXT_LIMIT) {
+            cancelFlushTimer();
+            await flush(false);
+          } else {
+            scheduleFlush();
+          }
         }
 
       } else if (event.type === "tool_start") {
         if (toolMode === "all") {
-          cancelFlushTimer();
-          if (!fileMode) await flush(true);
+          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); }
+          else { cancelFlushTimer(); if (!fileMode) await flush(true); }
           await send(`🔧 使用工具：${event.name}`);
           if (isFirst) stopTyping();
           isFirst = false;
+          editMsg = null; // 重置，下次文字重新起始
         } else if (toolMode === "summary" && !summaryHintSent) {
-          cancelFlushTimer();
-          if (!fileMode) await flush(true);
+          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); }
+          else { cancelFlushTimer(); if (!fileMode) await flush(true); }
           await send("⏳ 處理中...");
           if (isFirst) stopTyping();
           isFirst = false;
           summaryHintSent = true;
+          editMsg = null;
         }
 
       } else if (event.type === "tool_blocked") {
         if (toolMode !== "none") {
-          cancelFlushTimer();
-          if (!fileMode) await flush(true);
+          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); }
+          else { cancelFlushTimer(); if (!fileMode) await flush(true); }
           await send(`🚫 工具被阻擋：${event.name} — ${event.reason}`);
           if (isFirst) stopTyping();
           isFirst = false;
+          editMsg = null;
         }
 
       } else if (event.type === "done") {
-        cancelFlushTimer();
+        if (useStreamEdit) { cancelEditTimer(); }
+        else { cancelFlushTimer(); }
         stopTyping();
 
         const { text: cleanedText, mediaPaths } = extractMediaTokens(totalText);
@@ -251,20 +361,25 @@ export async function handleAgentLoopReply(
           }
           isFirst = false;
         } else {
-          if (fileMode) {
-            buffer = cleanedText;
+          if (useStreamEdit) {
+            // 串流模式：buffer 已是完整文字，做最終 edit
+            if (fileMode) buffer = cleanedText;
+            else { const { text: cb } = extractMediaTokens(buffer); buffer = cb; }
+            await waitEditDone();
+            await doEdit();
+            editMsg = null; buffer = "";
           } else {
-            const { text: cleanedBuffer } = extractMediaTokens(buffer);
-            buffer = cleanedBuffer;
+            if (fileMode) buffer = cleanedText;
+            else { const { text: cb } = extractMediaTokens(buffer); buffer = cb; }
+            await flush(true);
           }
-          await flush(true);
         }
 
         for (const filePath of mediaPaths) {
           if (threadChannel) {
             try {
-              const buffer2 = await readFile(filePath);
-              const attachment = new AttachmentBuilder(buffer2, { name: basename(filePath) });
+              const buf2 = await readFile(filePath);
+              const attachment = new AttachmentBuilder(buf2, { name: basename(filePath) });
               await threadChannel.send({ files: [attachment] });
               isFirst = false;
             } catch { /* 靜默 */ }
@@ -275,16 +390,18 @@ export async function handleAgentLoopReply(
         }
 
       } else if (event.type === "error") {
-        cancelFlushTimer();
+        if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); }
+        else { cancelFlushTimer(); if (!fileMode) await flush(true); }
         stopTyping();
-        if (!fileMode) await flush(true);
         const errorMsg = `⚠️ ${event.message}`.slice(0, TEXT_LIMIT);
         await send(errorMsg);
+        if (isFirst) stopTyping();
         isFirst = false;
       }
     }
   } finally {
     cancelFlushTimer();
+    cancelEditTimer();
     stopTyping();
   }
 }
