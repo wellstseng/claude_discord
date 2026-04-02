@@ -89,7 +89,7 @@ export class CodexOAuthProvider implements LLMProvider {
   readonly maxContextTokens = 128_000;
 
   private baseUrl: string;
-  private model: string;
+  readonly modelId: string;
   private tokenPath: string;
   private refreshUrl: string;
   private clientId?: string;
@@ -99,7 +99,7 @@ export class CodexOAuthProvider implements LLMProvider {
   constructor(id: string, entry: ProviderEntry) {
     this.id = id;
     this.baseUrl = (entry.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
-    this.model = entry.model ?? DEFAULT_MODEL;
+    this.modelId = entry.model ?? DEFAULT_MODEL;
 
     const rawPath = (entry as unknown as Record<string, unknown>)["oauthTokenPath"] as string | undefined
       ?? DEFAULT_TOKEN_PATH;
@@ -207,7 +207,7 @@ export class CodexOAuthProvider implements LLMProvider {
     const input = convertToResponsesInput(messages);
 
     const body: Record<string, unknown> = {
-      model: this.model,
+      model: this.modelId,
       input,
       stream: true,
     };
@@ -226,7 +226,7 @@ export class CodexOAuthProvider implements LLMProvider {
 
     if (opts.maxTokens) body["max_output_tokens"] = opts.maxTokens;
 
-    log.debug(`[codex-oauth:${this.id}] POST /v1/responses model=${this.model} msgs=${messages.length}`);
+    log.debug(`[codex-oauth:${this.id}] POST /v1/responses model=${this.modelId} msgs=${messages.length}`);
 
     const response = await fetch(`${this.baseUrl}/v1/responses`, {
       method: "POST",
