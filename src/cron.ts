@@ -705,3 +705,12 @@ export function stopCron(): void {
   }
   log.info("[cron] 排程服務已停止");
 }
+
+/**
+ * Dashboard API 用：取得 cron-jobs.json 的路徑
+ */
+export function getCronStorePath(): string {
+  return STORE_PATH;
+}
+
+export type { CronJobEntry };

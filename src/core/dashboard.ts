@@ -215,6 +215,7 @@ details[open] summary { margin-bottom: 6px; }
   <div class="tab" onclick="switchTab('sessions',this)">Sessions</div>
   <div class="tab" onclick="switchTab('logs',this)">日誌</div>
   <div class="tab" onclick="switchTab('ops',this)">操作</div>
+  <div class="tab" onclick="switchTab('cron',this)">排程</div>
   <div class="tab" onclick="switchTab('config',this)">Config</div>
 </div>
 
@@ -271,6 +272,27 @@ details[open] summary { margin-bottom: 6px; }
   </div>
 </div>
 
+<!-- 排程 -->
+<div id="pane-cron" class="pane">
+  <div class="card">
+    <h2>Cron Jobs
+      <button class="btn btn-sm" style="float:right;margin-left:4px" onclick="showCronAdd()">+ 新增</button>
+      <button class="btn btn-sm" style="float:right" onclick="loadCron()">↻</button>
+    </h2>
+    <div id="cron-msg" class="msg"></div>
+    <div id="cron-list"><p style="color:#888;font-size:0.8rem">載入中...</p></div>
+  </div>
+  <div id="cron-add-panel" class="card" style="margin-top:16px;display:none">
+    <h2>新增 Job（JSON）</h2>
+    <p style="font-size:0.72rem;color:#888;margin-bottom:6px">格式：{"name":"...","schedule":{"kind":"cron","expr":"0 9 * * *"},"action":{"type":"message","channelId":"...","text":"..."}}</p>
+    <textarea id="cron-add-json" rows="8" placeholder='{"name":"my-job","enabled":true,"schedule":{"kind":"cron","expr":"0 9 * * *"},"action":{"type":"message","channelId":"CHANNEL_ID","text":"hello"}}'></textarea>
+    <div style="margin-top:8px;display:flex;gap:8px">
+      <button class="btn btn-green" onclick="addCronJob()">新增</button>
+      <button class="btn" onclick="hideCronAdd()">取消</button>
+    </div>
+  </div>
+</div>
+
 <!-- Config -->
 <div id="pane-config" class="pane">
   <div class="card">
@@ -298,6 +320,7 @@ function switchTab(id, el) {
   if (id === 'sessions') loadSessions();
   if (id === 'logs') loadLogs();
   if (id === 'ops') { loadSubagents(); }
+  if (id === 'cron') loadCron();
   if (id === 'config') loadCfg();
 }
 
@@ -413,6 +436,86 @@ async function loadSubagents() {
     document.getElementById('subagents-list').innerHTML =
       \`<table class="tbl"><thead><tr><th>Label</th><th>狀態</th><th>Turns</th></tr></thead><tbody>\${rows}</tbody></table>\`;
   } catch {}
+}
+
+// ── 排程 ─────────────────────────────────────────────────────────────────────
+async function loadCron() {
+  try {
+    const d = await fetch('/api/cron').then(r => r.json());
+    const jobs = d.jobs || {};
+    const entries = Object.entries(jobs);
+    if (!entries.length) { document.getElementById('cron-list').innerHTML = '<p style="color:#888;font-size:0.8rem">無 cron job</p>'; return; }
+    const rows = entries.map(([id, job]) => {
+      const j = job;
+      const schedStr = j.schedule.kind === 'cron' ? j.schedule.expr
+        : j.schedule.kind === 'every' ? ('每 ' + Math.round(j.schedule.everyMs/1000) + 's')
+        : (j.schedule.at || '-');
+      const lastRun = j.lastRunAtMs ? new Date(j.lastRunAtMs).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}) : '-';
+      const nextRun = j.nextRunAtMs && j.nextRunAtMs < 9e15 ? new Date(j.nextRunAtMs).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}) : '-';
+      const resultBadge = j.lastResult === 'success' ? '<span class="badge badge-done">✓</span>' : j.lastResult === 'error' ? '<span class="badge badge-err">✗</span>' : '-';
+      const enCls = j.enabled !== false ? 'badge-done' : 'badge-err';
+      const enLabel = j.enabled !== false ? '啟用' : '停用';
+      return \`<tr>
+        <td title="\${id}">\${id.slice(-8)}</td>
+        <td>\${j.name||'-'}</td>
+        <td style="font-size:0.72rem;font-family:monospace">\${schedStr}</td>
+        <td><span class="badge \${enCls}">\${enLabel}</span></td>
+        <td style="font-size:0.72rem">\${lastRun}</td>
+        <td>\${resultBadge}</td>
+        <td style="font-size:0.72rem">\${nextRun}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-sm btn-green" onclick="triggerCronJob('\${id}')">▶</button>
+          <button class="btn btn-sm" onclick="toggleCronJob('\${id}', \${j.enabled === false})">⊘</button>
+          <button class="btn btn-sm btn-red" onclick="deleteCronJob('\${id}')">✕</button>
+        </td>\`;
+    }).join('');
+    document.getElementById('cron-list').innerHTML =
+      \`<table class="tbl"><thead><tr><th>ID</th><th>名稱</th><th>排程</th><th>狀態</th><th>上次執行</th><th>結果</th><th>下次執行</th><th>操作</th></tr></thead><tbody>\${rows}</tbody></table>\`;
+  } catch(e) { document.getElementById('cron-list').innerHTML = '讀取失敗：' + e; }
+}
+
+function showCronAdd() { document.getElementById('cron-add-panel').style.display = ''; }
+function hideCronAdd() { document.getElementById('cron-add-panel').style.display = 'none'; }
+
+async function addCronJob() {
+  const raw = document.getElementById('cron-add-json').value.trim();
+  try { JSON.parse(raw); } catch(e) { showCronMsg('JSON 格式錯誤：' + e, false); return; }
+  try {
+    const d = await fetch('/api/cron',{method:'POST',headers:{'Content-Type':'application/json'},body:raw}).then(r=>r.json());
+    if (d.success) { showCronMsg('✓ 已新增', true); hideCronAdd(); loadCron(); }
+    else showCronMsg('錯誤：' + d.error, false);
+  } catch(e) { showCronMsg('失敗：' + e, false); }
+}
+
+async function deleteCronJob(id) {
+  if (!confirm('確定刪除 job ' + id + '？')) return;
+  try {
+    const d = await fetch('/api/cron/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}).then(r=>r.json());
+    if (d.success) { showCronMsg('✓ 已刪除', true); loadCron(); }
+    else showCronMsg('錯誤：' + d.error, false);
+  } catch(e) { showCronMsg('失敗：' + e, false); }
+}
+
+async function triggerCronJob(id) {
+  try {
+    const d = await fetch('/api/cron/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}).then(r=>r.json());
+    if (d.success) { showCronMsg('✓ 已排入立即執行（下次 tick 生效）', true); loadCron(); }
+    else showCronMsg('錯誤：' + d.error, false);
+  } catch(e) { showCronMsg('失敗：' + e, false); }
+}
+
+async function toggleCronJob(id, enable) {
+  try {
+    const d = await fetch('/api/cron/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,enabled:enable})}).then(r=>r.json());
+    if (d.success) { loadCron(); }
+    else showCronMsg('錯誤：' + d.error, false);
+  } catch(e) { showCronMsg('失敗：' + e, false); }
+}
+
+function showCronMsg(msg, ok) {
+  const el = document.getElementById('cron-msg');
+  el.className = 'msg ' + (ok ? 'ok' : 'err');
+  el.textContent = msg;
 }
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -558,6 +661,65 @@ export class DashboardServer {
         const ok = touchRestart();
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(ok ? { success: true } : { success: false, error: "signal/RESTART not found" }));
+        return;
+      }
+
+      // GET /api/cron
+      if (url === "/api/cron" && method === "GET") {
+        void (async () => {
+          try {
+            const { getCronStorePath } = await import("../cron.js");
+            const p = getCronStorePath();
+            const data = existsSync(p) ? JSON.parse(readFileSync(p, "utf-8")) : { version: 1, jobs: {} };
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ jobs: (data.jobs ?? {}) }));
+          } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: String(err) })); }
+        })();
+        return;
+      }
+
+      // POST /api/cron, /api/cron/delete, /api/cron/trigger, /api/cron/toggle
+      if (url.startsWith("/api/cron") && method === "POST") {
+        const chunks: Buffer[] = [];
+        let sz = 0;
+        req.on("data", (c: Buffer) => { sz += c.length; if (sz < 131072) chunks.push(c); });
+        req.on("end", () => {
+          void (async () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as Record<string, unknown>;
+              const { getCronStorePath } = await import("../cron.js");
+              const p = getCronStorePath();
+              const store = existsSync(p) ? JSON.parse(readFileSync(p, "utf-8")) : { version: 1, jobs: {} };
+              const jobs = store.jobs as Record<string, Record<string, unknown>>;
+
+              if (url === "/api/cron") {
+                // create
+                const id = `job-${Date.now()}`;
+                jobs[id] = body as Record<string, unknown>;
+              } else if (url === "/api/cron/delete") {
+                const id = String(body["id"] ?? "");
+                if (!jobs[id]) throw new Error(`Job not found: ${id}`);
+                delete jobs[id];
+              } else if (url === "/api/cron/trigger") {
+                const id = String(body["id"] ?? "");
+                if (!jobs[id]) throw new Error(`Job not found: ${id}`);
+                jobs[id]!["nextRunAtMs"] = Date.now() - 1;
+              } else if (url === "/api/cron/toggle") {
+                const id = String(body["id"] ?? "");
+                if (!jobs[id]) throw new Error(`Job not found: ${id}`);
+                jobs[id]!["enabled"] = Boolean(body["enabled"]);
+              }
+
+              const tmp = p + ".tmp";
+              writeFileSync(tmp, JSON.stringify(store, null, 2), "utf-8");
+              renameSync(tmp, p);
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ success: true }));
+            } catch (err) {
+              res.writeHead(400); res.end(JSON.stringify({ success: false, error: String(err) }));
+            }
+          })();
+        });
         return;
       }
 
