@@ -45,6 +45,10 @@ export class FailoverProvider implements LLMProvider {
 
   // LLMProvider interface
 
+  get modelId(): string | undefined {
+    return this.chain[0]?.provider.modelId;
+  }
+
   get supportsToolUse(): boolean {
     // 只要 chain 中有任一 provider 支援 tool use，就回報支援
     return this.chain.some(e => e.provider.supportsToolUse);
