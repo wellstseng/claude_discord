@@ -172,9 +172,9 @@ async function runChildAgentLoop(opts: ChildRunOpts): Promise<{ text: string; tu
   const safetyGuard = getPlatformSafetyGuard();
   const providerRegistry = getProviderRegistry();
 
-  // 取得 provider（無 providerId 則用 resolve() 取預設）
+  // 取得 provider（registry.get 自動解析 alias，無 providerId 則用 resolve() 取預設）
   const provider = opts.providerId
-    ? providerRegistry.get(opts.providerId)
+    ? (providerRegistry.get(opts.providerId) ?? providerRegistry.resolve())
     : providerRegistry.resolve();
   if (!provider) throw new Error("找不到可用的 provider");
 

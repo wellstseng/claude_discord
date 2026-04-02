@@ -445,11 +445,11 @@ async function execSubagent(action: {
     throw new Error("Platform 未就緒，無法執行 subagent");
   }
 
-  // 解析 provider
+  // 解析 provider（registry.get 自動解析 alias）
   const providerRegistry = getProviderRegistry();
-  const providerId = action.provider ?? config.cron.defaultProvider;
-  const provider = providerId
-    ? (providerRegistry.get(providerId) ?? providerRegistry.resolve())
+  const rawProviderId = action.provider ?? config.cron.defaultProvider;
+  const provider = rawProviderId
+    ? (providerRegistry.get(rawProviderId) ?? providerRegistry.resolve())
     : providerRegistry.resolve();
 
   // 確保 cron 系統帳號存在（developer 角色：public/standard/elevated，不含 admin/owner tier）

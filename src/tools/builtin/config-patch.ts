@@ -47,6 +47,11 @@ const PATCH_WHITELIST = [
   "providers.*.model",
   "providers.*.think",
   "providers.*.numPredict",
+  // V2 三層分離
+  "agentDefaults.model.primary",
+  "agentDefaults.model.fallbacks",
+  "providerRouting.roles.*",
+  "providerRouting.channels.*",
   "cron.enabled",
   "cron.maxConcurrentRuns",
   "inboundHistory.inject.enabled",

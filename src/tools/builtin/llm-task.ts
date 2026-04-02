@@ -40,6 +40,7 @@ export const tool: Tool = {
     const registry = getProviderRegistry();
     if (!registry) return { error: "ProviderRegistry 尚未初始化" };
 
+    // registry.get() 自動解析 alias
     const provider = providerId ? registry.get(providerId) : registry.resolve();
     if (!provider) return { error: `找不到 provider${providerId ? ` (${providerId})` : ""}` };
 

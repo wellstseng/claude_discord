@@ -15,6 +15,7 @@ import { resolve } from "node:path";
 import type { Skill, SkillContext, SkillResult } from "../types.js";
 import { config } from "../../core/config.js";
 import { log } from "../../logger.js";
+import { getProviderRegistry } from "../../providers/registry.js";
 
 // ── 設定檔路徑 ────────────────────────────────────────────────────────────────
 
@@ -39,11 +40,31 @@ function writeRawConfig(obj: Record<string, unknown>): void {
 
 function handleShow(): SkillResult {
   const lines: string[] = ["**目前 Provider 設定**"];
-  lines.push(`預設 provider：\`${config.provider}\``);
-  for (const [id, entry] of Object.entries(config.providers)) {
-    const active = id === config.provider ? " ◀ 預設" : "";
-    lines.push(`• \`${id}\`  type=${entry.type}  model=${entry.model ?? "(預設)"}${active}`);
+
+  // V2：agentDefaults 存在時
+  if (config.agentDefaults?.model?.primary) {
+    const ad = config.agentDefaults;
+    lines.push(`模式：V2 三層分離`);
+    lines.push(`Primary：\`${ad.model!.primary}\``);
+    if (ad.model!.fallbacks?.length) {
+      lines.push(`Fallbacks：${ad.model!.fallbacks.map(f => `\`${f}\``).join(" → ")}`);
+    }
+    // 從 registry 列出已註冊的 provider
+    try {
+      const registry = getProviderRegistry();
+      for (const p of registry.list()) {
+        lines.push(`• \`${p.id}\`  model=${p.modelId ?? "(預設)"}`);
+      }
+    } catch { /* registry 未初始化 */ }
+  } else {
+    // V1
+    lines.push(`預設 provider：\`${config.provider}\``);
+    for (const [id, entry] of Object.entries(config.providers)) {
+      const active = id === config.provider ? " ◀ 預設" : "";
+      lines.push(`• \`${id}\`  type=${entry.type}  model=${entry.model ?? "(預設)"}${active}`);
+    }
   }
+
   return { text: lines.join("\n") };
 }
 
@@ -65,13 +86,31 @@ function handleSetModel(args: string): SkillResult {
     return { text: "❌ 用法：`/configure model <model-id> [--provider <id>]`", isError: true };
   }
 
-  const targetProvider = providerId ?? config.provider;
-  if (!config.providers[targetProvider]) {
-    return { text: `❌ Provider 不存在：${targetProvider}`, isError: true };
-  }
-
   try {
     const raw = readRawConfig();
+
+    // V2：修改 agentDefaults.model.primary
+    if (config.agentDefaults?.model?.primary) {
+      const ad = raw["agentDefaults"] as Record<string, unknown> | undefined;
+      if (!ad) {
+        return { text: "❌ catclaw.json 中找不到 agentDefaults", isError: true };
+      }
+      const model = ad["model"] as Record<string, unknown> | undefined;
+      if (!model) {
+        return { text: "❌ catclaw.json 中找不到 agentDefaults.model", isError: true };
+      }
+      // modelId 可以是 alias 或 "provider/model" 格式
+      model["primary"] = modelId;
+      writeRawConfig(raw);
+      log.info(`[configure] agentDefaults.model.primary → ${modelId}`);
+      return { text: `✅ primary model 已設為 \`${modelId}\`（hot-reload 生效中）` };
+    }
+
+    // V1
+    const targetProvider = providerId ?? config.provider;
+    if (!config.providers[targetProvider]) {
+      return { text: `❌ Provider 不存在：${targetProvider}`, isError: true };
+    }
     const providers = raw["providers"] as Record<string, Record<string, unknown>>;
     if (!providers?.[targetProvider]) {
       return { text: `❌ catclaw.json 中找不到 provider：${targetProvider}`, isError: true };
@@ -107,6 +146,23 @@ function handleSetProvider(args: string): SkillResult {
 
 async function handleListModels(): Promise<SkillResult> {
   try {
+    // V2：從 models.json 列出所有模型
+    if (config.agentDefaults?.model?.primary) {
+      const { loadModelsJson } = await import("../../providers/models-config.js");
+      const wsDir = process.env.CATCLAW_WORKSPACE;
+      if (!wsDir) return { text: "❌ CATCLAW_WORKSPACE 未設定", isError: true };
+      const modelsJson = loadModelsJson(wsDir);
+      const lines = ["**可用模型（models.json）**"];
+      for (const [provider, def] of Object.entries(modelsJson.providers)) {
+        lines.push(`\n**${provider}**`);
+        for (const m of def.models) {
+          lines.push(`• \`${provider}/${m.id}\`  ctx=${(m.contextWindow / 1000).toFixed(0)}k  maxOut=${m.maxTokens}`);
+        }
+      }
+      return { text: lines.join("\n") };
+    }
+
+    // V1：pi-ai
     const { getModels } = await import("@mariozechner/pi-ai");
     const models = getModels("anthropic");
     const lines = ["**Anthropic 可用模型（via pi-ai）**"];

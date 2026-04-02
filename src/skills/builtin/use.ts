@@ -54,7 +54,7 @@ export const skill: Skill = {
       return { text: "🔌 Provider 覆寫已清除，回到 routing 預設。" };
     }
 
-    // 驗證 provider 存在
+    // 驗證 provider 存在（registry.get 自動解析 alias）
     const providerRegistry = getProviderRegistry();
     const p = providerRegistry.get(arg);
     if (!p) {
@@ -62,7 +62,7 @@ export const skill: Skill = {
       return { text: `❌ Provider \`${arg}\` 不存在。\n可用：${all}`, isError: true };
     }
 
-    setChannelProviderOverride(channelId, arg);
+    setChannelProviderOverride(channelId, p.id);
     const modelSuffix = p.modelId ? ` — ${p.modelId}` : "";
     return { text: `🔌 此頻道已切換至 \`${arg}\`（${p.name}${modelSuffix}）。下次對話生效。` };
   },

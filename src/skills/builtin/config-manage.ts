@@ -51,6 +51,11 @@ const PATCH_WHITELIST: string[] = [
   "providers.*.model",
   "providers.*.think",
   "providers.*.numPredict",
+  // V2 三層分離
+  "agentDefaults.model.primary",
+  "agentDefaults.model.fallbacks",
+  "providerRouting.roles.*",
+  "providerRouting.channels.*",
   "cron.enabled",
   "cron.maxConcurrentRuns",
   "inboundHistory.inject.enabled",
@@ -96,6 +101,11 @@ const SCHEMA_MAP: Record<string, string> = {
   "session.maxHistoryTurns":           "Session 最大保留輪數",
   "agents.*.systemPrompt":             "Agent 系統提示詞",
   "providers.*.model":                 "Provider 使用的模型名稱",
+  // V2 三層分離
+  "agentDefaults.model.primary":       "V2 主要模型（alias 或 provider/model 格式）",
+  "agentDefaults.model.fallbacks":     "V2 備援模型清單（JSON 陣列）",
+  "providerRouting.roles.*":           "角色綁定模型（alias 或 provider/model 格式）",
+  "providerRouting.channels.*":        "頻道綁定模型（alias 或 provider/model 格式）",
 };
 
 // ── 工具函式 ─────────────────────────────────────────────────────────────────

@@ -24,7 +24,9 @@ import { PermissionGate, initPermissionGate } from "../accounts/permission-gate.
 import { SafetyGuard, initSafetyGuard } from "../safety/guard.js";
 import { SessionManager, initSessionManager } from "./session.js";
 import { eventBus } from "./event-bus.js";
-import { buildProviderRegistry, initProviderRegistry } from "../providers/registry.js";
+import { buildProviderRegistry, buildProviderRegistryV2, initProviderRegistry } from "../providers/registry.js";
+import { ensureModelsJson, loadModelsJson } from "../providers/models-config.js";
+import { initAuthProfileStore, getAuthProfileStore } from "../providers/auth-profile-store.js";
 import { initWorkflow } from "../workflow/bootstrap.js";
 import { initRegistrationManager } from "../accounts/registration.js";
 import { initIdentityLinker } from "../accounts/identity-linker.js";
@@ -108,12 +110,32 @@ export async function initPlatform(
   _safetyGuard = initSafetyGuard(config.safety, catclawDir);
 
   // ── 5. Provider Registry ───────────────────────────────────────────────────
-  const providerRegistry = await buildProviderRegistry(
-    config.provider ?? Object.keys(config.providers)[0]!,
-    config.providers,
-    config.providerRouting ?? {},
-  );
-  initProviderRegistry(providerRegistry);
+  // V2：三層分離（agentDefaults + models.json + auth-profile）
+  // V1：舊格式（providers entries）
+  if (config.agentDefaults?.model?.primary) {
+    // V2 路徑
+    log.info("[platform] V2 provider 設定（三層分離）");
+    ensureModelsJson(wsDir, config.modelsConfig);
+    const modelsJson = loadModelsJson(wsDir);
+    const authProfilePath = join(wsDir, "agents", "default", "auth-profile.json");
+    initAuthProfileStore(authProfilePath);
+    const authStore = getAuthProfileStore();
+    const providerRegistry = await buildProviderRegistryV2(
+      config.agentDefaults,
+      modelsJson,
+      authStore,
+      config.providerRouting ?? {},
+    );
+    initProviderRegistry(providerRegistry);
+  } else {
+    // V1 路徑（舊格式相容）
+    const providerRegistry = await buildProviderRegistry(
+      config.provider ?? Object.keys(config.providers)[0]!,
+      config.providers,
+      config.providerRouting ?? {},
+    );
+    initProviderRegistry(providerRegistry);
+  }
 
   // ── 6. Session Manager ─────────────────────────────────────────────────────
   const sessionCfg = config.session ?? {
@@ -189,11 +211,18 @@ export async function initPlatform(
       budgetGuard: ceCfg?.strategies?.budgetGuard,
       slidingWindow: ceCfg?.strategies?.slidingWindow,
     });
-    // 若 compaction 指定了 model，建立專用 CE provider 並注入
+    // 若 compaction 指定了 model，取得或建立專用 CE provider 並注入
     const ceModel = ceCfg?.strategies?.compaction?.model;
     if (ceModel) {
-      const { ClaudeApiProvider } = await import("../providers/claude-api.js");
-      ce.setCeProvider(new ClaudeApiProvider("ce-compaction", { model: ceModel }));
+      // 優先從 registry 取（支援 alias / model-ref）
+      const { getProviderRegistry: getRegistry } = await import("../providers/registry.js");
+      const ceProvider = getRegistry().get(ceModel);
+      if (ceProvider) {
+        ce.setCeProvider(ceProvider);
+      } else {
+        const { ClaudeApiProvider } = await import("../providers/claude-api.js");
+        ce.setCeProvider(new ClaudeApiProvider("ce-compaction", { model: ceModel }));
+      }
       log.debug(`[platform] CE compaction provider: ${ceModel}`);
     }
     log.info("[platform] ContextEngine 初始化完成");

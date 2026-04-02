@@ -46,81 +46,95 @@
   "fileUploadThreshold": 4000,     // 超過此字數上傳為 .md（0 = 停用）
   "logLevel": "info",              // debug / info / warn / error / silent
 
-  // ── Providers（LLM 提供者）───────────────────────────────────
-  // type 可選：claude / openai-compat / codex-oauth / ollama
-  // 若不填 type，系統依以下順序自動判斷：
-  //   entry.wsUrl → openclaw | id=claude-api → claude
-  //   id 含 ollama → ollama | entry.host/baseUrl → openai-compat
-  //   entry.token（無 baseUrl）→ claude
-  //
-  // claude mode 欄位（選填）：
-  //   "token" → 使用 auth-profile.json 的 OAuth token（sk-ant-oat...，Claude.ai）
-  //   "api"   → 直接用 token 欄位的 API key（sk-ant-api...，Anthropic Console）
-  //   不填 → 自動偵測（有 auth-profile.json 且有效 → token，否則 → api）
+  // ══════════════════════════════════════════════════════════════
+  // V2 三層分離設定（推薦）
+  // 格式：<provider>/<model>，如 "anthropic/claude-sonnet-4-6"
+  // 認證放 auth-profile.json，模型目錄自動從內建 + 自訂合併
+  // ══════════════════════════════════════════════════════════════
+
+  // ── Agent 預設模型 ────────────────────────────────────────────
+  "agentDefaults": {
+    "model": {
+      // primary：主要使用的模型（alias 或 "provider/model" 格式）
+      "primary": "sonnet",
+      // fallbacks：primary 不可用時依序嘗試
+      "fallbacks": ["anthropic/claude-opus-4-6"]
+    },
+    // 模型對照表：key = "provider/model"，alias = 簡短名
+    "models": {
+      "anthropic/claude-sonnet-4-6": { "alias": "sonnet" },
+      "anthropic/claude-opus-4-6": { "alias": "opus" },
+      "anthropic/claude-haiku-4-5-20251001": { "alias": "haiku" }
+      // "openai/gpt-4o": {},
+      // "openai-codex/gpt-5.4": {},
+      // "ollama/qwen3:8b": { "alias": "local" }
+    }
+  },
+
+  // ── 模型目錄設定（可選）────────────────────────────────────────
+  // 內建：anthropic、openai、openai-codex（自動載入）
+  // 自訂 provider 在此新增，mode="merge" 與內建合併
+  // "modelsConfig": {
+  //   "mode": "merge",
+  //   "providers": {
+  //     "ollama": {
+  //       "baseUrl": "http://localhost:11434",
+  //       "api": "ollama",
+  //       "models": [
+  //         {
+  //           "id": "qwen3:8b",
+  //           "name": "Qwen3 8B",
+  //           "reasoning": false,
+  //           "input": ["text"],
+  //           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+  //           "contextWindow": 32768,
+  //           "maxTokens": 8192
+  //         }
+  //       ]
+  //     }
+  //   }
+  // },
+
+  // ── 認證設定（可選，控制輪替順序和 cooldown）─────────────────
+  // 實際 credential 放在 {workspace}/agents/default/auth-profile.json
+  // 格式參考：
+  // {
+  //   "version": 1,
+  //   "profiles": {
+  //     "anthropic:default": { "type": "api_key", "provider": "anthropic", "key": "sk-ant-..." },
+  //     "openai:primary":    { "type": "api_key", "provider": "openai", "key": "sk-..." },
+  //     "openai-codex:default": { "type": "oauth", "provider": "openai-codex",
+  //                               "access": "...", "refresh": "...", "expires": 1774019983859 }
+  //   },
+  //   "order": { "anthropic": ["anthropic:default"] }
+  // }
+  // "authConfig": {
+  //   "order": { "anthropic": ["anthropic:default", "anthropic:backup"] },
+  //   "cooldowns": { "billingBackoffHours": 5 }
+  // },
+
+  // ── Provider 路由 ──────────────────────────────────────────────
+  // 優先序：channels > projects > roles > defaultProvider
+  // 值可以是 alias 或 "provider/model" 格式
+  "providerRouting": {
+    "roles": {
+      "default": "sonnet"
+    }
+    // 範例：特定頻道走不同模型
+    // "channels": {
+    //   "<頻道 ID>": "anthropic/claude-opus-4-6"
+    // }
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // V1 舊格式（保留相容，若有 agentDefaults 則以 V2 優先）
+  // ══════════════════════════════════════════════════════════════
   "providers": {
-    // Claude Sonnet（預設）
-    // mode="token"：使用 Claude.ai OAuth token（auth-profile.json，無需 API key）
     "claude": {
       "type": "claude",
       "mode": "token",
       "model": "claude-sonnet-4-6"
-    },
-
-    // mode="api"：使用 Anthropic API key（ANTHROPIC_TOKEN 環境變數）
-    // "claude-api": {
-    //   "type": "claude",
-    //   "mode": "api",
-    //   "token": "${ANTHROPIC_TOKEN}",
-    //   "model": "claude-sonnet-4-6"
-    // },
-
-    // Claude Opus（重型任務）
-    // "claude-opus": {
-    //   "type": "claude",
-    //   "mode": "token",
-    //   "model": "claude-opus-4-6"
-    // },
-
-    // OpenAI / GPT：type 可簡寫為 "openai"
-    // "openai": {
-    //   "type": "openai",
-    //   "baseUrl": "https://api.openai.com",
-    //   "token": "${OPENAI_API_KEY}",
-    //   "model": "gpt-4o"
-    // },
-
-    // Codex OAuth：OpenAI Codex（GPT-5），使用 Responses API（/v1/responses）
-    // 需先執行 `codex auth login` 產生 ~/.codex/auth.json
-    // "codex": {
-    //   "type": "codex-oauth",
-    //   "model": "openai-codex/gpt-5.4",
-    //   "oauthTokenPath": "~/.codex/auth.json"
-    // },
-
-    // Ollama 本地 LLM：使用 /api/chat NDJSON 串流（非 OpenAI compat）
-    // think: true 啟用 thinking 模式（qwen3 等支援的模型）
-    // numPredict: 每次最大 token 數（預設 4096）
-    // supportsToolUse: 不填時 init() 自動偵測（查 /api/show capabilities）
-    // "ollama-local": {
-    //   "type": "ollama",
-    //   "host": "http://localhost:11434",
-    //   "model": "qwen3:1.7b",
-    //   "think": false,
-    //   "numPredict": 4096
-    // }
-  },
-
-  // ── Provider 路由 ──────────────────────────────────────────────
-  // 優先序：channels > projects > roles > defaultProvider
-  // roles.default 為全域預設（必填）
-  "providerRouting": {
-    "roles": {
-      "default": "claude-oauth"
     }
-    // 範例：特定頻道走 ollama
-    // "channels": {
-    //   "<頻道 ID>": "ollama-local"
-    // }
   },
 
   // ── Session 持久化 ────────────────────────────────────────────
