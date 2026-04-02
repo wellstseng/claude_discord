@@ -58,6 +58,7 @@ import { handleAgentLoopReply } from "./core/reply-handler.js";
 import { setDiscordClient, getSubagentThreadBinding } from "./core/subagent-discord-bridge.js";
 import { parseApprovalReply, parseApprovalButtonId, resolveApproval, setApprovalDiscordClient } from "./core/exec-approval.js";
 import { abortRunningTurn } from "./skills/builtin/stop.js";
+import { MessageTrace } from "./core/message-trace.js";
 
 // ── 訊息去重 ─────────────────────────────────────────────────────────────────
 
@@ -401,6 +402,14 @@ async function handleMessage(
     // 生成 turn_id，串聯 user input + AI response
     const turnId = randomUUID();
 
+    // ── Message Trace 建立 ──────────────────────────────────────────────────
+    const trace = MessageTrace.create(turnId, firstMessage.channelId, firstMessage.author.id);
+    trace.recordInbound({
+      messageId: firstMessage.id,
+      text: combinedText,
+      attachments: [...firstMessage.attachments.values()].length + allImages.length,
+    });
+
     // 記錄 user 訊息到 history DB
     recordUserMessage({
       turnId,
@@ -567,9 +576,11 @@ async function handleMessage(
       if (baseSystemPrompt) log.debug(`[discord] 載入 base system prompt (${baseSystemPrompt.length} 字)`);
 
       // ── 記憶 Recall（三層：全域+專案+個人） ─────────────────────────────
+      trace.recordContextStart();
       let systemPromptFromMemory = "";
       const memEngine = getPlatformMemoryEngine();
       if (memEngine) {
+        const recallStartMs = Date.now();
         try {
           const recallResult = await memEngine.recall(prompt, {
             accountId,
@@ -580,6 +591,14 @@ async function handleMessage(
             const ctx = memEngine.buildContext(recallResult.fragments, prompt, recallResult.blindSpot);
             systemPromptFromMemory = ctx.text;
             log.debug(`[discord] 記憶注入 ${recallResult.fragments.length} 個 atom (${ctx.tokenCount} tokens)`);
+            trace.recordMemoryRecall({
+              durationMs: Date.now() - recallStartMs,
+              fragmentCount: recallResult.fragments.length,
+              atomNames: recallResult.fragments.map(f => f.atom.name),
+              injectedTokens: ctx.tokenCount,
+              vectorSearch: !recallResult.degraded,
+              degraded: recallResult.degraded,
+            });
           }
         } catch (err) {
           log.debug(`[discord] 記憶 recall 失敗（繼續）：${err instanceof Error ? err.message : String(err)}`);
@@ -613,6 +632,12 @@ async function handleMessage(
             combinedSystemPrompt = combinedSystemPrompt
               ? `${combinedSystemPrompt}\n\n${inboundContext}`
               : inboundContext;
+            // Trace: inbound history 注入（簡易計算 token 數）
+            trace.recordInboundHistory({
+              bucketA: 0, bucketB: 0,
+              tokens: Math.ceil(inboundContext.length / 4),
+              decayIIApplied: false,
+            });
           }
         } catch (err) {
           log.debug(`[discord] inbound-history inject 失敗（繼續）：${err instanceof Error ? err.message : String(err)}`);
@@ -649,6 +674,17 @@ async function handleMessage(
         } catch (err) {
           log.warn(`[discord] autoThread 建立失敗，改用原頻道：${err instanceof Error ? err.message : String(err)}`);
         }
+      }
+
+      // Trace: Context 組裝完成
+      {
+        const sysTokens = Math.ceil((combinedSystemPrompt?.length ?? 0) / 4);
+        trace.recordContextEnd({
+          systemPromptTokens: sysTokens,
+          historyTokens: 0,  // 精確值在 agent-loop CE 之後才知道
+          historyMessageCount: 0,
+          totalContextTokens: sysTokens,
+        });
       }
 
       // ── Ack Reaction：⏳ queued ──────────────────────────────────────────
@@ -688,6 +724,7 @@ async function handleMessage(
         } : {}),
         ...(allImages.length > 0 ? { imageAttachments: allImages } : {}),
         ...(getChannelThinking(firstMessage.channelId) ? { thinking: getChannelThinking(firstMessage.channelId) } : {}),
+        trace,
       }, {
         sessionManager: getPlatformSessionManager(),
         permissionGate: getPlatformPermissionGate(),

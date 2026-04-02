@@ -37,6 +37,7 @@ Discord 收訊 → claude -p stream-json → 串流回覆 Discord。
 | [modules/pm2.md](modules/pm2.md) | `catclaw.js` + `ecosystem.config.cjs` | PM2 進程管理、signal file 重啟機制、reset-session 指令 |
 | [modules/providers.md](modules/providers.md) | `src/providers/` | LLM Provider 系統：ClaudeApiProvider(pi-ai OAuth)、AuthProfileStore、Ollama | 2026-03-28 |
 | [modules/skills.md](modules/skills.md) | `src/skills/` | Skill 系統：registry、builtin skills、/configure | 2026-03-28 |
+| [modules/message-trace.md](modules/message-trace.md) | `src/core/message-trace.ts` | Message Lifecycle Trace：7 階段訊息追蹤 + TraceStore | 2026-04-02 |
 
 ## 架構一句話摘要
 

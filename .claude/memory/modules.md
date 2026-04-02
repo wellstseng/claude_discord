@@ -2,7 +2,7 @@
 
 - Scope: project
 - Confidence: [固]
-- Trigger: 模組, config.ts, discord.ts, session.ts, acp.ts, reply.ts, logger, cron.ts, pm2, index.ts, 函式, 介面, BridgeConfig, getChannelAccess, enqueue, AcpEvent, providers, claude-api, auth-profile, skills, configure
+- Trigger: 模組, config.ts, discord.ts, session.ts, acp.ts, reply.ts, logger, cron.ts, pm2, index.ts, 函式, 介面, BridgeConfig, getChannelAccess, enqueue, AcpEvent, providers, claude-api, auth-profile, skills, configure, message-trace, trace, 追蹤
 - Last-used: 2026-04-02
 - Confirmations: 9
 

@@ -14,6 +14,7 @@ import { dirname, basename, join, join as pathJoin, resolve } from "node:path";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
 import { getTurnAuditLog, type TurnAuditEntry } from "./turn-audit-log.js";
+import { getTraceStore, type MessageTraceEntry } from "./message-trace.js";
 
 // ── Config 備份 ──────────────────────────────────────────────────────────────
 const BACKUP_KEEP = 5;
@@ -367,6 +368,7 @@ details[open] summary { margin-bottom: 6px; }
   <div class="tab" onclick="switchTab('logs',this)">日誌</div>
   <div class="tab" onclick="switchTab('ops',this)">操作</div>
   <div class="tab" onclick="switchTab('cron',this)">排程</div>
+  <div class="tab" onclick="switchTab('traces',this)">Traces</div>
   <div class="tab" onclick="switchTab('auth',this)">Auth Profiles</div>
   <div class="tab" onclick="switchTab('config',this)">Config</div>
 </div>
@@ -445,6 +447,25 @@ details[open] summary { margin-bottom: 6px; }
       <button class="btn btn-green" onclick="addCronJob()">新增</button>
       <button class="btn" onclick="hideCronAdd()">取消</button>
     </div>
+  </div>
+</div>
+
+<!-- Traces -->
+<div id="pane-traces" class="pane">
+  <div class="card">
+    <h2>Message Lifecycle Traces
+      <button class="btn btn-sm" style="float:right" onclick="loadTraces()">↻</button>
+      <select id="trace-limit" style="float:right;margin-right:8px;background:var(--bg3);color:var(--fg);border:1px solid var(--border);padding:2px 6px;border-radius:4px" onchange="loadTraces()">
+        <option value="20">20</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+      </select>
+    </h2>
+    <div id="trace-list" style="margin-top:8px"></div>
+  </div>
+  <div class="card" style="margin-top:16px;display:none" id="trace-detail-card">
+    <h2>Trace Detail <span id="trace-detail-id" style="font-size:0.8em;color:var(--fg2)"></span></h2>
+    <div id="trace-detail"></div>
   </div>
 </div>
 
@@ -1338,6 +1359,193 @@ async function clearCooldown(providerId, profileId) {
   } catch(e) { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = '失敗：' + e; }
 }
 
+// ── Traces ──────────────────────────────────────────────────────────────────
+async function loadTraces() {
+  const limit = document.getElementById('trace-limit')?.value ?? 50;
+  const el = document.getElementById('trace-list');
+  el.innerHTML = '<div style="color:var(--fg2)">載入中…</div>';
+  try {
+    const d = await fetch('/api/traces?limit=' + limit).then(r => r.json());
+    if (!d.traces || d.traces.length === 0) { el.innerHTML = '<div style="color:var(--fg2)">無 trace 記錄</div>'; return; }
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
+    html += '<tr style="border-bottom:1px solid var(--border);color:var(--fg2)">';
+    html += '<th style="text-align:left;padding:4px">時間</th>';
+    html += '<th style="text-align:left;padding:4px">Channel</th>';
+    html += '<th style="text-align:right;padding:4px">Duration</th>';
+    html += '<th style="text-align:right;padding:4px">↑ In</th>';
+    html += '<th style="text-align:right;padding:4px">↓ Out</th>';
+    html += '<th style="text-align:right;padding:4px">Tools</th>';
+    html += '<th style="text-align:right;padding:4px">LLM</th>';
+    html += '<th style="text-align:center;padding:4px">CE</th>';
+    html += '<th style="text-align:center;padding:4px">Status</th>';
+    html += '<th style="text-align:left;padding:4px">Preview</th>';
+    html += '</tr>';
+    for (const t of d.traces) {
+      const ts = new Date(t.ts).toLocaleTimeString('zh-TW', {hour12:false});
+      const dur = t.totalDurationMs ? (t.totalDurationMs/1000).toFixed(1)+'s' : '-';
+      const ch = (t.channelId ?? '').slice(-6);
+      const statusIcon = t.status === 'completed' ? '✅' : t.status === 'aborted' ? '⏹' : '❌';
+      const ce = t.contextEngineering?.strategiesApplied?.length > 0 ? '📦' + t.contextEngineering.strategiesApplied.join(',') : '-';
+      const prev = (t.inbound?.textPreview ?? '').slice(0, 40);
+      html += '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="showTraceDetail(\\'' + t.traceId + '\\')">';
+      html += '<td style="padding:4px;color:var(--fg2)">' + ts + '</td>';
+      html += '<td style="padding:4px">…' + ch + '</td>';
+      html += '<td style="padding:4px;text-align:right">' + dur + '</td>';
+      html += '<td style="padding:4px;text-align:right">' + (t.totalInputTokens ?? 0).toLocaleString() + '</td>';
+      html += '<td style="padding:4px;text-align:right">' + (t.totalOutputTokens ?? 0).toLocaleString() + '</td>';
+      html += '<td style="padding:4px;text-align:right">' + (t.totalToolCalls ?? 0) + '</td>';
+      html += '<td style="padding:4px;text-align:right">' + (t.llmCalls?.length ?? 0) + '</td>';
+      html += '<td style="padding:4px;text-align:center">' + ce + '</td>';
+      html += '<td style="padding:4px;text-align:center">' + statusIcon + '</td>';
+      html += '<td style="padding:4px;color:var(--fg2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + prev + '</td>';
+      html += '</tr>';
+    }
+    html += '</table>';
+    el.innerHTML = html;
+  } catch (e) { el.innerHTML = '<div style="color:var(--red2)">載入失敗：' + e + '</div>'; }
+}
+
+async function showTraceDetail(traceId) {
+  const card = document.getElementById('trace-detail-card');
+  const el = document.getElementById('trace-detail');
+  const idEl = document.getElementById('trace-detail-id');
+  card.style.display = 'block';
+  idEl.textContent = traceId;
+  el.innerHTML = '<div style="color:var(--fg2)">載入中…</div>';
+  try {
+    const t = await fetch('/api/traces/' + traceId).then(r => r.json());
+    let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+
+    // Phase 1: Inbound
+    html += '<div class="card" style="background:var(--bg4)">';
+    html += '<h3 style="color:var(--accent);margin-bottom:6px">① Inbound</h3>';
+    html += '<div style="font-size:0.82rem">';
+    html += '<div>Text: <span style="color:var(--fg2)">' + (t.inbound?.textPreview ?? '-') + '</span></div>';
+    html += '<div>Chars: ' + (t.inbound?.charCount ?? 0) + ' | Attachments: ' + (t.inbound?.attachments ?? 0) + '</div>';
+    if (t.inbound?.debounceMs) html += '<div>Debounce: ' + t.inbound.debounceMs + 'ms</div>';
+    if (t.inbound?.interruptedPrevious) html += '<div style="color:var(--warn)">⚠ Interrupted previous turn</div>';
+    html += '</div></div>';
+
+    // Phase 2: Context
+    html += '<div class="card" style="background:var(--bg4)">';
+    html += '<h3 style="color:var(--accent);margin-bottom:6px">② Context Assembly</h3>';
+    if (t.context) {
+      html += '<div style="font-size:0.82rem">';
+      html += '<div>Duration: ' + (t.context.endMs - t.context.startMs) + 'ms</div>';
+      html += '<div>System Prompt: ~' + t.context.systemPromptTokens + ' tokens</div>';
+      if (t.context.memoryRecall) {
+        const r = t.context.memoryRecall;
+        html += '<div style="margin-top:4px;padding:4px;background:var(--bg3);border-radius:4px">';
+        html += '<div>🧠 Memory Recall (' + r.durationMs + 'ms)</div>';
+        html += '<div>Fragments: ' + r.fragmentCount + ' | Tokens: ' + r.injectedTokens + '</div>';
+        html += '<div style="color:var(--fg2);font-size:0.78rem">' + r.atomNames.join(', ') + '</div>';
+        if (r.degraded) html += '<div style="color:var(--warn)">⚠ Degraded (keyword only)</div>';
+        html += '</div>';
+      }
+      if (t.context.inboundHistory) {
+        html += '<div style="margin-top:4px">📨 Inbound History: ~' + t.context.inboundHistory.tokens + ' tokens</div>';
+      }
+      html += '</div>';
+    } else { html += '<div style="color:var(--fg2);font-size:0.82rem">N/A</div>'; }
+    html += '</div>';
+
+    // Phase 3: LLM Calls (full width)
+    html += '</div>'; // close grid
+    html += '<div class="card" style="background:var(--bg4);margin-top:12px">';
+    html += '<h3 style="color:var(--accent);margin-bottom:6px">③ LLM Call Loop (' + (t.llmCalls?.length ?? 0) + ' iterations)</h3>';
+    if (t.llmCalls?.length > 0) {
+      for (const call of t.llmCalls) {
+        html += '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:0.82rem">';
+        html += '<div style="display:flex;justify-content:space-between">';
+        html += '<span><b>Loop #' + call.iteration + '</b> — ' + (call.model ?? '?') + '</span>';
+        html += '<span>' + (call.durationMs/1000).toFixed(1) + 's | ↑' + call.inputTokens + ' ↓' + call.outputTokens + '</span>';
+        html += '</div>';
+        if (call.cacheRead > 0 || call.cacheWrite > 0) {
+          html += '<div style="color:var(--fg2)">Cache: read=' + call.cacheRead + ' write=' + call.cacheWrite + '</div>';
+        }
+        if (call.toolCalls?.length > 0) {
+          html += '<div style="margin-top:4px">';
+          for (const tc of call.toolCalls) {
+            const tcColor = tc.error ? 'var(--red2)' : 'var(--green2)';
+            html += '<div style="padding:2px 0;border-top:1px solid var(--border)">';
+            html += '<span style="color:' + tcColor + '">🔧 ' + tc.name + '</span>';
+            html += ' <span style="color:var(--fg2)">' + tc.durationMs + 'ms</span>';
+            if (tc.error) html += ' <span style="color:var(--red2)">❌ ' + tc.error.slice(0, 60) + '</span>';
+            if (tc.resultPreview) html += ' <span style="color:var(--fg3);font-size:0.75rem">' + tc.resultPreview.slice(0, 60) + '</span>';
+            html += '</div>';
+          }
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+    } else { html += '<div style="color:var(--fg2);font-size:0.82rem">No LLM calls</div>'; }
+    html += '</div>';
+
+    // Phase 4-7 grid
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">';
+
+    // Phase 4: CE
+    html += '<div class="card" style="background:var(--bg4)">';
+    html += '<h3 style="color:var(--accent);margin-bottom:6px">④ Context Engineering</h3>';
+    if (t.contextEngineering) {
+      html += '<div style="font-size:0.82rem">';
+      html += '<div>Strategies: ' + t.contextEngineering.strategiesApplied.join(', ') + '</div>';
+      html += '<div>Before: ' + t.contextEngineering.tokensBeforeCE + ' → After: ' + t.contextEngineering.tokensAfterCE + '</div>';
+      html += '<div style="color:var(--green2)">Saved: ' + t.contextEngineering.tokensSaved + ' tokens</div>';
+      html += '</div>';
+    } else { html += '<div style="color:var(--fg2);font-size:0.82rem">Not triggered</div>'; }
+    html += '</div>';
+
+    // Phase 6: Post-process
+    html += '<div class="card" style="background:var(--bg4)">';
+    html += '<h3 style="color:var(--accent);margin-bottom:6px">⑥ Post-process</h3>';
+    if (t.postProcess) {
+      html += '<div style="font-size:0.82rem">';
+      html += '<div>Extract: ' + (t.postProcess.extractRan ? '✅' : '⏭') + '</div>';
+      html += '<div>Snapshot kept: ' + (t.postProcess.sessionSnapshotKept ? '✅' : '❌') + '</div>';
+      html += '<div>Session note: ' + (t.postProcess.sessionNoteUpdated ? '✅' : '⏭') + '</div>';
+      if (t.postProcess.toolLogPath) html += '<div style="color:var(--fg2)">Log: ' + t.postProcess.toolLogPath + '</div>';
+      html += '</div>';
+    } else { html += '<div style="color:var(--fg2);font-size:0.82rem">N/A</div>'; }
+    html += '</div>';
+
+    // Phase 5: Abort (if any)
+    if (t.abort) {
+      html += '<div class="card" style="background:var(--bg4)">';
+      html += '<h3 style="color:var(--warn);margin-bottom:6px">⑤ Abort</h3>';
+      html += '<div style="font-size:0.82rem">';
+      html += '<div>Trigger: ' + t.abort.trigger + '</div>';
+      html += '<div>Rollback: ' + (t.abort.rollback ? '✅' : '❌') + '</div>';
+      html += '</div></div>';
+    }
+
+    // Phase 7: Response
+    html += '<div class="card" style="background:var(--bg4)">';
+    html += '<h3 style="color:var(--accent);margin-bottom:6px">⑦ Response</h3>';
+    if (t.response) {
+      html += '<div style="font-size:0.82rem">';
+      html += '<div>Chars: ' + t.response.charCount + ' | Duration: ' + (t.response.durationMs/1000).toFixed(1) + 's</div>';
+      html += '<div style="color:var(--fg2);margin-top:4px">' + (t.response.textPreview ?? '') + '</div>';
+      html += '</div>';
+    } else { html += '<div style="color:var(--fg2);font-size:0.82rem">N/A</div>'; }
+    html += '</div>';
+
+    html += '</div>'; // close grid
+
+    // Summary bar
+    html += '<div style="margin-top:12px;padding:8px;background:var(--bg3);border-radius:6px;font-size:0.82rem;display:flex;gap:16px;flex-wrap:wrap">';
+    html += '<span>Total: ' + (t.totalDurationMs/1000).toFixed(1) + 's</span>';
+    html += '<span>↑ ' + (t.totalInputTokens ?? 0).toLocaleString() + '</span>';
+    html += '<span>↓ ' + (t.totalOutputTokens ?? 0).toLocaleString() + '</span>';
+    html += '<span>Tools: ' + (t.totalToolCalls ?? 0) + '</span>';
+    html += '<span>Status: ' + (t.status === 'completed' ? '✅' : t.status === 'aborted' ? '⏹' : '❌') + ' ' + t.status + '</span>';
+    if (t.error) html += '<span style="color:var(--red2)">Error: ' + t.error + '</span>';
+    html += '</div>';
+
+    el.innerHTML = html;
+  } catch (e) { el.innerHTML = '<div style="color:var(--red2)">載入失敗：' + e + '</div>'; }
+}
+
 // ── 初始化 ───────────────────────────────────────────────────────────────────
 loadOverview();
 loadStatus();
@@ -1757,6 +1965,30 @@ export class DashboardServer {
             }
           })();
         });
+        return;
+      }
+
+      // GET /api/traces — 最近 N 筆 trace（預設 50）
+      if (url.startsWith("/api/traces") && method === "GET") {
+        const traceStore = getTraceStore();
+        if (!traceStore) { res.writeHead(500); res.end(JSON.stringify({ error: "TraceStore not initialized" })); return; }
+
+        // /api/traces/:traceId — 單筆查詢
+        const idMatch = url.match(/^\/api\/traces\/([a-f0-9-]+)/);
+        if (idMatch) {
+          const entry = traceStore.getById(idMatch[1]!);
+          if (!entry) { res.writeHead(404); res.end(JSON.stringify({ error: "Trace not found" })); return; }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(entry));
+          return;
+        }
+
+        // /api/traces?limit=N — 列表
+        const limitMatch = url.match(/[?&]limit=(\d+)/);
+        const limit = limitMatch ? parseInt(limitMatch[1]!, 10) : 50;
+        const entries = traceStore.recent(limit);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ traces: entries }));
         return;
       }
 

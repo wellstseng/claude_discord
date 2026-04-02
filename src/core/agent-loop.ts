@@ -33,6 +33,8 @@ import type { MemoryEngine } from "../memory/engine.js";
 import { createApproval, sendApprovalDm, isCommandAllowed } from "./exec-approval.js";
 import { getSessionNote, checkAndSaveNote } from "../memory/session-memory.js";
 import { config } from "./config.js";
+import type { MessageTrace } from "./message-trace.js";
+import { getTraceStore } from "./message-trace.js";
 
 // ── 常數 ─────────────────────────────────────────────────────────────────────
 
@@ -171,6 +173,8 @@ export interface AgentLoopOpts {
    * 直接作為 image content blocks 加入第一條 user 訊息，讓 LLM 可直接「看」圖。
    */
   imageAttachments?: Array<{ data: string; mimeType: string; name: string }>;
+  /** Message Lifecycle Trace 收集器（由呼叫端建立並傳入） */
+  trace?: MessageTrace;
   /**
    * Extended thinking 等級（Anthropic）。
    * 傳入後 LLM 會輸出 thinking_delta 事件。
@@ -343,6 +347,7 @@ export async function* agentLoop(
   const { channelId, accountId, provider, projectId } = opts;
   const platform = opts.platform ?? "discord";
   const spawnDepth = opts.spawnDepth ?? 0;
+  const trace = opts.trace;
   // allowSpawn: depth ≥ 2 強制 false（最多 3 層）；opts.allowSpawn 明確 false 也關閉
   const allowSpawn = opts.allowSpawn !== false && spawnDepth < 2;
 
@@ -390,6 +395,16 @@ export async function* agentLoop(
     }
   } else {
     processedHistory = rawHistory;
+  }
+
+  // Trace: Context Engineering 記錄
+  if (trace && contextEngine) {
+    const bd = contextEngine.lastBuildBreakdown;
+    trace.recordCE({
+      strategiesApplied: bd.strategiesApplied,
+      tokensBeforeCE: bd.tokensBeforeCE ?? bd.estimatedTokens,
+      tokensAfterCE: bd.tokensAfterCE ?? bd.estimatedTokens,
+    });
   }
 
   // Context overflow 三段 failover 第三段：CE 偵測到超硬上限 → 終止
@@ -511,6 +526,7 @@ export async function* agentLoop(
 
       // ── 5a. LLM 呼叫（帶重試）────────────────────────────────────────────
       log.debug(`[agent-loop] [loop=${loopCount}] 呼叫 LLM msgs=${messages.length}`);
+      trace?.recordLLMCallStart(loopCount);
       let streamResult;
       try {
         streamResult = await callWithRetry(
@@ -566,6 +582,18 @@ export async function* agentLoop(
       lastModel = streamResult.usage.model;
       lastProviderType = streamResult.usage.providerType;
       if (streamResult.usage.estimated) lastEstimated = true;
+
+      // Trace: LLM call 結束
+      trace?.recordLLMCallEnd({
+        model: streamResult.usage.model ?? "",
+        provider: streamResult.usage.providerType ?? provider.id,
+        inputTokens: streamResult.usage.input,
+        outputTokens: streamResult.usage.output,
+        cacheRead: streamResult.usage.cacheRead ?? 0,
+        cacheWrite: streamResult.usage.cacheWrite ?? 0,
+        estimated: streamResult.usage.estimated ?? false,
+        stopReason: streamResult.stopReason,
+      });
 
       if (controller.signal.aborted) break;
       if (streamResult.stopReason === "end_turn") break;
@@ -641,6 +669,12 @@ export async function* agentLoop(
           toolResults.push(batch.toolResult);
           turnToolResultTokens += Math.ceil(batch.toolResult.content.length / 4);
           tracker.recordToolCall(batch.toolRecord.name, batch.toolRecord.params, batch.toolRecord.result, batch.toolRecord.error, batch.toolRecord.durationMs);
+          trace?.recordToolCall({
+            name: batch.toolRecord.name,
+            durationMs: batch.toolRecord.durationMs,
+            error: batch.toolRecord.error,
+            resultPreview: batch.toolRecord.error ?? String(batch.toolRecord.result ?? "").slice(0, 100),
+          });
         }
       }
 
@@ -739,6 +773,13 @@ export async function* agentLoop(
         }
 
         tracker.recordToolCall(call.name, hookResult.params, toolResult.result, toolResult.error, durationMs);
+        // Trace: tool call 記錄
+        trace?.recordToolCall({
+          name: call.name,
+          durationMs,
+          error: toolResult.error,
+          resultPreview: toolResult.error ? toolResult.error : String(toolResult.result ?? "").slice(0, 100),
+        });
         if (toolResult.error) {
           log.debug(`[agent-loop] [使用工具] (${call.name}) :: error ${durationMs}ms — ${toolResult.error}`);
         } else {
@@ -837,6 +878,29 @@ export async function* agentLoop(
       intervalTurns: opts.sessionMemory.intervalTurns,
       maxHistoryTurns: opts.sessionMemory.maxHistoryTurns,
     }).catch(() => { /* 靜默 */ });
+  }
+
+  // Trace: Post-process + Finalize
+  if (trace) {
+    const ceApplied = (contextEngine?.lastBuildBreakdown?.strategiesApplied?.length ?? 0) > 0;
+    trace.recordPostProcess({
+      extractRan: false, // extract 在 discord.ts 的 handleAgentLoopReply 中 fire-and-forget
+      sessionSnapshotKept: ceApplied,
+      sessionNoteUpdated: !!opts.sessionMemory?.enabled,
+      toolLogPath: toolLogPath ?? undefined,
+    });
+    trace.recordResponse(fullResponse, Date.now() - turnStartMs);
+
+    // 如果是 abort 導致的退出（loopCount 沒到但 response 為空），標記
+    if (controller.signal.aborted) {
+      trace.recordAbort("stop", !!snapshotStore);
+    }
+
+    // 持久化
+    const traceStore = getTraceStore();
+    if (traceStore) {
+      traceStore.append(trace.finalize());
+    }
   }
 
   // Turn Audit Log 記錄
