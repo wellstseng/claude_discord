@@ -43,7 +43,8 @@
           // 情境 A：自動觸發頻道（不需 @mention）
           "111111111111111111": {
             "allow": true,
-            "requireMention": false  // 覆寫：不需 mention
+            "requireMention": false, // 覆寫：不需 mention
+            "autoThread": true       // 每則訊息自動建立 Thread（對話隔離，預設 false）
             // 其餘繼承 guild 預設（allowBot/allowFrom 同 guild 設定）
           },
 
@@ -74,9 +75,39 @@
                                  //   "none"    → 完全隱藏
   "showThinking": false,         // 是否顯示 Claude 推理過程（thinking block）
                                  //   true → 以 > 💭 引用格式漸進顯示
+  "streamingReply": true,        // 串流即時編輯模式（預設 true）
+                                 //   true → 先發 💭 占位訊息，token 到來時即時 edit
+                                 //   false → 累積後分段發送（舊模式）
   "debounceMs": 500,             // 同一人多則訊息合併延遲（毫秒），預設 500
   "fileUploadThreshold": 4000,   // 回覆超過此字數時改上傳 .md 檔（0 = 停用），預設 4000
   "logLevel": "info",            // 日誌層級：debug / info / warn / error / silent
+
+  // ── Provider 設定 ─────────────────────────────────────────────────
+  // 若完全不填：有 ANTHROPIC_TOKEN 環境變數 → 自動建立 claude-oauth provider
+  //            否則 → 自動建立 ollama-local provider
+  "provider": "claude",          // 預設使用的 provider ID
+  "providers": {
+    "claude": {
+      "type": "claude",          // 型別：claude / openai / openai-compat / ollama / codex-oauth
+                                 //   "claude" 是 "claude-oauth" 的短名稱別名
+      "mode": "oauth",           // Claude 認證模式（選填，僅 type=claude 有效）
+                                 //   "oauth"  → 使用 auth-profile.json（Claude.ai OAuth）
+                                 //   "token" / "api" → 使用 token 欄位（Anthropic API key）
+                                 //   不填 → 自動偵測（有 auth-profile.json → oauth；否則 token）
+      "model": "claude-sonnet-4-6"  // 完整 model ID 或短名稱別名：
+                                    //   "claude-haiku" → "claude-haiku-4-5"
+                                    //   "claude-sonnet" → "claude-sonnet-4-6"
+                                    //   "claude-opus" → "claude-opus-4-6"
+    },
+    "ollama-local": {
+      "type": "ollama",
+      "host": "http://localhost:11434",
+      "model": "qwen3:14b"
+    }
+  },
+  "providerRouting": {
+    "roles": { "default": "claude" }
+  },
 
   // ── 排程（job 定義在 data/cron-jobs.json）──────────────────────
   "cron": {
@@ -96,6 +127,7 @@
 | `sessionTtlHours` | `168` | 7 天（頂層，非 claude.* 下） |
 | `showToolCalls` | `"all"` | 完整顯示（config.example 預設 "summary"） |
 | `showThinking` | `false` | 不顯示推理 |
+| `streamingReply` | `true` | 串流即時編輯模式 |
 | `debounceMs` | `500` | 0.5 秒 |
 | `fileUploadThreshold` | `4000` | 4000 字 |
 | `logLevel` | `"info"` | |
@@ -105,6 +137,8 @@
 | guild `requireMention` | `true` | 需要 @mention |
 | guild `allowBot` | `false` | 不允許 bot |
 | guild `allowFrom` | `[]` | 不限制 |
+| channel `autoThread` | `false` | 每則訊息建 Thread |
+| provider `mode` | auto | claude 認證模式：oauth/token/api |
 
 ---
 
