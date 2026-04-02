@@ -22,6 +22,8 @@ export interface SkillContext {
   message: Message;
   channelId: string;
   authorId: string;
+  /** 平台帳號 ID（如 discord:{discordId}），平台就緒時有值 */
+  accountId?: string;
   config: BridgeConfig;
 }
 

@@ -85,6 +85,12 @@ export interface ProviderOpts {
   temperature?: number;
   maxTokens?: number;
   abortSignal?: AbortSignal;
+  /**
+   * Extended thinking level（Anthropic）。
+   * 傳入後 LLM 會輸出 thinking_delta 事件。
+   * 值：minimal | low | medium | high | xhigh
+   */
+  thinking?: "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 // ── 串流事件 ─────────────────────────────────────────────────────────────────

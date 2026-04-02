@@ -50,6 +50,7 @@ import { getInboundHistoryStore, type InboundEntry } from "./discord/inbound-his
 import { resolveProvider, getChannelAccess as getCoreChannelAccess } from "./core/config.js";
 import { getProviderRegistry } from "./providers/registry.js";
 import { agentLoop } from "./core/agent-loop.js";
+import { getChannelThinking } from "./skills/builtin/think.js";
 import { eventBus } from "./core/event-bus.js";
 import { handleAgentLoopReply } from "./core/reply-handler.js";
 import { setDiscordClient, getSubagentThreadBinding } from "./core/subagent-discord-bridge.js";
@@ -432,14 +433,19 @@ async function handleMessage(
       }
 
       try {
+        const skillAccountId = isPlatformReady()
+          ? resolveDiscordIdentity(firstMessage.author.id, config.admin?.allowedUserIds ?? []).accountId
+          : undefined;
+        const skillCtx = { args, message: firstMessage, channelId: firstMessage.channelId, authorId: firstMessage.author.id, accountId: skillAccountId, config };
+
         if (skill.preflight) {
-          const check = await skill.preflight({ args, message: firstMessage, channelId: firstMessage.channelId, authorId: firstMessage.author.id, config });
+          const check = await skill.preflight(skillCtx);
           if (!check.ok) {
             void firstMessage.reply(`❌ ${skill.name} 無法執行：${check.reason ?? "前置檢查失敗"}`);
             return;
           }
         }
-        const result = await skill.execute({ args, message: firstMessage, channelId: firstMessage.channelId, authorId: firstMessage.author.id, config });
+        const result = await skill.execute(skillCtx);
         void firstMessage.reply(result.text);
       } catch (err) {
         log.warn(`[discord] skill ${skill.name} 執行失敗：${err instanceof Error ? err.message : String(err)}`);
@@ -655,6 +661,7 @@ async function handleMessage(
           },
         } : {}),
         ...(allImages.length > 0 ? { imageAttachments: allImages } : {}),
+        ...(getChannelThinking(firstMessage.channelId) ? { thinking: getChannelThinking(firstMessage.channelId) } : {}),
       }, {
         sessionManager: getPlatformSessionManager(),
         permissionGate: getPlatformPermissionGate(),

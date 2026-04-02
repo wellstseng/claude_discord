@@ -172,6 +172,11 @@ export interface AgentLoopOpts {
    */
   imageAttachments?: Array<{ data: string; mimeType: string; name: string }>;
   /**
+   * Extended thinking 等級（Anthropic）。
+   * 傳入後 LLM 會輸出 thinking_delta 事件。
+   */
+  thinking?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  /**
    * 執行指令前 DM 確認設定。
    * 啟用時，run_command 執行前會送 DM 給指定使用者等待確認。
    * 回呼由呼叫端提供（需整合 discord client）。
@@ -512,6 +517,7 @@ export async function* agentLoop(
               input_schema: d.input_schema,
             })) : undefined,
             abortSignal: controller.signal,
+            ...(opts.thinking ? { thinking: opts.thinking } : {}),
           }),
           {
             maxAttempts: opts.retryMaxAttempts ?? 3,
