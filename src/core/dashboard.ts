@@ -2026,7 +2026,7 @@ export class DashboardServer {
       res.writeHead(404); res.end("Not found");
     });
 
-    server.listen(this.port, "127.0.0.1", () => {
+    server.listen(this.port, "0.0.0.0", () => {
       log.info(`[dashboard] 啟動 http://127.0.0.1:${this.port}`);
     });
 
