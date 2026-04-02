@@ -157,6 +157,12 @@ const HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CatClaw Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/theme/monokai.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/mode/yaml/yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: system-ui, sans-serif; background: #0f1117; color: #e0e0e0; }
@@ -194,6 +200,9 @@ canvas { max-height: 200px; }
 textarea { width: 100%; background: #0f1117; color: #e0e0e0; border: 1px solid #2a2d3e; border-radius: 6px; padding: 8px; font-family: monospace; font-size: 0.78rem; resize: vertical; }
 details summary { cursor: pointer; color: #818cf8; font-size: 0.78rem; padding: 4px 0; }
 details[open] summary { margin-bottom: 6px; }
+.CodeMirror { height: 580px; font-size: 0.82rem; border: 1px solid #2a2d3e; border-radius: 6px; }
+.cm-mode-btn { background: #1e3a5f; border: none; color: #60a5fa; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 0.72rem; }
+.cm-mode-btn.active { background: #065f46; color: #34d399; }
 </style>
 </head>
 <body>
@@ -267,11 +276,13 @@ details[open] summary { margin-bottom: 6px; }
   <div class="card">
     <h2>Config 編輯器
       <button class="btn btn-sm" style="float:right;margin-left:4px" onclick="saveCfg()">💾 備份後儲存</button>
+      <button class="btn btn-sm" style="float:right;margin-left:4px;display:none" onclick="convertYaml()" id="btn-yaml-convert">⇄ YAML→JSON</button>
+      <button class="cm-mode-btn" style="float:right;margin-left:4px" onclick="toggleYamlMode()" id="btn-yaml-mode">YAML 模式</button>
       <button class="btn btn-sm" style="float:right" onclick="loadCfg()">↻ 讀取</button>
     </h2>
     <p style="font-size:0.72rem;color:#f59e0b;margin:6px 0">⚠ 敏感欄位顯示 ***，儲存前請手動還原實際值</p>
     <div id="cfg-msg" class="msg"></div>
-    <textarea id="cfg-editor" rows="30"></textarea>
+    <div id="cfg-editor"></div>
   </div>
 </div>
 
@@ -405,16 +416,61 @@ async function loadSubagents() {
 }
 
 // ── Config ───────────────────────────────────────────────────────────────────
+let cfgEditor = null;
+let cfgYamlMode = false;
+
+function initCfgEditor(initialValue) {
+  if (cfgEditor) { cfgEditor.setValue(initialValue); return; }
+  cfgEditor = CodeMirror(document.getElementById('cfg-editor'), {
+    value: initialValue,
+    mode: { name: 'javascript', json: true },
+    theme: 'monokai',
+    lineNumbers: true,
+    lineWrapping: false,
+    tabSize: 2,
+    indentWithTabs: false,
+  });
+}
+
 async function loadCfg() {
   try {
     const text = await fetch('/api/config').then(r => r.text());
-    document.getElementById('cfg-editor').value = text;
+    initCfgEditor(text);
     document.getElementById('cfg-msg').textContent = '';
   } catch(e) { showCfgMsg('讀取失敗：' + e, false); }
 }
 
+function toggleYamlMode() {
+  cfgYamlMode = !cfgYamlMode;
+  const btn = document.getElementById('btn-yaml-mode');
+  const btnConvert = document.getElementById('btn-yaml-convert');
+  btn.textContent = cfgYamlMode ? '✓ YAML 模式' : 'YAML 模式';
+  btn.classList.toggle('active', cfgYamlMode);
+  btnConvert.style.display = cfgYamlMode ? 'inline-block' : 'none';
+  if (cfgEditor) cfgEditor.setOption('mode', cfgYamlMode ? 'yaml' : { name: 'javascript', json: true });
+}
+
+function convertYaml() {
+  if (!cfgEditor || !cfgYamlMode) return;
+  try {
+    const obj = jsyaml.load(cfgEditor.getValue());
+    cfgYamlMode = false;
+    document.getElementById('btn-yaml-mode').textContent = 'YAML 模式';
+    document.getElementById('btn-yaml-mode').classList.remove('active');
+    document.getElementById('btn-yaml-convert').style.display = 'none';
+    cfgEditor.setOption('mode', { name: 'javascript', json: true });
+    cfgEditor.setValue(JSON.stringify(obj, null, 2));
+    showCfgMsg('✓ 已轉換為 JSON', true);
+  } catch(e) { showCfgMsg('YAML 解析失敗：' + e, false); }
+}
+
 async function saveCfg() {
-  const body = document.getElementById('cfg-editor').value;
+  if (!cfgEditor) { showCfgMsg('編輯器未初始化', false); return; }
+  let body = cfgEditor.getValue();
+  if (cfgYamlMode) {
+    try { body = JSON.stringify(jsyaml.load(body), null, 2); }
+    catch(e) { showCfgMsg('YAML 解析失敗：' + e, false); return; }
+  }
   try { JSON.parse(body); } catch(e) { showCfgMsg('JSON 格式錯誤：' + e, false); return; }
   try {
     const d = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body}).then(r=>r.json());
