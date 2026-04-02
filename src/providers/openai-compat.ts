@@ -31,25 +31,32 @@ export class OpenAICompatProvider implements LLMProvider {
 
   private baseUrl: string;
   readonly modelId: string;
-  private token?: string;
+  private authHeader?: string;
 
   constructor(id: string, entry: ProviderEntry) {
     this.id = id;
     this.name = `OpenAI-Compat (${id})`;
     this.baseUrl = (entry.baseUrl ?? entry.host ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.modelId = entry.model ?? DEFAULT_MODEL;
-    this.token = entry.token;
     // 預設支援 tool_use（Ollama 新版支援）；可由 config 覆寫
     this.supportsToolUse = (entry as Record<string, unknown>)["supportsToolUse"] !== false;
+    if (entry.mode === "password" && entry.username != null) {
+      const creds = Buffer.from(`${entry.username}:${entry.password ?? ""}`).toString("base64");
+      this.authHeader = `Basic ${creds}`;
+    } else if (entry.token) {
+      this.authHeader = `Bearer ${entry.token}`;
+    }
   }
 
   // ── 可選：啟動時偵測模型能力 ──────────────────────────────────────────────
 
   async init(): Promise<void> {
     try {
+      const hdrs: Record<string, string> = { "content-type": "application/json" };
+      if (this.authHeader) hdrs["Authorization"] = this.authHeader;
       const resp = await fetch(`${this.baseUrl}/api/show`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: hdrs,
         body: JSON.stringify({ name: this.modelId }),
         signal: AbortSignal.timeout(5000),
       });
@@ -99,7 +106,7 @@ export class OpenAICompatProvider implements LLMProvider {
     if (opts.temperature !== undefined) body["temperature"] = opts.temperature;
 
     const headers: Record<string, string> = { "content-type": "application/json" };
-    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    if (this.authHeader) headers["Authorization"] = this.authHeader;
 
     log.debug(`[openai-compat:${this.id}] POST /v1/chat/completions model=${this.modelId} msgs=${messages.length}`);
 
