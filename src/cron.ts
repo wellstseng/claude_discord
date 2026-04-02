@@ -313,8 +313,9 @@ async function execMessage(channelId: string, text: string): Promise<void> {
 
 /**
  * 執行 claude-acp action：透過 ACP（Claude CLI spawn）執行 turn，收集回覆文字，發送到頻道
+ * @param timeoutSec 可選 timeout（秒），覆寫全域 turnTimeoutMs
  */
-async function execClaude(channelId: string, prompt: string): Promise<void> {
+async function execClaude(channelId: string, prompt: string, timeoutSec?: number): Promise<void> {
   if (!discordClient) throw new Error("Discord client 未初始化");
 
   const channel = await discordClient.channels.fetch(channelId);
@@ -322,30 +323,38 @@ async function execClaude(channelId: string, prompt: string): Promise<void> {
     throw new Error(`找不到頻道或無法發送：${channelId}`);
   }
 
-  // 收集 Claude 回覆
-  // cwd 和 binary 路徑由 runClaudeTurn 內部從環境變數取得
-  let responseText = "";
-  for await (const event of runClaudeTurn(
-    null, // 不 resume，每次獨立 session
-    prompt,
-    channelId, // 排程 job 的目標頻道
-  )) {
-    if (event.type === "text_delta") {
-      responseText += event.text;
-    } else if (event.type === "error") {
-      throw new Error(event.message);
-    }
-  }
+  // timeout 控制：job 指定 > 全域 turnTimeoutMs
+  const timeoutMs = timeoutSec ? timeoutSec * 1000 : config.turnTimeoutMs;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
 
-  // 送出結果
-  if (responseText.trim()) {
-    const sendable = channel as SendableChannels;
-    // 分段送出（2000 字上限）
-    let remaining = responseText.trim();
-    while (remaining.length > 0) {
-      await sendable.send(remaining.slice(0, 2000));
-      remaining = remaining.slice(2000);
+  try {
+    // 收集 Claude 回覆
+    let responseText = "";
+    for await (const event of runClaudeTurn(
+      null, // 不 resume，每次獨立 session
+      prompt,
+      channelId,
+      ac.signal,
+    )) {
+      if (event.type === "text_delta") {
+        responseText += event.text;
+      } else if (event.type === "error") {
+        throw new Error(event.message);
+      }
     }
+
+    // 送出結果
+    if (responseText.trim()) {
+      const sendable = channel as SendableChannels;
+      let remaining = responseText.trim();
+      while (remaining.length > 0) {
+        await sendable.send(remaining.slice(0, 2000));
+        remaining = remaining.slice(2000);
+      }
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -529,7 +538,7 @@ async function runJob(job: CronJobRuntime): Promise<void> {
     } else if (entry.action.type === "subagent") {
       await execSubagent(entry.action);
     } else if (entry.action.type === "claude-acp") {
-      await execClaude(entry.action.channelId, entry.action.prompt);
+      await execClaude(entry.action.channelId, entry.action.prompt, entry.action.timeoutSec);
     } else {
       log.warn(`[cron] 未知 action type：${(entry.action as { type: string }).type}，跳過`);
     }
