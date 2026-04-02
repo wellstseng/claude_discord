@@ -357,6 +357,8 @@ export interface BridgeConfig {
   showThinking: boolean;
   debounceMs: number;
   fileUploadThreshold: number;
+  /** 串流輸出（逐步 edit 訊息），預設 true */
+  streamingReply: boolean;
   logLevel: LogLevel;
   cron: CronConfig;
   history: HistoryConfig;
@@ -475,6 +477,7 @@ interface RawConfig {
   showThinking?: boolean;
   debounceMs?: number;
   fileUploadThreshold?: number;
+  streamingReply?: boolean;
   logLevel?: string;
   cron?: { enabled?: boolean; maxConcurrentRuns?: number; defaultAccountId?: string; defaultProvider?: string };
   history?: { enabled?: boolean };
@@ -725,6 +728,7 @@ function loadConfig(): BridgeConfig {
     showThinking: raw.showThinking ?? false,
     debounceMs: raw.debounceMs ?? 500,
     fileUploadThreshold: raw.fileUploadThreshold ?? 4000,
+    streamingReply: raw.streamingReply ?? true,
     logLevel,
     cron: {
       enabled: raw.cron?.enabled ?? false,
@@ -735,18 +739,28 @@ function loadConfig(): BridgeConfig {
     history: { enabled: raw.history?.enabled ?? true },
 
     // ── 平台擴充欄位 ──
-    // 預設 provider 為 ollama-local（本地，不需要 token）
-    provider: raw.provider ?? "ollama-local",
-    providers: raw.providers ?? {
-      "ollama-local": {
-        type: "ollama",
-        host: "http://localhost:11434",
-        model: "qwen3:1.7b",
-      },
-    },
+    // 未設定 providers 時，若有 ANTHROPIC_TOKEN 預設用 claude-oauth；否則 ollama-local
+    provider: raw.provider ?? (process.env["ANTHROPIC_TOKEN"] ? "claude-oauth" : "ollama-local"),
+    providers: raw.providers ?? (process.env["ANTHROPIC_TOKEN"]
+      ? {
+          "claude-oauth": {
+            type: "claude-oauth" as const,
+            token: process.env["ANTHROPIC_TOKEN"],
+            model: "claude-sonnet-4-6",
+          },
+        }
+      : {
+          "ollama-local": {
+            type: "ollama" as const,
+            host: "http://localhost:11434",
+            model: "qwen3:1.7b",
+          },
+        }),
     providerRouting: {
       channels: raw.providerRouting?.channels ?? {},
-      roles: raw.providerRouting?.roles ?? { default: "ollama-local" },
+      roles: raw.providerRouting?.roles ?? {
+        default: process.env["ANTHROPIC_TOKEN"] ? "claude-oauth" : "ollama-local",
+      },
       projects: raw.providerRouting?.projects ?? {},
       failoverChain: raw.providerRouting?.failoverChain,
       circuitBreaker: raw.providerRouting?.circuitBreaker,
