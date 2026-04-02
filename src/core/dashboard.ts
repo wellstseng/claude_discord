@@ -1372,8 +1372,9 @@ async function loadTraces() {
     html += '<th style="text-align:left;padding:4px">時間</th>';
     html += '<th style="text-align:left;padding:4px">Channel</th>';
     html += '<th style="text-align:right;padding:4px">Duration</th>';
-    html += '<th style="text-align:right;padding:4px">↑ In</th>';
+    html += '<th style="text-align:right;padding:4px">↑ Effective</th>';
     html += '<th style="text-align:right;padding:4px">↓ Out</th>';
+    html += '<th style="text-align:right;padding:4px">Cache R/W</th>';
     html += '<th style="text-align:right;padding:4px">Tools</th>';
     html += '<th style="text-align:right;padding:4px">LLM</th>';
     html += '<th style="text-align:center;padding:4px">CE</th>';
@@ -1391,8 +1392,9 @@ async function loadTraces() {
       html += '<td style="padding:4px;color:var(--fg2)">' + ts + '</td>';
       html += '<td style="padding:4px">…' + ch + '</td>';
       html += '<td style="padding:4px;text-align:right">' + dur + '</td>';
-      html += '<td style="padding:4px;text-align:right">' + (t.totalInputTokens ?? 0).toLocaleString() + '</td>';
+      html += '<td style="padding:4px;text-align:right">' + (t.effectiveInputTokens ?? t.totalInputTokens ?? 0).toLocaleString() + '</td>';
       html += '<td style="padding:4px;text-align:right">' + (t.totalOutputTokens ?? 0).toLocaleString() + '</td>';
+      html += '<td style="padding:4px;text-align:right;color:var(--fg2)">' + (t.totalCacheRead ?? 0).toLocaleString() + '/' + (t.totalCacheWrite ?? 0).toLocaleString() + '</td>';
       html += '<td style="padding:4px;text-align:right">' + (t.totalToolCalls ?? 0) + '</td>';
       html += '<td style="padding:4px;text-align:right">' + (t.llmCalls?.length ?? 0) + '</td>';
       html += '<td style="padding:4px;text-align:center">' + ce + '</td>';
@@ -1433,6 +1435,10 @@ async function showTraceDetail(traceId) {
       html += '<div style="font-size:0.82rem">';
       html += '<div>Duration: ' + (t.context.endMs - t.context.startMs) + 'ms</div>';
       html += '<div>System Prompt: ~' + t.context.systemPromptTokens + ' tokens</div>';
+      if (t.context.historyMessageCount > 0) {
+        html += '<div>History: ' + t.context.historyMessageCount + ' msgs (~' + t.context.historyTokens + ' tokens)</div>';
+      }
+      html += '<div style="color:var(--accent2)">Total Context: ~' + t.context.totalContextTokens + ' tokens</div>';
       if (t.context.memoryRecall) {
         const r = t.context.memoryRecall;
         html += '<div style="margin-top:4px;padding:4px;background:var(--bg3);border-radius:4px">';
@@ -1458,10 +1464,11 @@ async function showTraceDetail(traceId) {
         html += '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:0.82rem">';
         html += '<div style="display:flex;justify-content:space-between">';
         html += '<span><b>Loop #' + call.iteration + '</b> — ' + (call.model ?? '?') + '</span>';
-        html += '<span>' + (call.durationMs/1000).toFixed(1) + 's | ↑' + call.inputTokens + ' ↓' + call.outputTokens + '</span>';
+        const effIn = call.inputTokens + (call.cacheRead ?? 0) + (call.cacheWrite ?? 0);
+        html += '<span>' + (call.durationMs/1000).toFixed(1) + 's | ↑' + effIn + ' (new:' + call.inputTokens + ') ↓' + call.outputTokens + '</span>';
         html += '</div>';
         if (call.cacheRead > 0 || call.cacheWrite > 0) {
-          html += '<div style="color:var(--fg2)">Cache: read=' + call.cacheRead + ' write=' + call.cacheWrite + '</div>';
+          html += '<div style="color:var(--fg2)">Cache read: ' + call.cacheRead + ' (10%價) | write: ' + call.cacheWrite + ' (125%價)</div>';
         }
         if (call.toolCalls?.length > 0) {
           html += '<div style="margin-top:4px">';
@@ -1535,7 +1542,9 @@ async function showTraceDetail(traceId) {
     // Summary bar
     html += '<div style="margin-top:12px;padding:8px;background:var(--bg3);border-radius:6px;font-size:0.82rem;display:flex;gap:16px;flex-wrap:wrap">';
     html += '<span>Total: ' + (t.totalDurationMs/1000).toFixed(1) + 's</span>';
-    html += '<span>↑ ' + (t.totalInputTokens ?? 0).toLocaleString() + '</span>';
+    html += '<span>↑ Effective: ' + (t.effectiveInputTokens ?? t.totalInputTokens ?? 0).toLocaleString() + '</span>';
+    html += '<span>↑ New: ' + (t.totalInputTokens ?? 0).toLocaleString() + '</span>';
+    html += '<span>Cache R: ' + (t.totalCacheRead ?? 0).toLocaleString() + ' W: ' + (t.totalCacheWrite ?? 0).toLocaleString() + '</span>';
     html += '<span>↓ ' + (t.totalOutputTokens ?? 0).toLocaleString() + '</span>';
     html += '<span>Tools: ' + (t.totalToolCalls ?? 0) + '</span>';
     html += '<span>Status: ' + (t.status === 'completed' ? '✅' : t.status === 'aborted' ? '⏹' : '❌') + ' ' + t.status + '</span>';

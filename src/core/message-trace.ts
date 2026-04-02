@@ -126,6 +126,10 @@ export interface MessageTraceEntry {
   totalDurationMs: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheRead: number;
+  totalCacheWrite: number;
+  /** input + cacheRead + cacheWrite = 實際送進 LLM 的總 context */
+  effectiveInputTokens: number;
   totalToolCalls: number;
   error?: string;
   status: "completed" | "aborted" | "error";
@@ -168,6 +172,9 @@ export class MessageTrace {
       totalDurationMs: 0,
       totalInputTokens: 0,
       totalOutputTokens: 0,
+      totalCacheRead: 0,
+      totalCacheWrite: 0,
+      effectiveInputTokens: 0,
       totalToolCalls: 0,
       status: "completed",
     };
@@ -282,6 +289,9 @@ export class MessageTrace {
     this.entry.llmCalls.push(call);
     this.entry.totalInputTokens += opts.inputTokens;
     this.entry.totalOutputTokens += opts.outputTokens;
+    this.entry.totalCacheRead += opts.cacheRead;
+    this.entry.totalCacheWrite += opts.cacheWrite;
+    this.entry.effectiveInputTokens += opts.inputTokens + opts.cacheRead + opts.cacheWrite;
     this._currentLLMCall = null;
   }
 

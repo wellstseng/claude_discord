@@ -397,14 +397,29 @@ export async function* agentLoop(
     processedHistory = rawHistory;
   }
 
-  // Trace: Context Engineering 記錄
-  if (trace && contextEngine) {
-    const bd = contextEngine.lastBuildBreakdown;
-    trace.recordCE({
-      strategiesApplied: bd.strategiesApplied,
-      tokensBeforeCE: bd.tokensBeforeCE ?? bd.estimatedTokens,
-      tokensAfterCE: bd.tokensAfterCE ?? bd.estimatedTokens,
+  // Trace: Context Engineering + Session History 記錄
+  if (trace) {
+    // History token 估算（補回 discord.ts 無法取得的 history 資訊）
+    const historyTokens = processedHistory.reduce((sum, m) => {
+      if (m.tokens) return sum + m.tokens;
+      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      return sum + Math.ceil(content.length / 4);
+    }, 0);
+    trace.recordContextEnd({
+      systemPromptTokens: Math.ceil((opts.systemPrompt?.length ?? 0) / 4),
+      historyTokens,
+      historyMessageCount: processedHistory.length,
+      totalContextTokens: Math.ceil((opts.systemPrompt?.length ?? 0) / 4) + historyTokens,
     });
+
+    if (contextEngine) {
+      const bd = contextEngine.lastBuildBreakdown;
+      trace.recordCE({
+        strategiesApplied: bd.strategiesApplied,
+        tokensBeforeCE: bd.tokensBeforeCE ?? bd.estimatedTokens,
+        tokensAfterCE: bd.tokensAfterCE ?? bd.estimatedTokens,
+      });
+    }
   }
 
   // Context overflow 三段 failover 第三段：CE 偵測到超硬上限 → 終止
