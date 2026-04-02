@@ -3,7 +3,7 @@
  * @description read_file — 讀取檔案內容（elevated tier）
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Tool } from "../types.js";
 
@@ -27,6 +27,16 @@ export const tool: Tool = {
     const filePath = resolve(String(params["path"] ?? ""));
 
     if (!existsSync(filePath)) return { error: `檔案不存在：${filePath}` };
+
+    // 目錄偵測：回傳目錄列表而非 EISDIR 錯誤
+    try {
+      if (statSync(filePath).isDirectory()) {
+        const entries = readdirSync(filePath, { withFileTypes: true })
+          .map(e => (e.isDirectory() ? e.name + "/" : e.name))
+          .sort();
+        return { result: `這是一個目錄，包含 ${entries.length} 個項目：\n${entries.join("\n")}` };
+      }
+    } catch { /* stat 失敗就繼續嘗試讀取 */ }
 
     let content: string;
     try {

@@ -42,6 +42,8 @@ export interface TraceToolCall {
   durationMs: number;
   error?: string;
   resultPreview?: string;
+  /** 工具參數摘要（依工具類型提取關鍵欄位） */
+  paramsPreview?: string;
 }
 
 /** 單次 LLM 呼叫追蹤 */
@@ -325,6 +327,9 @@ export class MessageTrace {
   recordToolCall(tc: TraceToolCall): void {
     if (this._currentLLMCall) {
       this._currentLLMCall.toolCalls!.push(tc);
+    } else if (this.entry.llmCalls.length > 0) {
+      // tool 執行在 recordLLMCallEnd 之後，歸屬到觸發它的那次 LLM call
+      this.entry.llmCalls[this.entry.llmCalls.length - 1].toolCalls.push(tc);
     }
     this.entry.totalToolCalls++;
   }

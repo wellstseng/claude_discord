@@ -339,6 +339,7 @@ label.cfg-toggle { min-width: 36px; }
 .cfg-toggle .slider:before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background: var(--fg2); border-radius: 50%; transition: .2s; }
 .cfg-toggle input:checked + .slider { background: var(--green); }
 .cfg-toggle input:checked + .slider:before { transform: translateX(16px); background: var(--green2); }
+.th-tip { display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;font-size:0.65rem;background:var(--bg4);color:var(--fg2);border:1px solid var(--border);border-radius:50%;cursor:help;margin-left:3px;vertical-align:middle; }
 .cfg-map { width: 100%; }
 .cfg-map-row { display: flex; gap: 4px; margin-bottom: 4px; align-items: center; }
 .cfg-map-row input { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; font-size: 0.75rem; font-family: monospace; }
@@ -552,6 +553,7 @@ function switchTab(id, el) {
   if (id !== 'logs') disconnectLogStream();
   if (id === 'ops') { loadSubagents(); }
   if (id === 'auth') loadAuthProfiles();
+  if (id === 'traces') loadTraces();
   if (id === 'cron') loadCron();
   if (id === 'config') loadCfg();
 }
@@ -1370,17 +1372,18 @@ async function loadTraces() {
     if (!d.traces || d.traces.length === 0) { el.innerHTML = '<div style="color:var(--fg2)">無 trace 記錄</div>'; return; }
     let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
     html += '<tr style="border-bottom:1px solid var(--border);color:var(--fg2)">';
+    const tip = (label, desc) => label + ' <span class="th-tip" title="' + desc + '">?</span>';
     html += '<th style="text-align:left;padding:4px">時間</th>';
     html += '<th style="text-align:left;padding:4px">Channel</th>';
-    html += '<th style="text-align:right;padding:4px">Duration</th>';
-    html += '<th style="text-align:right;padding:4px">↑ Effective</th>';
-    html += '<th style="text-align:right;padding:4px">↓ Out</th>';
-    html += '<th style="text-align:right;padding:4px">Cache R/W</th>';
-    html += '<th style="text-align:right;padding:4px">Tools</th>';
-    html += '<th style="text-align:right;padding:4px">LLM</th>';
-    html += '<th style="text-align:center;padding:4px">CE</th>';
+    html += '<th style="text-align:right;padding:4px">' + tip('Duration', '從收到訊息到回覆完成的總耗時') + '</th>';
+    html += '<th style="text-align:right;padding:4px">' + tip('↑ Effective', 'LLM 實際處理的 input tokens（新送 + cache read + cache write）') + '</th>';
+    html += '<th style="text-align:right;padding:4px">' + tip('↓ Out', 'LLM 產出的 output tokens') + '</th>';
+    html += '<th style="text-align:right;padding:4px">' + tip('Cache R/W', 'Cache Read（10%價）/ Cache Write（125%價）的 token 數') + '</th>';
+    html += '<th style="text-align:right;padding:4px">' + tip('Tools', '本次 turn 呼叫的工具總次數') + '</th>';
+    html += '<th style="text-align:right;padding:4px">' + tip('LLM', 'LLM 來回呼叫次數（含 tool use 迴圈）') + '</th>';
+    html += '<th style="text-align:center;padding:4px">' + tip('CE', 'Context Engineering 策略（compaction 等）') + '</th>';
     html += '<th style="text-align:center;padding:4px">Status</th>';
-    html += '<th style="text-align:right;padding:4px">Cost</th>';
+    html += '<th style="text-align:right;padding:4px">' + tip('Cost', '預估 API 費用（USD）') + '</th>';
     html += '<th style="text-align:left;padding:4px">Preview</th>';
     html += '</tr>';
     for (const t of d.traces) {
@@ -1466,14 +1469,27 @@ async function showTraceDetail(traceId) {
     if (t.llmCalls?.length > 0) {
       for (const call of t.llmCalls) {
         html += '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:0.82rem">';
-        html += '<div style="display:flex;justify-content:space-between">';
-        html += '<span><b>Loop #' + call.iteration + '</b> — ' + (call.model ?? '?') + '</span>';
-        const effIn = call.inputTokens + (call.cacheRead ?? 0) + (call.cacheWrite ?? 0);
-        html += '<span>' + (call.durationMs/1000).toFixed(1) + 's | ↑' + effIn + ' (new:' + call.inputTokens + ') ↓' + call.outputTokens + '</span>';
+        // 第一行：Loop # + model + 用途摘要
+        const toolNames = (call.toolCalls ?? []).map(tc => tc.name);
+        const uniqueTools = [...new Set(toolNames)];
+        const toolSummary = uniqueTools.length > 0 ? uniqueTools.slice(0, 3).join(', ') + (uniqueTools.length > 3 ? ' +' + (uniqueTools.length - 3) : '') : '';
+        const purpose = call.stopReason === 'end_turn' ? ' → 💬 回覆'
+          : call.stopReason === 'tool_use' ? ' → 🔧 ' + (toolSummary || '(tool)')
+          : toolSummary ? ' → ' + toolSummary : '';
+        html += '<div style="display:flex;justify-content:space-between;align-items:baseline">';
+        html += '<span><b>Loop #' + call.iteration + '</b> — ' + (call.model ?? '?') + '<span style="color:var(--fg2)">' + purpose + '</span></span>';
+        html += '<span style="color:var(--fg2)">' + (call.durationMs/1000).toFixed(1) + 's</span>';
         html += '</div>';
+        // 第二行：tokens 緊湊排列
+        const effIn = call.inputTokens + (call.cacheRead ?? 0) + (call.cacheWrite ?? 0);
+        html += '<div style="display:flex;gap:12px;margin-top:2px;color:var(--fg2)">';
+        html += '<span>↑ ' + effIn.toLocaleString() + ' <span style="font-size:0.75rem">(new:' + call.inputTokens.toLocaleString() + ')</span></span>';
+        html += '<span>↓ ' + call.outputTokens.toLocaleString() + '</span>';
         if (call.cacheRead > 0 || call.cacheWrite > 0) {
-          html += '<div style="color:var(--fg2)">Cache read: ' + call.cacheRead + ' (10%價) | write: ' + call.cacheWrite + ' (125%價)</div>';
+          html += '<span style="font-size:0.75rem">cache R:' + call.cacheRead.toLocaleString() + ' W:' + call.cacheWrite.toLocaleString() + '</span>';
         }
+        if (call.stopReason && call.stopReason !== 'tool_use' && call.stopReason !== 'end_turn') html += '<span style="font-size:0.75rem">stop:' + call.stopReason + '</span>';
+        html += '</div>';
         if (call.toolCalls?.length > 0) {
           html += '<div style="margin-top:4px">';
           for (const tc of call.toolCalls) {
@@ -1481,8 +1497,9 @@ async function showTraceDetail(traceId) {
             html += '<div style="padding:2px 0;border-top:1px solid var(--border)">';
             html += '<span style="color:' + tcColor + '">🔧 ' + tc.name + '</span>';
             html += ' <span style="color:var(--fg2)">' + tc.durationMs + 'ms</span>';
+            if (tc.paramsPreview) html += ' <span style="color:var(--accent2);font-size:0.75rem">' + tc.paramsPreview.replace(/</g,'&lt;').slice(0, 80) + '</span>';
             if (tc.error) html += ' <span style="color:var(--red2)">❌ ' + tc.error.slice(0, 60) + '</span>';
-            if (tc.resultPreview) html += ' <span style="color:var(--fg3);font-size:0.75rem">' + tc.resultPreview.slice(0, 60) + '</span>';
+            else if (tc.resultPreview) html += ' <span style="color:var(--fg3);font-size:0.75rem">→ ' + tc.resultPreview.replace(/</g,'&lt;').slice(0, 60) + '</span>';
             html += '</div>';
           }
           html += '</div>';

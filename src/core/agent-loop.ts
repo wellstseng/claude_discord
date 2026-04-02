@@ -36,6 +36,42 @@ import { config } from "./config.js";
 import type { MessageTrace } from "./message-trace.js";
 import { getTraceStore } from "./message-trace.js";
 
+// ── Tool trace helpers ──────────────────────────────────────────────────────
+
+/** 從 tool params 提取人類可讀摘要 */
+function toolParamsPreview(name: string, params: unknown): string {
+  const p = params as Record<string, unknown> | null;
+  if (!p) return "";
+  switch (name) {
+    case "run_command": return String(p.command ?? "").slice(0, 80);
+    case "read_file": return String(p.path ?? p.filePath ?? "");
+    case "write_file": return String(p.path ?? p.filePath ?? "");
+    case "edit_file": return String(p.path ?? p.filePath ?? "");
+    case "search_files": return `${p.pattern ?? ""} in ${p.path ?? "."}`;
+    case "discord_reply": return String(p.text ?? "").slice(0, 60);
+    case "discord_react": return `${p.emoji ?? ""} on ${p.message_id ?? ""}`;
+    case "spawn_subagent": return String(p.task ?? "").slice(0, 60);
+    case "memory_recall": return String(p.query ?? "").slice(0, 60);
+    case "atom_write": return String(p.name ?? p.atomName ?? "");
+    case "fetch_messages": return `ch:${String(p.chat_id ?? p.channelId ?? "").slice(-6)}`;
+    default: {
+      // 通用：取第一個 string 值
+      for (const v of Object.values(p)) {
+        if (typeof v === "string" && v.length > 0) return v.slice(0, 60);
+      }
+      return "";
+    }
+  }
+}
+
+/** 安全序列化 tool result 為預覽字串 */
+function toolResultPreview(result: unknown, error?: string): string {
+  if (error) return error;
+  if (result == null) return "";
+  if (typeof result === "string") return result.slice(0, 100);
+  try { return JSON.stringify(result).slice(0, 100); } catch { return String(result).slice(0, 100); }
+}
+
 // ── 常數 ─────────────────────────────────────────────────────────────────────
 
 const MAX_LOOPS = 20;
@@ -688,7 +724,8 @@ export async function* agentLoop(
             name: batch.toolRecord.name,
             durationMs: batch.toolRecord.durationMs,
             error: batch.toolRecord.error,
-            resultPreview: batch.toolRecord.error ?? String(batch.toolRecord.result ?? "").slice(0, 100),
+            resultPreview: toolResultPreview(batch.toolRecord.result, batch.toolRecord.error),
+            paramsPreview: toolParamsPreview(batch.toolRecord.name, batch.toolRecord.params),
           });
         }
       }
@@ -793,7 +830,8 @@ export async function* agentLoop(
           name: call.name,
           durationMs,
           error: toolResult.error,
-          resultPreview: toolResult.error ? toolResult.error : String(toolResult.result ?? "").slice(0, 100),
+          resultPreview: toolResultPreview(toolResult.result, toolResult.error),
+          paramsPreview: toolParamsPreview(call.name, hookResult.params),
         });
         if (toolResult.error) {
           log.debug(`[agent-loop] [使用工具] (${call.name}) :: error ${durationMs}ms — ${toolResult.error}`);
