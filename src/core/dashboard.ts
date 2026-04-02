@@ -1,17 +1,17 @@
 /**
  * @file core/dashboard.ts
- * @description Token Usage Web Dashboard（minimal, no external deps）
+ * @description Web Dashboard — 多分頁監控 + 操作面板
  *
- * 啟動後開一個 HTTP server，提供：
- *   GET /          → 靜態 HTML 儀表板（Chart.js from CDN）
- *   GET /api/usage → JSON：最近 7 天 token 統計 + CE 效果
- *
- * 設定：catclaw.json → dashboard.port（預設 8088）
+ * 分頁：概覽 | Sessions | 日誌 | 操作 | Config
+ * 端點：GET /  GET /api/usage  GET /api/sessions  GET /api/status
+ *        GET /api/logs  POST /api/restart  GET /api/subagents
+ *        GET /api/config  POST /api/config
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, writeFileSync, readdirSync, unlinkSync, renameSync } from "node:fs";
-import { dirname, basename, join as pathJoin } from "node:path";
+import { readFileSync, writeFileSync, readdirSync, unlinkSync, renameSync, existsSync } from "node:fs";
+import { dirname, basename, join as pathJoin, resolve } from "node:path";
+import { homedir } from "node:os";
 import { log } from "../logger.js";
 import { getTurnAuditLog, type TurnAuditEntry } from "./turn-audit-log.js";
 
@@ -31,7 +31,7 @@ function backupConfig(configPath: string): void {
 }
 
 // ── Config 敏感欄位遮罩 ───────────────────────────────────────────────────────
-const SENSITIVE_KEYS = new Set(["token", "apiKey", "api_key"]);
+const SENSITIVE_KEYS = new Set(["token", "apiKey", "api_key", "password"]);
 function maskConfig(obj: unknown): unknown {
   if (Array.isArray(obj)) return obj.map(maskConfig);
   if (obj && typeof obj === "object") {
@@ -43,187 +43,40 @@ function maskConfig(obj: unknown): unknown {
   return obj;
 }
 
-// ── Dashboard HTML ────────────────────────────────────────────────────────────
-
-const HTML = `<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CatClaw Token Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, sans-serif; background: #0f1117; color: #e0e0e0; padding: 20px; }
-  h1 { font-size: 1.2rem; margin-bottom: 16px; color: #a78bfa; }
-  h2 { font-size: 0.95rem; margin-bottom: 8px; color: #818cf8; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
-  .card { background: #1e2130; border-radius: 8px; padding: 16px; }
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
-  .stat { background: #1e2130; border-radius: 8px; padding: 12px; text-align: center; }
-  .stat-val { font-size: 1.4rem; font-weight: bold; color: #a78bfa; }
-  .stat-lbl { font-size: 0.75rem; color: #888; margin-top: 4px; }
-  canvas { max-height: 200px; }
-  .table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-  .table th, .table td { padding: 6px 8px; border-bottom: 1px solid #2a2d3e; text-align: left; }
-  .table th { color: #818cf8; }
-  .refresh-btn { background: #4c1d95; border: none; color: white; padding: 6px 14px;
-    border-radius: 6px; cursor: pointer; font-size: 0.8rem; float: right; }
-  .refresh-btn:hover { background: #5b21b6; }
-</style>
-</head>
-<body>
-<h1>🐱 CatClaw Token Dashboard <button class="refresh-btn" onclick="load()">↻ 刷新</button></h1>
-<div class="stats" id="stats"></div>
-<div class="card" id="status-card" style="margin-bottom:16px">
-  <h2>Bot 狀態</h2>
-  <div id="status-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px"></div>
-</div>
-<div class="grid">
-  <div class="card">
-    <h2>每日 Token 用量</h2>
-    <canvas id="tokenChart"></canvas>
-  </div>
-  <div class="card">
-    <h2>CE 壓縮效果</h2>
-    <canvas id="ceChart"></canvas>
-  </div>
-</div>
-<div class="card" style="margin-top:16px">
-  <h2>最近 Turns</h2>
-  <div id="turns"></div>
-</div>
-<div class="card" style="margin-top:16px">
-  <h2>Config 編輯器
-    <button class="refresh-btn" onclick="loadCfg()" style="float:none;margin-left:8px">↻ 讀取</button>
-    <button class="refresh-btn" onclick="saveCfg()" style="float:none;margin-left:4px;background:#065f46">備份後儲存</button>
-  </h2>
-  <p style="font-size:0.75rem;color:#f59e0b;margin:6px 0">⚠ token 等敏感欄位顯示 ***，儲存前請手動還原實際值</p>
-  <div id="cfg-msg" style="font-size:0.8rem;margin:4px 0"></div>
-  <textarea id="cfg-editor" style="width:100%;height:300px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:6px;padding:8px;font-family:monospace;font-size:0.8rem;resize:vertical"></textarea>
-</div>
-<script>
-let tokenChart, ceChart;
-
-async function loadStatus() {
-  try {
-    const r = await fetch('/api/status');
-    const d = await r.json();
-    document.getElementById('status-grid').innerHTML = [
-      ['Uptime', d.uptimeStr],
-      ['Memory', d.memoryMB + ' MB'],
-      ['Heap', d.heapUsedMB + ' MB'],
-      ['Node', d.nodeVersion],
-      ['PID', d.pid],
-    ].map(([lbl, val]) =>
-      \`<div class="stat"><div class="stat-val" style="font-size:1rem">\${val}</div><div class="stat-lbl">\${lbl}</div></div>\`
-    ).join('');
-  } catch(e) { /* 忽略 */ }
-}
-
-async function loadCfg() {
-  try {
-    const r = await fetch('/api/config');
-    const text = await r.text();
-    document.getElementById('cfg-editor').value = text;
-    document.getElementById('cfg-msg').textContent = '';
-  } catch(e) {
-    document.getElementById('cfg-msg').textContent = '讀取失敗：' + e;
-  }
-}
-
-async function saveCfg() {
-  const body = document.getElementById('cfg-editor').value;
-  try {
-    JSON.parse(body); // 客端先驗
-  } catch(e) {
-    document.getElementById('cfg-msg').textContent = 'JSON 格式錯誤：' + e;
-    return;
-  }
-  try {
-    const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body });
-    const d = await r.json();
-    if (d.success) {
-      document.getElementById('cfg-msg').style.color = '#34d399';
-      document.getElementById('cfg-msg').textContent = '✓ 已備份並儲存';
-    } else {
-      document.getElementById('cfg-msg').style.color = '#f87171';
-      document.getElementById('cfg-msg').textContent = '錯誤：' + d.error;
+// ── Log tail helper ──────────────────────────────────────────────────────────
+function tailLog(lines = 100): string {
+  const candidates = [
+    pathJoin(homedir(), ".pm2", "logs", "catclaw-out.log"),
+    pathJoin(homedir(), ".pm2", "logs", "catclaw-test-out.log"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      try {
+        const content = readFileSync(p, "utf-8");
+        const all = content.split("\n");
+        return all.slice(-lines).join("\n");
+      } catch { /* 忽略 */ }
     }
-  } catch(e) {
-    document.getElementById('cfg-msg').style.color = '#f87171';
-    document.getElementById('cfg-msg').textContent = '儲存失敗：' + e;
   }
+  return "(log file not found)";
 }
 
-async function load() {
-  const r = await fetch('/api/usage');
-  const d = await r.json();
-
-  // Stats bar
-  document.getElementById('stats').innerHTML = [
-    ['合計 Tokens', (d.totalTokens||0).toLocaleString(), 'total'],
-    ['輸入 Tokens', (d.totalInput||0).toLocaleString(), 'input'],
-    ['輸出 Tokens', (d.totalOutput||0).toLocaleString(), 'output'],
-    ['CE 觸發次數', d.ceTriggers||0, 'ce-triggers'],
-    ['平均省 Tokens', (d.avgTokensSaved||0).toLocaleString(), 'ce-saved'],
-    ['總 Turns', d.totalTurns||0, 'turns'],
-  ].map(([lbl, val]) =>
-    \`<div class="stat"><div class="stat-val">\${val}</div><div class="stat-lbl">\${lbl}</div></div>\`
-  ).join('');
-
-  // Token bar chart
-  const labels = d.daily.map(x => x.date.slice(5)); // MM-DD
-  const inputData = d.daily.map(x => x.input);
-  const outputData = d.daily.map(x => x.output);
-
-  if (tokenChart) tokenChart.destroy();
-  tokenChart = new Chart(document.getElementById('tokenChart'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label: '輸入', data: inputData, backgroundColor: '#4c1d95' },
-        { label: '輸出', data: outputData, backgroundColor: '#1d4ed8' },
-      ]
-    },
-    options: { responsive: true, scales: { x: { stacked: true }, y: { stacked: true } },
-      plugins: { legend: { labels: { color: '#ccc' } } },
-    }
-  });
-
-  // CE bar chart
-  const ceLabels = d.daily.map(x => x.date.slice(5));
-  const ceTokensSaved = d.daily.map(x => x.ceTokensSaved);
-  if (ceChart) ceChart.destroy();
-  ceChart = new Chart(document.getElementById('ceChart'), {
-    type: 'bar',
-    data: {
-      labels: ceLabels,
-      datasets: [{ label: '省 Tokens', data: ceTokensSaved, backgroundColor: '#065f46' }]
-    },
-    options: { responsive: true, plugins: { legend: { labels: { color: '#ccc' } } } }
-  });
-
-  // Recent turns table
-  const rows = (d.recentTurns||[]).map(e => {
-    const ts = new Date(e.ts).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
-    const ce = e.ceApplied?.length ? e.ceApplied.join('+') : '-';
-    const tok = e.inputTokens != null ? \`↑\${e.inputTokens}/↓\${e.outputTokens??0}\` : '-';
-    const dur = e.durationMs != null ? \`\${(e.durationMs/1000).toFixed(1)}s\` : '-';
-    return \`<tr><td>\${ts}</td><td>\${(e.sessionKey||'').slice(-20)}</td><td>\${tok}</td><td>\${ce}</td><td>\${dur}</td></tr>\`;
-  }).join('');
-  document.getElementById('turns').innerHTML =
-    \`<table class="table"><thead><tr><th>時間</th><th>Session</th><th>Tokens</th><th>CE</th><th>耗時</th></tr></thead><tbody>\${rows}</tbody></table>\`;
+// ── Signal restart ───────────────────────────────────────────────────────────
+function touchRestart(): boolean {
+  const candidates = [
+    resolve(process.cwd(), "signal", "RESTART"),
+    resolve(homedir(), "project", "catclaw", "signal", "RESTART"),
+  ];
+  for (const p of candidates) {
+    try {
+      writeFileSync(p, new Date().toISOString(), "utf-8");
+      return true;
+    } catch { /* try next */ }
+  }
+  return false;
 }
 
-load();
-loadStatus();
-</script>
-</body>
-</html>`;
-
-// ── API Handler ───────────────────────────────────────────────────────────────
+// ── API Data Builders ────────────────────────────────────────────────────────
 
 function buildApiData(days = 7) {
   const auditLog = getTurnAuditLog();
@@ -240,7 +93,6 @@ function buildApiData(days = 7) {
         s + ((e.tokensBeforeCE ?? 0) - (e.tokensAfterCE ?? 0)), 0) / ceEntries.length)
     : 0;
 
-  // 按日聚合
   const dailyMap = new Map<string, { input: number; output: number; ceTokensSaved: number }>();
   for (const e of entries) {
     const date = e.ts.slice(0, 10);
@@ -256,20 +108,333 @@ function buildApiData(days = 7) {
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, v]) => ({ date, ...v }));
 
-  // 最近 20 turns（最新優先）
   const recentTurns: TurnAuditEntry[] = entries.slice(0, 20);
 
-  return {
-    totalInput,
-    totalOutput,
-    totalTokens: totalInput + totalOutput,
-    totalTurns: entries.length,
-    ceTriggers: ceEntries.length,
-    avgTokensSaved,
-    daily,
-    recentTurns,
-  };
+  return { totalInput, totalOutput, totalTokens: totalInput + totalOutput,
+    totalTurns: entries.length, ceTriggers: ceEntries.length, avgTokensSaved, daily, recentTurns };
 }
+
+function buildSessionsData() {
+  const auditLog = getTurnAuditLog();
+  if (!auditLog) return { error: "TurnAuditLog not initialized" };
+
+  const entries = auditLog.recent(100000);
+  const sessMap = new Map<string, {
+    sessionKey: string; turns: number; inputTokens: number; outputTokens: number;
+    firstTs: string; lastTs: string; ceTriggers: number;
+    recentTurns: TurnAuditEntry[];
+  }>();
+
+  for (const e of entries) {
+    const k = e.sessionKey;
+    const s = sessMap.get(k) ?? {
+      sessionKey: k, turns: 0, inputTokens: 0, outputTokens: 0,
+      firstTs: e.ts, lastTs: e.ts, ceTriggers: 0, recentTurns: [],
+    };
+    s.turns++;
+    s.inputTokens += e.inputTokens ?? 0;
+    s.outputTokens += e.outputTokens ?? 0;
+    if (e.ceApplied.length > 0) s.ceTriggers++;
+    if (e.ts < s.firstTs) s.firstTs = e.ts;
+    if (e.ts > s.lastTs) s.lastTs = e.ts;
+    if (s.recentTurns.length < 10) s.recentTurns.push(e);
+    sessMap.set(k, s);
+  }
+
+  const sessions = Array.from(sessMap.values())
+    .sort((a, b) => b.lastTs.localeCompare(a.lastTs))
+    .slice(0, 50);
+
+  return { sessions };
+}
+
+// ── Dashboard HTML ────────────────────────────────────────────────────────────
+
+const HTML = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CatClaw Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #0f1117; color: #e0e0e0; }
+.topbar { background: #1a1d2e; padding: 12px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #2a2d3e; }
+.topbar h1 { font-size: 1.1rem; color: #a78bfa; flex: 1; }
+.tabs { display: flex; gap: 2px; background: #0f1117; padding: 0 20px; border-bottom: 1px solid #2a2d3e; }
+.tab { padding: 10px 16px; cursor: pointer; font-size: 0.85rem; color: #888; border-bottom: 2px solid transparent; }
+.tab.active { color: #a78bfa; border-bottom-color: #a78bfa; }
+.tab:hover:not(.active) { color: #ccc; }
+.pane { display: none; padding: 20px; }
+.pane.active { display: block; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.card { background: #1e2130; border-radius: 8px; padding: 16px; }
+.card h2 { font-size: 0.9rem; color: #818cf8; margin-bottom: 10px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 16px; }
+.stat { background: #1e2130; border-radius: 8px; padding: 12px; text-align: center; }
+.stat-val { font-size: 1.3rem; font-weight: bold; color: #a78bfa; }
+.stat-lbl { font-size: 0.72rem; color: #888; margin-top: 4px; }
+canvas { max-height: 200px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.tbl th, .tbl td { padding: 6px 8px; border-bottom: 1px solid #2a2d3e; text-align: left; }
+.tbl th { color: #818cf8; background: #161827; }
+.tbl tr:hover td { background: #1e2130; }
+.btn { background: #4c1d95; border: none; color: white; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+.btn:hover { background: #5b21b6; }
+.btn-green { background: #065f46; } .btn-green:hover { background: #047857; }
+.btn-red { background: #7f1d1d; } .btn-red:hover { background: #991b1b; }
+.btn-sm { padding: 3px 8px; font-size: 0.72rem; }
+.msg { font-size: 0.8rem; margin: 6px 0; }
+.msg.ok { color: #34d399; } .msg.err { color: #f87171; }
+.badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+.badge-run { background: #065f46; color: #34d399; }
+.badge-done { background: #1e3a5f; color: #60a5fa; }
+.badge-err { background: #7f1d1d; color: #f87171; }
+textarea { width: 100%; background: #0f1117; color: #e0e0e0; border: 1px solid #2a2d3e; border-radius: 6px; padding: 8px; font-family: monospace; font-size: 0.78rem; resize: vertical; }
+details summary { cursor: pointer; color: #818cf8; font-size: 0.78rem; padding: 4px 0; }
+details[open] summary { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>🐱 CatClaw Dashboard</h1>
+  <button class="btn btn-sm" onclick="refreshAll()">↻ 全部刷新</button>
+</div>
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('overview',this)">概覽</div>
+  <div class="tab" onclick="switchTab('sessions',this)">Sessions</div>
+  <div class="tab" onclick="switchTab('logs',this)">日誌</div>
+  <div class="tab" onclick="switchTab('ops',this)">操作</div>
+  <div class="tab" onclick="switchTab('config',this)">Config</div>
+</div>
+
+<!-- 概覽 -->
+<div id="pane-overview" class="pane active">
+  <div class="stats" id="stats"></div>
+  <div class="card" style="margin-bottom:16px">
+    <h2>Bot 狀態</h2>
+    <div id="status-grid" class="stats" style="margin-bottom:0"></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h2>每日 Token 用量</h2><canvas id="tokenChart"></canvas></div>
+    <div class="card"><h2>CE 壓縮效果</h2><canvas id="ceChart"></canvas></div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2>最近 Turns</h2>
+    <div id="turns"></div>
+  </div>
+</div>
+
+<!-- Sessions -->
+<div id="pane-sessions" class="pane">
+  <div class="card">
+    <h2>Sessions（最近 50）<button class="btn btn-sm" style="float:right" onclick="loadSessions()">↻</button></h2>
+    <div id="sessions-list"></div>
+  </div>
+</div>
+
+<!-- 日誌 -->
+<div id="pane-logs" class="pane">
+  <div class="card">
+    <h2>PM2 日誌（最近 200 行）
+      <button class="btn btn-sm" style="float:right;margin-left:4px" onclick="startLogRefresh()">▶ 自動刷新</button>
+      <button class="btn btn-sm" style="float:right" onclick="loadLogs()">↻ 讀取</button>
+    </h2>
+    <textarea id="log-area" rows="30" readonly></textarea>
+  </div>
+</div>
+
+<!-- 操作 -->
+<div id="pane-ops" class="pane">
+  <div class="grid">
+    <div class="card">
+      <h2>Bot 控制</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-red" onclick="doRestart()">⟳ 重啟 Bot</button>
+      </div>
+      <div id="ops-msg" class="msg"></div>
+    </div>
+    <div class="card">
+      <h2>Active Subagents</h2>
+      <div id="subagents-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Config -->
+<div id="pane-config" class="pane">
+  <div class="card">
+    <h2>Config 編輯器
+      <button class="btn btn-sm" style="float:right;margin-left:4px" onclick="saveCfg()">💾 備份後儲存</button>
+      <button class="btn btn-sm" style="float:right" onclick="loadCfg()">↻ 讀取</button>
+    </h2>
+    <p style="font-size:0.72rem;color:#f59e0b;margin:6px 0">⚠ 敏感欄位顯示 ***，儲存前請手動還原實際值</p>
+    <div id="cfg-msg" class="msg"></div>
+    <textarea id="cfg-editor" rows="30"></textarea>
+  </div>
+</div>
+
+<script>
+let tokenChart, ceChart;
+let logTimer = null;
+
+function switchTab(id, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('pane-' + id).classList.add('active');
+  if (id === 'sessions') loadSessions();
+  if (id === 'logs') loadLogs();
+  if (id === 'ops') { loadSubagents(); }
+  if (id === 'config') loadCfg();
+}
+
+function refreshAll() { loadOverview(); loadStatus(); }
+
+// ── 概覽 ─────────────────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const d = await fetch('/api/status').then(r => r.json());
+    document.getElementById('status-grid').innerHTML = [
+      ['Uptime', d.uptimeStr], ['Memory', d.memoryMB + ' MB'],
+      ['Heap', d.heapUsedMB + ' MB'], ['PID', d.pid],
+    ].map(([l,v]) => \`<div class="stat"><div class="stat-val" style="font-size:1rem">\${v}</div><div class="stat-lbl">\${l}</div></div>\`).join('');
+  } catch {}
+}
+
+async function loadOverview() {
+  try {
+    const d = await fetch('/api/usage').then(r => r.json());
+    document.getElementById('stats').innerHTML = [
+      ['合計 Tokens', (d.totalTokens||0).toLocaleString()],
+      ['輸入', (d.totalInput||0).toLocaleString()],
+      ['輸出', (d.totalOutput||0).toLocaleString()],
+      ['CE 觸發', d.ceTriggers||0],
+      ['平均省 Tokens', (d.avgTokensSaved||0).toLocaleString()],
+      ['Turns', d.totalTurns||0],
+    ].map(([l,v]) => \`<div class="stat"><div class="stat-val">\${v}</div><div class="stat-lbl">\${l}</div></div>\`).join('');
+
+    const labels = d.daily.map(x => x.date.slice(5));
+    if (tokenChart) tokenChart.destroy();
+    tokenChart = new Chart(document.getElementById('tokenChart'), {
+      type:'bar', data:{ labels, datasets:[
+        {label:'輸入',data:d.daily.map(x=>x.input),backgroundColor:'#4c1d95'},
+        {label:'輸出',data:d.daily.map(x=>x.output),backgroundColor:'#1d4ed8'},
+      ]},
+      options:{responsive:true,scales:{x:{stacked:true},y:{stacked:true}},plugins:{legend:{labels:{color:'#ccc'}}}},
+    });
+
+    if (ceChart) ceChart.destroy();
+    ceChart = new Chart(document.getElementById('ceChart'), {
+      type:'bar', data:{labels,datasets:[{label:'省 Tokens',data:d.daily.map(x=>x.ceTokensSaved),backgroundColor:'#065f46'}]},
+      options:{responsive:true,plugins:{legend:{labels:{color:'#ccc'}}}},
+    });
+
+    const rows = (d.recentTurns||[]).map(e => {
+      const ts = new Date(e.ts).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
+      const tok = e.inputTokens != null ? \`↑\${e.inputTokens}/↓\${e.outputTokens??0}\` : '-';
+      const dur = e.durationMs != null ? \`\${(e.durationMs/1000).toFixed(1)}s\` : '-';
+      const sk = (e.sessionKey||'').slice(-16);
+      return \`<tr><td>\${ts}</td><td title="\${e.sessionKey}">\${sk}</td><td>\${tok}</td><td>\${e.ceApplied?.join('+')||'-'}</td><td>\${dur}</td></tr>\`;
+    }).join('');
+    document.getElementById('turns').innerHTML =
+      \`<table class="tbl"><thead><tr><th>時間</th><th>Session</th><th>Tokens</th><th>CE</th><th>耗時</th></tr></thead><tbody>\${rows}</tbody></table>\`;
+  } catch(e) { console.error(e); }
+}
+
+// ── Sessions ─────────────────────────────────────────────────────────────────
+async function loadSessions() {
+  try {
+    const d = await fetch('/api/sessions').then(r => r.json());
+    if (!d.sessions?.length) { document.getElementById('sessions-list').innerHTML = '<p style="color:#888;font-size:0.8rem">無資料</p>'; return; }
+    const rows = d.sessions.map(s => {
+      const last = new Date(s.lastTs).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
+      const tok = \`↑\${s.inputTokens.toLocaleString()}/↓\${s.outputTokens.toLocaleString()}\`;
+      const turnsHtml = s.recentTurns.map(e => {
+        const ts2 = new Date(e.ts).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
+        const dur = e.durationMs != null ? \`\${(e.durationMs/1000).toFixed(1)}s\` : '-';
+        return \`<tr><td>\${ts2}</td><td>\${e.inputTokens??'-'}/\${e.outputTokens??'-'}</td><td>\${e.ceApplied?.join('+')||'-'}</td><td>\${dur}</td></tr>\`;
+      }).join('');
+      const detail = \`<details><summary>展開 \${s.turns} turns</summary><table class="tbl"><thead><tr><th>時間</th><th>Tokens</th><th>CE</th><th>耗時</th></tr></thead><tbody>\${turnsHtml}</tbody></table></details>\`;
+      return \`<tr><td title="\${s.sessionKey}">\${s.sessionKey.slice(-24)}</td><td>\${last}</td><td>\${s.turns}</td><td>\${tok}</td><td>\${s.ceTriggers}</td><td>\${detail}</td></tr>\`;
+    }).join('');
+    document.getElementById('sessions-list').innerHTML =
+      \`<table class="tbl"><thead><tr><th>Session</th><th>最後活躍</th><th>Turns</th><th>Tokens</th><th>CE</th><th>詳細</th></tr></thead><tbody>\${rows}</tbody></table>\`;
+  } catch(e) { document.getElementById('sessions-list').innerHTML = '讀取失敗：' + e; }
+}
+
+// ── 日誌 ─────────────────────────────────────────────────────────────────────
+async function loadLogs() {
+  try {
+    const text = await fetch('/api/logs?lines=200').then(r => r.text());
+    const el = document.getElementById('log-area');
+    el.value = text;
+    el.scrollTop = el.scrollHeight;
+  } catch(e) { document.getElementById('log-area').value = '讀取失敗：' + e; }
+}
+
+function startLogRefresh() {
+  if (logTimer) { clearInterval(logTimer); logTimer = null; return; }
+  loadLogs();
+  logTimer = setInterval(loadLogs, 5000);
+}
+
+// ── 操作 ─────────────────────────────────────────────────────────────────────
+async function doRestart() {
+  if (!confirm('確定重啟 Bot？')) return;
+  try {
+    const d = await fetch('/api/restart', {method:'POST'}).then(r => r.json());
+    const el = document.getElementById('ops-msg');
+    el.className = 'msg ' + (d.success ? 'ok' : 'err');
+    el.textContent = d.success ? '✓ 重啟信號已送出' : '錯誤：' + d.error;
+  } catch(e) { const el = document.getElementById('ops-msg'); el.className='msg err'; el.textContent='失敗：'+e; }
+}
+
+async function loadSubagents() {
+  try {
+    const d = await fetch('/api/subagents').then(r => r.json());
+    if (!d.subagents?.length) { document.getElementById('subagents-list').innerHTML = '<p style="color:#888;font-size:0.8rem">無 active subagent</p>'; return; }
+    const rows = d.subagents.map(s => {
+      const badge = s.status === 'running' ? 'badge-run' : s.status === 'completed' ? 'badge-done' : 'badge-err';
+      return \`<tr><td>\${s.label||s.runId.slice(-8)}</td><td><span class="badge \${badge}">\${s.status}</span></td><td>\${s.turns||0}</td></tr>\`;
+    }).join('');
+    document.getElementById('subagents-list').innerHTML =
+      \`<table class="tbl"><thead><tr><th>Label</th><th>狀態</th><th>Turns</th></tr></thead><tbody>\${rows}</tbody></table>\`;
+  } catch {}
+}
+
+// ── Config ───────────────────────────────────────────────────────────────────
+async function loadCfg() {
+  try {
+    const text = await fetch('/api/config').then(r => r.text());
+    document.getElementById('cfg-editor').value = text;
+    document.getElementById('cfg-msg').textContent = '';
+  } catch(e) { showCfgMsg('讀取失敗：' + e, false); }
+}
+
+async function saveCfg() {
+  const body = document.getElementById('cfg-editor').value;
+  try { JSON.parse(body); } catch(e) { showCfgMsg('JSON 格式錯誤：' + e, false); return; }
+  try {
+    const d = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body}).then(r=>r.json());
+    showCfgMsg(d.success ? '✓ 已備份並儲存' : '錯誤：' + d.error, d.success);
+  } catch(e) { showCfgMsg('儲存失敗：' + e, false); }
+}
+
+function showCfgMsg(msg, ok) {
+  const el = document.getElementById('cfg-msg');
+  el.className = 'msg ' + (ok ? 'ok' : 'err');
+  el.textContent = msg;
+}
+
+// ── 初始化 ───────────────────────────────────────────────────────────────────
+loadOverview();
+loadStatus();
+setInterval(loadStatus, 30000);
+</script>
+</body>
+</html>`;
 
 // ── DashboardServer ───────────────────────────────────────────────────────────
 
@@ -283,6 +448,7 @@ export class DashboardServer {
   start(): void {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       const url = req.url ?? "/";
+      const method = req.method ?? "GET";
 
       if (url === "/" || url === "/index.html") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -290,19 +456,24 @@ export class DashboardServer {
         return;
       }
 
+      // GET /api/usage
       if (url.startsWith("/api/usage")) {
         const daysMatch = url.match(/[?&]days=(\d+)/);
         const days = daysMatch ? parseInt(daysMatch[1]!, 10) : 7;
-        const data = buildApiData(days);
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(data));
+        res.end(JSON.stringify(buildApiData(days)));
         return;
       }
 
-      const method = req.method ?? "GET";
+      // GET /api/sessions
+      if (url === "/api/sessions" && method === "GET") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(buildSessionsData()));
+        return;
+      }
 
       // GET /api/status
-      if (url === "/api/status") {
+      if (url === "/api/status" && method === "GET") {
         const uptime = Math.floor(process.uptime());
         const mem = process.memoryUsage();
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -314,6 +485,44 @@ export class DashboardServer {
           nodeVersion: process.version,
           pid: process.pid,
         }));
+        return;
+      }
+
+      // GET /api/logs
+      if (url.startsWith("/api/logs") && method === "GET") {
+        const linesMatch = url.match(/[?&]lines=(\d+)/);
+        const lines = linesMatch ? parseInt(linesMatch[1]!, 10) : 100;
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(tailLog(lines));
+        return;
+      }
+
+      // POST /api/restart
+      if (url === "/api/restart" && method === "POST") {
+        const ok = touchRestart();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(ok ? { success: true } : { success: false, error: "signal/RESTART not found" }));
+        return;
+      }
+
+      // GET /api/subagents
+      if (url === "/api/subagents" && method === "GET") {
+        void (async () => {
+          try {
+            const { getSubagentRegistry } = await import("./subagent-registry.js");
+            const reg = getSubagentRegistry();
+            const all = reg ? Array.from((reg as unknown as { records: Map<string, unknown> }).records.values()) : [];
+            const subagents = (all as Array<Record<string, unknown>>).map(r => ({
+              runId: r["runId"], label: r["label"], status: r["status"],
+              turns: r["turns"], createdAt: r["createdAt"],
+            }));
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ subagents }));
+          } catch (err) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ subagents: [], error: String(err) }));
+          }
+        })();
         return;
       }
 
@@ -359,8 +568,7 @@ export class DashboardServer {
         return;
       }
 
-      res.writeHead(404);
-      res.end("Not found");
+      res.writeHead(404); res.end("Not found");
     });
 
     server.listen(this.port, "127.0.0.1", () => {
