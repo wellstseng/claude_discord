@@ -105,7 +105,7 @@ export async function initPlatform(
   _permissionGate = initPermissionGate(_accountRegistry, _toolRegistry);
 
   // ── 4. Safety Guard ────────────────────────────────────────────────────────
-  _safetyGuard = initSafetyGuard(config.safety);
+  _safetyGuard = initSafetyGuard(config.safety, catclawDir);
 
   // ── 5. Provider Registry ───────────────────────────────────────────────────
   const providerRegistry = await buildProviderRegistry(

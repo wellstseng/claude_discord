@@ -81,8 +81,10 @@ export class SafetyGuard {
   private credentialPatterns: RegExp[];
   private toolRules: ToolPermissionRule[];
   private toolDefaultAllow: boolean;
+  private configDir?: string;
 
-  constructor(cfg?: SafetyConfig) {
+  constructor(cfg?: SafetyConfig, configDir?: string) {
+    this.configDir = configDir;
     this.selfProtect = cfg?.selfProtect ?? true;
     this.bashMode = (cfg?.bash as { mode?: string } | undefined)?.mode === "whitelist"
       ? "whitelist" : "blacklist";
@@ -272,9 +274,15 @@ export class SafetyGuard {
   checkSelfProtect(filePath: string): GuardResult {
     if (!this.selfProtect) return { blocked: false };
     const abs = this.expandPath(filePath);
-    const catclawDir = resolve(homedir(), ".catclaw");
-    if (abs.startsWith(catclawDir + "/catclaw.json") || abs.startsWith(catclawDir + "/accounts")) {
-      return { blocked: true, reason: `selfProtect：禁止修改 CatClaw 核心設定 ${abs}` };
+    // 保護當前 configDir 以及預設 ~/.catclaw
+    const dirsToProtect = [
+      resolve(homedir(), ".catclaw"),
+      ...(this.configDir ? [resolve(this.configDir)] : []),
+    ];
+    for (const dir of dirsToProtect) {
+      if (abs === resolve(dir, "catclaw.json") || abs.startsWith(resolve(dir, "accounts"))) {
+        return { blocked: true, reason: `selfProtect：禁止修改 CatClaw 核心設定 ${abs}` };
+      }
     }
     return { blocked: false };
   }
@@ -292,8 +300,8 @@ export class SafetyGuard {
 
 let _guard: SafetyGuard | null = null;
 
-export function initSafetyGuard(cfg?: SafetyConfig): SafetyGuard {
-  _guard = new SafetyGuard(cfg);
+export function initSafetyGuard(cfg?: SafetyConfig, configDir?: string): SafetyGuard {
+  _guard = new SafetyGuard(cfg, configDir);
   return _guard;
 }
 
