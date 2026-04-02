@@ -37,6 +37,17 @@ import type {
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_TOKENS = 8192;
 
+/** 短名稱別名 → 完整 model ID */
+const MODEL_ALIASES: Record<string, string> = {
+  "claude-haiku":  "claude-haiku-4-5",
+  "claude-sonnet": "claude-sonnet-4-6",
+  "claude-opus":   "claude-opus-4-6",
+};
+
+function resolveModelId(id: string): string {
+  return MODEL_ALIASES[id] ?? id;
+}
+
 // ── 型別轉換：catclaw Message → pi-ai Message ─────────────────────────────────
 
 /** 建立 tool_use_id → toolName 的反查表（從歷史 assistant 訊息） */
@@ -168,7 +179,7 @@ export class ClaudeApiProvider implements LLMProvider {
   constructor(id: string, entry: ProviderEntry) {
     this.id = id;
     this.name = `Claude API (${id})`;
-    this.modelId = entry.model ?? DEFAULT_MODEL;
+    this.modelId = resolveModelId(entry.model ?? DEFAULT_MODEL);
 
     // 多憑證：從 {workspace}/agents/default/auth-profiles.json 載入
     const workspaceDir = resolveWorkspaceDirSafe();
