@@ -44,6 +44,8 @@ export interface BuildOpts {
   sessionKey: string;
   turnIndex: number;
   ceProvider?: LLMProvider;  // CE 用 LLM（壓縮/摘要）
+  /** 壓縮偏好（由 mode 決定）。"sliding-window" 強制跳過 LLM 摘要。 */
+  compactionPreference?: "sliding-window" | "llm-summary";
 }
 
 // ── Tool Pairing Repair ───────────────────────────────────────────────────────
@@ -394,13 +396,18 @@ export class ContextEngine {
 
     // 依照 compaction → budget-guard → sliding-window → overflow-hard-stop 順序套用
     const order = ["compaction", "budget-guard", "sliding-window", "overflow-hard-stop"];
+    // 壓縮偏好：sliding-window 模式下不傳 ceProvider 給 compaction（強制用 fallback）
+    const effectiveCeProvider = opts.compactionPreference === "sliding-window"
+      ? undefined
+      : (opts.ceProvider ?? this._ceProvider);
+
     for (const name of order) {
       const strategy = this.strategies.get(name);
       if (!strategy?.enabled) continue;
       if (strategy.shouldApply(ctx)) {
-        ctx = await strategy.apply(ctx, opts.ceProvider ?? this._ceProvider);
+        ctx = await strategy.apply(ctx, effectiveCeProvider);
         applied.push(name);
-        log.debug(`[context-engine] strategy=${name} applied`);
+        log.debug(`[context-engine] strategy=${name} applied (preference=${opts.compactionPreference ?? "default"})`);
       }
     }
 

@@ -51,6 +51,7 @@ import { resolveProvider, getChannelAccess as getCoreChannelAccess } from "./cor
 import { getProviderRegistry } from "./providers/registry.js";
 import { agentLoop } from "./core/agent-loop.js";
 import { getChannelThinking } from "./skills/builtin/think.js";
+import { getChannelModePreset, getModeThinking } from "./core/mode.js";
 import { getChannelProviderOverride } from "./skills/builtin/use.js";
 import { getChannelSystemOverride } from "./skills/builtin/system.js";
 import { eventBus } from "./core/event-bus.js";
@@ -618,7 +619,26 @@ async function handleMessage(
 
       // ── System Prompt 組裝（不含 inbound history） ──────────────────────
       const channelSystemOverride = getChannelSystemOverride(firstMessage.channelId);
-      const combinedSystemPrompt = [baseSystemPrompt, systemPromptFromMemory, channelSystemOverride, dateBlock].filter(Boolean).join("\n\n");
+
+      // Mode prompt extras（workspace/prompts/{name}.md）
+      const modePreset = getChannelModePreset(firstMessage.channelId);
+      let modeExtrasBlock = "";
+      if (modePreset.systemPromptExtras?.length) {
+        const { resolveWorkspaceDir } = await import("./core/config.js");
+        const { readFileSync, existsSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        const promptsDir = join(resolveWorkspaceDir(), "prompts");
+        const parts: string[] = [];
+        for (const name of modePreset.systemPromptExtras) {
+          const p = join(promptsDir, `${name}.md`);
+          if (existsSync(p)) {
+            try { parts.push(readFileSync(p, "utf-8")); } catch { /* skip */ }
+          }
+        }
+        if (parts.length > 0) modeExtrasBlock = parts.join("\n\n");
+      }
+
+      const combinedSystemPrompt = [baseSystemPrompt, systemPromptFromMemory, channelSystemOverride, modeExtrasBlock, dateBlock].filter(Boolean).join("\n\n");
 
       // ── Inbound History（注入到 messages 層，非 system prompt）──────────
       let inboundContext: string | undefined;
@@ -732,7 +752,16 @@ async function handleMessage(
           },
         } : {}),
         ...(allImages.length > 0 ? { imageAttachments: allImages } : {}),
-        ...(getChannelThinking(firstMessage.channelId) ? { thinking: getChannelThinking(firstMessage.channelId) } : {}),
+        ...(() => {
+          // thinking 優先：/think 手動設定 > mode preset
+          const channelThinking = getChannelThinking(firstMessage.channelId);
+          const modePreset = getChannelModePreset(firstMessage.channelId);
+          const thinking = channelThinking ?? getModeThinking(modePreset);
+          return {
+            ...(thinking ? { thinking } : {}),
+            modePreset,
+          };
+        })(),
         trace,
       }, {
         sessionManager: getPlatformSessionManager(),

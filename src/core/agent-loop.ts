@@ -24,7 +24,7 @@ import type { SafetyGuard } from "../safety/guard.js";
 import { eventBus as _eventBusInstance } from "./event-bus.js";
 type EventBus = typeof _eventBusInstance;
 import type { ToolContext } from "../tools/types.js";
-import { getContextEngine } from "./context-engine.js";
+import { getContextEngine, repairToolPairing } from "./context-engine.js";
 import { getToolLogStore, ToolLogStore } from "./tool-log-store.js";
 import { getSessionSnapshotStore } from "./session-snapshot.js";
 import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
@@ -98,9 +98,11 @@ function truncateToolResult(text: string, tokenCap: number): string {
 function resolveResultTokenCap(
   perToolCap: number | undefined,
   turnTokensUsed: number,
+  modeOverride?: number,
 ): number {
   if (perToolCap !== undefined) return perToolCap;
-  const globalDefault = config.toolBudget?.resultTokenCap ?? DEFAULT_RESULT_TOKEN_CAP;
+  // 模式覆寫 > global config > 預設
+  const globalDefault = modeOverride ?? config.toolBudget?.resultTokenCap ?? DEFAULT_RESULT_TOKEN_CAP;
   const perTurnCap = config.toolBudget?.perTurnTotalCap ?? 0;
   if (perTurnCap === 0) return globalDefault;
   const remaining = perTurnCap - turnTokensUsed;
@@ -220,6 +222,8 @@ export interface AgentLoopOpts {
    * 傳入後 LLM 會輸出 thinking_delta 事件。
    */
   thinking?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  /** 當前模式 preset（由 /mode 或 config 決定，影響 CE、tool budget、prompt extras） */
+  modePreset?: import("./config.js").ModePreset;
   /**
    * 執行指令前 DM 確認設定。
    * 啟用時，run_command 執行前會送 DM 給指定使用者等待確認。
@@ -428,6 +432,7 @@ export async function* agentLoop(
     processedHistory = await contextEngine.build(rawHistory, {
       sessionKey,
       turnIndex: session.turnCount,
+      compactionPreference: opts.modePreset?.compaction,
     });
     // S2: 有 strategy 觸發 → 把壓縮後的 messages 寫回 session（含備份原始）
     if (contextEngine.lastBuildBreakdown.strategiesApplied.length > 0) {
@@ -486,7 +491,7 @@ export async function* agentLoop(
       ]
     : [];
 
-  const messages: Message[] = [
+  let messages: Message[] = [
     ...processedHistory,
     ...inboundMessages,
     { role: "user", content: firstUserContent },
@@ -553,6 +558,27 @@ export async function* agentLoop(
     if (note) {
       systemPrompt = note + (systemPrompt ? `\n\n${systemPrompt}` : "");
       log.debug(`[agent-loop] session-note 已注入 channelId=${channelId.slice(-8)}`);
+    }
+  }
+
+  // ── 4d. AutoCompact：主動預留 output 空間 ─────────────────────────────────
+  // 在 system prompt 完整組裝後，檢查總 context 是否超出預留空間
+  if (contextEngine) {
+    const reserve = opts.modePreset?.contextReserve ?? 0.2;
+    const windowTokens = contextEngine.getContextWindowTokens();
+    const sysTokens = Math.ceil((systemPrompt?.length ?? 0) / 4);
+    const msgTokens = contextEngine.estimateTokens(messages);
+    const totalTokens = sysTokens + msgTokens;
+    const maxInputTokens = windowTokens * (1 - reserve);
+
+    if (totalTokens > maxInputTokens) {
+      log.info(`[agent-loop:autoCompact] tokens=${totalTokens} > maxInput=${Math.round(maxInputTokens)} (reserve=${reserve * 100}%), 觸發額外壓縮`);
+      const trimTarget = Math.round(maxInputTokens - sysTokens);
+      while (contextEngine.estimateTokens(messages) > trimTarget && messages.length > 3) {
+        messages = messages.slice(1);
+      }
+      messages = repairToolPairing(messages);
+      log.info(`[agent-loop:autoCompact] 壓縮後 messages=${messages.length} tokens≈${contextEngine.estimateTokens(messages)}`);
     }
   }
 
@@ -751,7 +777,7 @@ export async function* agentLoop(
             eventBus.emit("tool:after", { id: call.id, name: call.name, params: hookResult.params }, toolResult);
           }
           const rawText = toolResult.error ? `錯誤：${toolResult.error}` : JSON.stringify(toolResult.result ?? null);
-          const tokenCap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens);
+          const tokenCap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens, opts.modePreset?.resultTokenCap);
           const resultText = truncateToolResult(rawText, tokenCap);
           events.push({ type: "tool_result", name: call.name, id: call.id, result: toolResult.result, error: toolResult.error });
           return {
@@ -890,7 +916,7 @@ export async function* agentLoop(
         const rawResultText = toolResult.error
           ? `錯誤：${toolResult.error}`
           : JSON.stringify(toolResult.result ?? null);
-        const cap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens);
+        const cap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens, opts.modePreset?.resultTokenCap);
         const resultText = truncateToolResult(rawResultText, cap);
         if (resultText.length < rawResultText.length) {
           log.debug(`[agent-loop] [使用工具] (${call.name}) :: result truncated ${rawResultText.length} → ${resultText.length} chars`);

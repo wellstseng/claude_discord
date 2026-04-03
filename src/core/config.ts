@@ -450,6 +450,52 @@ export interface HomeClaudeCodeConfig {
 /** 多 Agent 單一 bot 入口設定 */
 export type AgentsConfig = Record<string, Partial<Omit<BridgeConfig, "agents">>>;
 
+// ── Mode（精密/一般模式）────────────────────────────────────────────────────
+
+export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
+
+/** 單一模式定義 */
+export interface ModePreset {
+  /** Extended Thinking 等級（null = 關閉） */
+  thinking?: ThinkingLevel | null;
+  /** 壓縮策略偏好 */
+  compaction?: "sliding-window" | "llm-summary";
+  /** 額外 system prompt 區段（.md 檔名，相對於 workspace/prompts/） */
+  systemPromptExtras?: string[];
+  /** 工具結果 token 上限覆寫 */
+  resultTokenCap?: number;
+  /** Output 預留空間比例（0-1，佔 context window） */
+  contextReserve?: number;
+  /** 每 turn 工具結果合計上限覆寫 */
+  perTurnTotalCap?: number;
+}
+
+/** 模式設定 */
+export interface ModeConfig {
+  /** 預設模式名稱 */
+  defaultMode: string;
+  /** 模式定義表 */
+  presets: Record<string, ModePreset>;
+}
+
+/** 內建模式預設值 */
+export const BUILTIN_MODE_PRESETS: Record<string, ModePreset> = {
+  normal: {
+    thinking: null,
+    compaction: "sliding-window",
+    systemPromptExtras: [],
+    resultTokenCap: 8000,
+    contextReserve: 0.2,
+  },
+  precision: {
+    thinking: "medium",
+    compaction: "llm-summary",
+    systemPromptExtras: ["coding-discipline"],
+    resultTokenCap: 16000,
+    contextReserve: 0.3,
+  },
+};
+
 /** Subagent 設定 */
 export interface SubagentsConfig {
   /** 同一 parent session 最多同時執行幾個子 agent（預設 3） */
@@ -520,6 +566,8 @@ export interface BridgeConfig {
   agents?: AgentsConfig;
   /** Subagent 設定 */
   subagents?: SubagentsConfig;
+  /** 模式設定（一般/精密/自訂） */
+  modes?: ModeConfig;
   /** Token Usage Dashboard 設定 */
   dashboard?: { enabled: boolean; port: number; token?: string };
   /** Tool 呼叫 token Budget */
