@@ -1,26 +1,33 @@
 # 01 — 架構概覽
 
-> 最近更新：2026-03-22
+> 最近更新：2026-04-04
 
 ## 專案目標
 
-專案知識代理人 — 輕量 Discord bot，透過 Claude Code CLI 提供專案知識問答。
+獨立多人 AI 平台 — 以 Discord 為前端介面，內建 Agent Loop、Provider 抽象層、三層記憶系統、權限控制的完整 AI 平台。
 
-- **不依賴 OpenClaw**：直接 spawn `claude -p --output-format stream-json`
-- **Persistent session**：per-channel，`--resume` 延續 + 磁碟持久化
-- **串流回覆**：`--include-partial-messages` + diff 機制
-- **多人並行**：不同 channel 並行，同 channel 串行
-- **熱重載**：config.json + cron-jobs.json 編輯存檔即生效
+- **Agent Loop（一軌制）**：CatClaw 自有 agent loop 控制所有 tool，LLM 只負責思考
+- **HTTP API 直連**：透過 pi-ai `streamSimpleAnthropic` 直接呼叫 Claude API，不 spawn CLI
+- **Provider 抽象**：claude-api / ollama / openai-compat / codex-oauth，hot-swap via registry
+- **models-config.json**：model 設定唯一真相來源（primary / fallbacks / aliases / routing）
+- **三層記憶**：Global + Project + Personal（atom memory + LanceDB vector search）
+- **權限系統**：5 級角色（guest → platform-owner）+ Tool Tier 物理移除
+- **Message Trace**：7 階段訊息生命週期追蹤
+- **Web Dashboard**：設定、traces、sessions、auth profiles、model switching
+- **熱重載**：catclaw.json + models-config.json 編輯存檔即生效
 
 ## 依賴
 
 | 套件 | 用途 |
 |------|------|
 | `discord.js` ^14.16.3 | Discord Gateway 連線、訊息收發 |
+| `@mariozechner/pi-ai` 0.58.0 | LLM HTTP API 串流（streamSimpleAnthropic） |
+| `@mariozechner/pi-agent-core` 0.58.0 | Agent 核心工具 |
+| `@lancedb/lancedb` ^0.27.1 | 向量資料庫（記憶 recall） |
+| `apache-arrow` ^18.1.0 | LanceDB 底層依賴 |
 | `croner` ^10.0.1 | Cron 排程表達式解析 |
 | `typescript` ^5.7.2 | 編譯 |
 | `pm2` ^6.0.14（devDep） | 進程管理 + signal file 重啟 |
-| `claude` (PATH) | Claude Code CLI，外部安裝 |
 
 套件管理：**pnpm**
 
@@ -35,44 +42,55 @@ Discord Gateway
       │  ② getChannelAccess() → allowed / requireMention / allowBot / allowFrom
       │  ③ allowBot / allowFrom 過濾
       │  ④ requireMention → strip mention <@id>
-      │  ⑤ downloadAttachments() → /tmp/claude-discord-uploads/{msgId}/
+      │  ⑤ downloadAttachments() → /tmp/catclaw-uploads/{msgId}/
       │  ⑥ text 為空 → 忽略
       ▼
 [discord.ts] debounce(channelId:authorId, debounceMs=500ms)
-      │  多則訊息 \n 合併，記錄第一則 Message
+      │  多則訊息 \n 合併
       ▼
-[reply.ts] createReplyHandler(firstMessage, config)
-      │  建立 event handler + 啟動 typing indicator（8s 重發）
+[slash.ts] Skill 指令攔截
+      │  /configure, /use, /system, /session, /status ...
+      │  命中 → skill handler 直接處理，不進 agent loop
+      │  未命中 ↓
       ▼
-[session.ts] enqueue(channelId, prompt, onEvent, opts)
+[session.ts] enqueue(channelId, prompt, opts)
       │  Promise chain 串行（同 channel 等前一個完成）
       │  AbortController + setTimeout(turnTimeoutMs)
-      │  TTL 檢查 → 取 sessionId 或 null
       ▼
-[session.ts] runTurn()
-      │  呼叫 runClaudeTurn()，攔截 session_init，記錄 UUID + 持久化
-      │  錯誤時保留 session，下次繼續 --resume
+[platform.ts] 身份解析 + 子系統初始化
+      │  ProviderRegistry / AccountRegistry / ToolRegistry / PermissionGate
+      │  SafetyGuard / SessionManager / MemoryEngine / ContextEngine
       ▼
-[acp.ts] runClaudeTurn(sessionId, text, channelId, signal?)
-      │  spawn: claude -p --output-format stream-json --verbose
-      │          --include-partial-messages --dangerously-skip-permissions
-      │          [--resume <sessionId>] "<prompt>"
-      │  env: CATCLAW_CHANNEL_ID=<channelId>
-      │  stdio: ["ignore", "pipe", "pipe"]
-      │  串流 diff：lastMessageId / lastTextLength / lastThinkingLength / lastToolCount
-      │  AbortSignal → SIGTERM → 250ms → SIGKILL
+[agent-loop.ts] runAgentLoop()
+      │  ① 身份 + 權限檢查
+      │  ② 記憶 Recall（atom + vector search）
+      │  ③ Context 組裝（ContextEngine strategy pipeline）
+      │  ④ Tool list 物理過濾（依角色 tier）
+      │  ⑤ LLM 呼叫 → 處理 tool_use → 迴圈至 end_turn
+      │  ⑥ Post-compact Recovery + 萃取 + 事件通知
       ▼
-AcpEvent stream (AsyncGenerator)
-      │  session_init / text_delta / thinking_delta / tool_call / done / error / status
+[providers/] LLM Provider（HTTP API 串流）
+      │  claude-api.ts    → Anthropic Messages API
+      │  ollama.ts        → Ollama API
+      │  openai-compat.ts → OpenAI-compatible API
+      │  codex-oauth.ts   → Codex OAuth 流程
+      │  failover-provider.ts → 自動 failover
       ▼
-[reply.ts] onEvent handler
-      │  text_delta → buffer → ≥2000字立即 flush / 否則 3s 定時 flush
-      │  fileMode → totalText > fileUploadThreshold → 等 done 上傳 response.md
-      │  tool_call → all:顯示工具名 / summary:首次「處理中」/ none:隱藏
-      │  done → extractMediaTokens → flush or sendFile → uploadMediaFile
-      │  error → flush + ⚠️ 發生錯誤：{message}（截斷至 2000 字）
+[reply-handler.ts] AgentLoopEvent → Discord 訊息
+      │  streaming 模式：live-edit（類 ChatGPT）
+      │  chunk 模式：逐段發送
+      │  fileMode → 超閾值上傳 response.md
+      │  MEDIA token → 解析上傳為 Discord 附件
       ▼
-Discord 訊息（reply / send / attachment upload）
+Discord 訊息（reply / edit / attachment upload）
+```
+
+### Message Trace（7 階段生命週期追蹤）
+
+```
+Inbound → Context → LLM Loop → CE → Abort → PostProcess → Response
+  收到訊息   記憶recall   tool迴圈   壓縮    中斷處理    萃取/事件    回覆送出
+              context組裝
 ```
 
 ### 獨立排程流程
@@ -97,69 +115,253 @@ armTimer() 重新排程
 ## 模組關係圖
 
 ```
-index.ts
-  ├── config.ts     (全域設定 + hot-reload + getChannelAccess)
-  ├── logger.ts     (log level 控制)
-  ├── discord.ts    (Client + messageCreate + debounce + 附件下載)
-  │     ├── config.ts
-  │     ├── session.ts  (enqueue)
-  │     └── reply.ts    (createReplyHandler)
-  ├── session.ts    (per-channel queue + session 快取 + 磁碟持久化)
-  │     └── acp.ts  (runClaudeTurn)
-  ├── reply.ts      (AcpEvent → Discord 訊息)
-  │     └── acp.ts  (AcpEvent 型別)
-  └── cron.ts       (排程服務)
-        ├── config.ts   (CronSchedule / CronAction 型別 + cron.enabled)
-        └── acp.ts      (runClaudeTurn，供 claude action 使用)
+index.ts                          ← 進入點：Discord login + 事件綁定
+  ├── core/config.ts              設定載入 + hot-reload + env expansion
+  ├── logger.ts                   log level 控制
+  ├── discord.ts                  Client + messageCreate + debounce + 附件下載
+  │     └── slash.ts              Skill 指令攔截（/ 前綴命令）
+  ├── core/platform.ts            V2 平台子系統初始化器（singleton factory）
+  │     ├── providers/registry.ts    Provider 註冊 + 路由解析
+  │     ├── accounts/registry.ts     帳號 + 角色管理
+  │     ├── accounts/permission-gate.ts  角色 Tier 權限閘門
+  │     ├── tools/registry.ts        Tool 註冊 + 物理過濾
+  │     ├── safety/guard.ts          安全防護
+  │     ├── core/session.ts          Session 管理 + 持久化
+  │     ├── memory/engine.ts         三層記憶引擎
+  │     ├── core/context-engine.ts   Context 壓縮 + token 追蹤
+  │     └── core/message-trace.ts    訊息全鏈路追蹤
+  ├── core/agent-loop.ts          Agent Loop 核心迴圈
+  │     ├── providers/base.ts        LLM Provider 介面
+  │     ├── tools/builtin/*          Tool 實作（LLM 可呼叫）
+  │     └── core/context-engine.ts   Context 策略管線
+  ├── core/reply-handler.ts       AgentLoopEvent → Discord 分段回覆
+  ├── core/dashboard.ts           Web Dashboard（HTTP server）
+  ├── skills/registry.ts          Skill 註冊表
+  │     └── skills/builtin/*         Skill 實作（使用者 / 指令觸發）
+  ├── workflow/bootstrap.ts       工作流自動化（萃取、同步提醒等）
+  ├── cron.ts                     排程服務
+  └── acp.ts                      Legacy CLI spawn（相容路徑，非主流程）
+```
+
+## Provider 架構
+
+```
+providers/
+  ├── base.ts              LLMProvider 介面 + Message 格式（遵循 Anthropic Messages API）
+  ├── registry.ts          ProviderRegistry — 初始化、路由、解析
+  ├── models-config.ts     models-config.json 載入（唯一 model 真相來源）
+  ├── model-ref.ts         ModelRef 解析（provider:model 格式）
+  ├── auth-profile-store.ts  OAuth profile 持久化
+  ├── claude-api.ts        Anthropic Claude API（pi-ai streamSimpleAnthropic）
+  ├── ollama.ts            Ollama 本地模型
+  ├── openai-compat.ts     OpenAI 相容 API
+  ├── codex-oauth.ts       Codex OAuth 登入流程
+  ├── failover-provider.ts 自動 failover（primary → fallback chain）
+  └── circuit-breaker.ts   熔斷器（連續失敗暫停）
+
+路由優先序：
+  1. 頻道綁定（channels.{channelId}）
+  2. 專案綁定（projects.{projectId}）
+  3. 角色綁定（roles.{role}）
+  4. 全域預設（defaultProvider）
 ```
 
 ## 核心概念詞彙表
 
 | 詞彙 | 說明 |
 |------|------|
-| **Session** | Claude CLI 的對話上下文，由 UUID 識別，per-channel（guild 頻道全員共享） |
-| **session_init** | claude 首次輸出的系統事件，包含新建立的 session_id UUID |
-| **--resume** | Claude CLI flag，用 session_id 延續既有對話上下文 |
-| **AcpEvent** | acp.ts 從 claude 串流解析出的事件型別聯集 |
-| **text_delta** | 累積文字的新增部分（diff 結果） |
-| **stream-json diff** | claude --include-partial-messages 輸出累積文字，需 diff lastTextLength 提取 delta |
+| **Agent Loop** | CatClaw 自有的 LLM 對話迴圈（一軌制），控制 tool 執行，LLM 只負責思考。MAX_LOOPS=20 |
+| **Provider** | LLM 供應商抽象（claude-api / ollama / openai-compat / codex-oauth），實作 LLMProvider 介面 |
+| **ProviderRegistry** | Provider 註冊表，依路由規則解析出當前 channel/project/role 應使用的 provider |
+| **models-config.json** | Model 設定唯一真相來源：primary / fallback / aliases / routing |
+| **ModelRef** | `provider:model` 格式字串，用於跨 provider 引用 model |
+| **FailoverProvider** | 包裝層，primary 失敗自動切換 fallback chain |
+| **CircuitBreaker** | 熔斷器，連續失敗暫停呼叫，防止雪崩 |
+| **Tool Tier** | Tool 分級：public / standard / elevated / admin / owner |
+| **PermissionGate** | 依角色 tier 物理過濾 LLM 可見的 tool list（非 prompt 提示，直接移除） |
+| **Role** | 5 級角色：guest → member → developer → admin → platform-owner |
+| **Skill** | 使用者觸發的 `/` 前綴指令（/configure、/use、/session 等），不經 agent loop |
+| **Tool** | LLM 可呼叫的函式（config_get、memory_recall、run_command 等），由 agent loop 執行 |
+| **ContextEngine** | Strategy Pattern 架構，管線式套用壓縮策略（Compaction / BudgetGuard / SlidingWindow） |
+| **MessageTrace** | 7 階段訊息生命週期追蹤：Inbound → Context → LLM Loop → CE → Abort → PostProcess → Response |
+| **TraceStore** | 統一追蹤系統，持久化所有 MessageTrace 記錄 |
+| **Session** | per-channel 對話上下文（guild 頻道共享），per-user for DM |
+| **SessionManager** | Session 快取 + 磁碟持久化 + TTL + per-channel queue |
+| **MemoryEngine** | 三層記憶引擎（Global + Project + Personal），atom + LanceDB vector search |
+| **Atom Memory** | 原子記憶系統：知識以 atom 為最小單位，分 [固]/[觀]/[臨] 三級 |
+| **LanceDB** | 向量資料庫，用於記憶 recall 時的語義搜尋 |
+| **Dashboard** | Web 監控面板：概覽 / Sessions / 日誌 / 操作 / Config |
+| **EventBus** | 內部事件匯流排，子系統間鬆耦合通訊 |
+| **Output Token Recovery** | max_tokens 截斷時自動續接（MAX_CONTINUATIONS=3） |
+| **Post-compact Recovery** | compact 後自動恢復 + batch partition |
 | **debounce** | 同一人 debounceMs（預設500ms）內多則訊息合併為一則 |
 | **per-channel queue** | Promise chain 實作的串行佇列，同 channel 的 turn 依序執行 |
 | **Turn timeout** | AbortController + setTimeout(turnTimeoutMs)，超時自動取消 |
 | **TTL** | Session 閒置超時（sessionTtlHours，預設 168h=7天），超過開新 session |
-| **fileMode** | 回覆超過 fileUploadThreshold 後切換，等 done 時上傳 response.md |
-| **MEDIA token** | Claude 回覆中 `MEDIA: /path` 語法，reply.ts 解析後上傳為 Discord 附件 |
-| **hot-reload** | config.json / cron-jobs.json 變更後無需重啟自動生效 |
-| **selfWriting** | cron.ts 寫入 cron-jobs.json 時的 flag，防止觸發自身的 fs.watch |
+| **fileMode** | 回覆超過 fileUploadThreshold 後切換，等完成時上傳 response.md |
+| **MEDIA token** | LLM 回覆中 `MEDIA: /path` 語法，reply-handler 解析後上傳為 Discord 附件 |
+| **hot-reload** | catclaw.json / models-config.json 變更後無需重啟自動生效 |
 | **signal file** | `signal/RESTART` 檔案，PM2 監聽此目錄變更觸發重啟 |
 | **原子寫入** | 先寫 .tmp 再 rename 覆蓋，防止 crash 導致 JSON 損壞 |
-| **CATCLAW_CHANNEL_ID** | acp.ts spawn claude 時傳入的環境變數，讓 Claude 知道當前 Discord 頻道 |
-| **Event Queue Pattern** | acp.ts 用 eventQueue + resolveNext 將 callback-based stdout 轉為可 yield 的 AsyncGenerator |
-| **ActiveTurnRecord** | session.ts 寫入 active-turns/{channelId}.json 的追蹤記錄，含 startedAt + prompt，用於 crash recovery |
-| **Crash Recovery** | bot 重啟後掃描 active-turns/ 殘留，偵測被中斷的 turn 並向使用者確認是否接續 |
-| **intentionalChannelIds** | index.ts 從 signal/RESTART 取得的 channelId Set，用於區分有意重啟 vs crash |
-| **CATCLAW_WORKSPACE** | 環境變數，Claude CLI agent 工作目錄 + data/ 存放位置，未設定時 throw |
-| **CATCLAW_CONFIG_DIR** | 環境變數，catclaw.json 所在目錄，未設定時 throw |
+| **SafetyGuard** | 安全防護層，輸入/輸出檢查 |
+| **Workflow** | 自動化工作流（記憶萃取、同步提醒、失敗偵測、振盪偵測等） |
+| **Subagent** | Agent Loop 可 spawn 的子代理，獨立 context 執行子任務 |
+| **AuthProfileStore** | OAuth profile 持久化（Codex 等外部登入憑證管理） |
 
 ## 專案結構
 
 ```
 ~/project/catclaw/              ← 純程式碼
 ├── src/
-│   ├── index.ts        進入點：設定 logLevel + loadSessions + Discord login + 重啟回報
-│   ├── config.ts       config.json 載入 + hot-reload + per-channel helper
-│   ├── logger.ts       Log level 控制
-│   ├── discord.ts      Discord client + debounce + per-channel 過濾 + 附件下載
-│   ├── session.ts      Session 快取 + 磁碟持久化 + TTL + per-channel queue
-│   ├── acp.ts          Claude CLI spawn + 串流 diff + event 解析 + 錯誤分類
-│   ├── reply.ts        Discord 回覆分段 + code fence 平衡 + typing + fileMode
-│   └── cron.ts         排程服務（cron-jobs.json hot-reload + timer + job runner）
+│   ├── index.ts                進入點：Discord login + 事件綁定
+│   ├── logger.ts               Log level 控制
+│   ├── discord.ts              Discord client + debounce + per-channel 過濾 + 附件下載
+│   ├── slash.ts                Skill 指令攔截（/ 前綴命令 router）
+│   ├── reply.ts                Legacy 回覆（舊 ACP 路徑用）
+│   ├── session.ts              Legacy session（舊路徑用）
+│   ├── acp.ts                  Legacy CLI spawn（相容路徑，非主流程）
+│   ├── history.ts              歷史訊息管理
+│   ├── cron.ts                 排程服務（cron-jobs.json hot-reload + timer + job runner）
+│   │
+│   ├── core/                   ★ 核心子系統
+│   │   ├── platform.ts            V2 平台初始化器（所有子系統 singleton factory）
+│   │   ├── agent-loop.ts          Agent Loop 核心迴圈（一軌制）
+│   │   ├── agent-loader.ts        Agent 載入器
+│   │   ├── agent-registry.ts      Agent 註冊表
+│   │   ├── config.ts              擴充版設定載入器（含 providers/memory/workflow 等區塊）
+│   │   ├── context-engine.ts      Context 壓縮 + token 追蹤（Strategy Pattern）
+│   │   ├── dashboard.ts           Web Dashboard（HTTP 多分頁監控面板）
+│   │   ├── event-bus.ts           內部事件匯流排
+│   │   ├── exec-approval.ts       指令執行審批
+│   │   ├── message-trace.ts       訊息全鏈路追蹤（7 階段）
+│   │   ├── mode.ts                精密模式系統
+│   │   ├── rate-limiter.ts        速率限制
+│   │   ├── reply-handler.ts       AgentLoopEvent → Discord 分段回覆（streaming / chunk）
+│   │   ├── session.ts             Session 管理 + 持久化 + TTL
+│   │   ├── session-snapshot.ts    Session snapshot 持久化
+│   │   ├── subagent-registry.ts   Subagent 註冊表
+│   │   ├── subagent-discord-bridge.ts  Subagent ↔ Discord 橋接
+│   │   └── tool-log-store.ts      Tool 執行日誌
+│   │
+│   ├── providers/              ★ LLM Provider 抽象層
+│   │   ├── base.ts                LLMProvider 介面 + Message 格式
+│   │   ├── registry.ts            Provider 註冊 + 路由解析
+│   │   ├── models-config.ts       models-config.json 載入
+│   │   ├── model-ref.ts           ModelRef 解析（provider:model）
+│   │   ├── auth-profile-store.ts  OAuth profile 持久化
+│   │   ├── claude-api.ts          Anthropic Claude API
+│   │   ├── ollama.ts              Ollama 本地模型
+│   │   ├── openai-compat.ts       OpenAI 相容 API
+│   │   ├── codex-oauth.ts         Codex OAuth 登入
+│   │   ├── failover-provider.ts   自動 failover
+│   │   └── circuit-breaker.ts     熔斷器
+│   │
+│   ├── accounts/               ★ 帳號 + 權限
+│   │   ├── registry.ts            帳號 + 角色管理
+│   │   ├── permission-gate.ts     角色 Tier 權限閘門
+│   │   ├── registration.ts        帳號註冊
+│   │   └── identity-linker.ts     跨平台身份連結
+│   │
+│   ├── tools/                  ★ LLM 可呼叫 Tool
+│   │   ├── registry.ts            Tool 註冊表
+│   │   ├── types.ts               Tool 型別定義（ToolTier / ToolDefinition）
+│   │   └── builtin/
+│   │       ├── config-get.ts      讀取設定
+│   │       ├── config-patch.ts    修改設定
+│   │       ├── memory-recall.ts   記憶召回
+│   │       ├── read-file.ts       讀檔
+│   │       ├── write-file.ts      寫檔
+│   │       ├── edit-file.ts       編輯檔案
+│   │       ├── glob.ts            檔案搜尋
+│   │       ├── grep.ts            內容搜尋
+│   │       ├── run-command.ts     執行命令
+│   │       ├── spawn-subagent.ts  Spawn 子代理
+│   │       ├── subagents.ts       子代理管理
+│   │       ├── llm-task.ts        LLM 子任務
+│   │       ├── web-search.ts      網路搜尋
+│   │       └── web-fetch.ts       網頁擷取
+│   │
+│   ├── skills/                 ★ 使用者 / 指令觸發 Skill
+│   │   ├── registry.ts            Skill 註冊表
+│   │   ├── types.ts               Skill 型別定義
+│   │   ├── builtin/
+│   │   │   ├── configure.ts       /configure — 設定管理 + OAuth 登入
+│   │   │   ├── use.ts             /use — 切換 model
+│   │   │   ├── system.ts          /system — 系統資訊
+│   │   │   ├── session-manage.ts  /session — session 管理
+│   │   │   ├── status.ts          /status — 狀態查詢
+│   │   │   ├── config-manage.ts   /config — 設定操作
+│   │   │   ├── mode.ts            /mode — 精密模式
+│   │   │   ├── help.ts            /help
+│   │   │   ├── stop.ts            /stop — 中斷 turn
+│   │   │   ├── restart.ts         /restart — 重啟
+│   │   │   ├── think.ts           /think — 強制思考
+│   │   │   ├── usage.ts           /usage — 用量統計
+│   │   │   ├── turn-audit.ts      /audit — turn 追蹤
+│   │   │   ├── account.ts         /account — 帳號管理
+│   │   │   ├── register.ts        /register — 帳號註冊
+│   │   │   ├── project.ts         /project — 專案管理
+│   │   │   ├── migrate.ts         /migrate — 資料遷移
+│   │   │   └── subagents.ts       /subagents — 子代理管理
+│   │   └── builtin-prompt/
+│   │       └── discord/SKILL.md   Discord 平台 skill 提示詞
+│   │
+│   ├── memory/                 ★ 三層記憶系統
+│   │   ├── engine.ts              記憶引擎（Global + Project + Personal）
+│   │   ├── recall.ts              記憶召回
+│   │   ├── atom.ts                Atom 讀寫
+│   │   ├── extract.ts             知識萃取
+│   │   ├── context-builder.ts     記憶 → context 組裝
+│   │   ├── consolidate.ts         記憶整合
+│   │   ├── episodic.ts            情境記憶
+│   │   ├── index-manager.ts       索引管理
+│   │   ├── session-memory.ts      Session 記憶
+│   │   └── write-gate.ts          寫入閘門
+│   │
+│   ├── vector/                 向量搜尋
+│   │   ├── lancedb.ts             LanceDB 封裝
+│   │   └── embedding.ts           Embedding 生成
+│   │
+│   ├── ollama/                 Ollama 本地服務
+│   │   └── client.ts              Ollama client
+│   │
+│   ├── projects/               專案管理
+│   │   └── manager.ts             專案 CRUD
+│   │
+│   ├── safety/                 安全防護
+│   │   └── guard.ts               輸入/輸出檢查
+│   │
+│   ├── workflow/               工作流自動化
+│   │   ├── bootstrap.ts           工作流初始化
+│   │   ├── memory-extractor.ts    自動記憶萃取
+│   │   ├── sync-reminder.ts       同步提醒
+│   │   ├── failure-detector.ts    失敗偵測
+│   │   ├── oscillation-detector.ts  振盪偵測
+│   │   ├── rut-detector.ts        重試窠臼偵測
+│   │   ├── fix-escalation.ts      修正升級
+│   │   ├── wisdom-engine.ts       智慧引擎
+│   │   ├── consolidate-scheduler.ts  整合排程
+│   │   ├── file-tracker.ts        檔案追蹤
+│   │   ├── aidocs-manager.ts      _AIDocs 管理
+│   │   └── types.ts               工作流型別
+│   │
+│   ├── discord/                Discord 擴充
+│   │   └── inbound-history.ts     入站歷史（Decay II）
+│   │
+│   ├── mcp/                    MCP 協議
+│   │   ├── client.ts              MCP client
+│   │   └── discord-server.ts      MCP Discord server
+│   │
+│   └── migration/              資料遷移
+│       ├── rename-sessions.ts     Session 重命名
+│       ├── import-claude.ts       Claude 對話匯入
+│       └── rebuild-index.ts       索引重建
+│
 ├── signal/             PM2 監聽目錄（gitignore）
 │   └── RESTART         重啟 signal file（JSON: {channelId, time}）
 ├── _AIDocs/            知識庫
 │   └── modules/        各模組詳細文件
 ├── config.example.json 設定範本
-├── cron-jobs.example.json  排程 job 範本
 ├── catclaw.js          跨平台管理腳本
 ├── ecosystem.config.cjs  PM2 設定（watch: ["signal"]）
 ├── CLAUDE.md           Claude CLI 專案指引（@import ~/.catclaw/workspace/AGENTS.md）
@@ -167,14 +369,15 @@ index.ts
 └── tsconfig.json
 
 ~/.catclaw/                     ← CATCLAW_CONFIG_DIR
-├── catclaw.json        設定檔（含 token、guild 權限、全域設定）
-└── workspace/          ← CATCLAW_WORKSPACE（Claude CLI cwd）
+├── catclaw.json        設定檔（含 token、guild 權限、providers、memory、workflow 等全區塊）
+├── models-config.json  Model 設定（primary / fallbacks / aliases / routing）
+└── workspace/          ← CATCLAW_WORKSPACE
     ├── AGENTS.md           bot 行為規則（system prompt）
     └── data/
-        ├── sessions.json       channelId → sessionId 映射（重啟持久化）
+        ├── sessions/           Session 持久化（per-channel context）
+        ├── traces/             MessageTrace 持久化
         ├── cron-jobs.json      排程 job 定義 + 狀態
-        └── active-turns/       進行中 turn 追蹤（crash recovery 用）
-            └── {channelId}.json  turn 開始時寫入，結束時刪除
+        └── auth-profiles/      OAuth profile 存放
 ```
 
 ## config.json 欄位完整說明
@@ -188,32 +391,36 @@ index.ts
 | `discord.guilds[id].requireMention` | boolean | `true` | — | Guild 預設：是否需 @mention |
 | `discord.guilds[id].allowBot` | boolean | `false` | — | Guild 預設：是否處理 bot 訊息 |
 | `discord.guilds[id].allowFrom` | string[] | `[]` | — | Guild 預設：白名單（空=不限） |
-| `discord.guilds[id].channels[chId].*` | ChannelConfig | guild 預設 | — | per-channel 覆寫（同上 4 欄位） |
-| `turnTimeoutMs` | number | `300000` | — | 基礎回應超時毫秒（5分鐘），頂層欄位 |
+| `discord.guilds[id].channels[chId].*` | ChannelConfig | guild 預設 | — | per-channel 覆寫（同上 4 欄位 + boundProject） |
+| `providers` | object | — | — | Provider 設定區塊（啟用時走 V2 Agent Loop 路徑） |
+| `admin.allowedUserIds` | string[] | `[]` | — | Platform-owner 身份的 Discord User ID |
+| `turnTimeoutMs` | number | `300000` | — | 基礎回應超時毫秒（5分鐘） |
 | `turnTimeoutToolCallMs` | number | `turnTimeoutMs×1.6` | — | tool_call 偵測後延長至此值（預設 8 分鐘） |
-| `sessionTtlHours` | number | `168` | — | Session 閒置超時小時（7天），頂層欄位 |
-| `showToolCalls` | "all"/"summary"/"none" | `"all"` | — | 工具呼叫顯示模式（舊版 boolean 相容） |
-| `showThinking` | boolean | `false` | — | 顯示 Claude 推理過程 |
+| `sessionTtlHours` | number | `168` | — | Session 閒置超時小時（7天） |
+| `showToolCalls` | "all"/"summary"/"none" | `"all"` | — | 工具呼叫顯示模式 |
+| `showThinking` | boolean | `false` | — | 顯示 LLM 推理過程 |
 | `debounceMs` | number | `500` | — | 訊息合併等待毫秒 |
 | `fileUploadThreshold` | number | `4000` | — | 超過此字數上傳 .md，0=停用 |
 | `logLevel` | string | `"info"` | — | debug/info/warn/error/silent |
 | `cron.enabled` | boolean | `false` | — | 啟用排程服務 |
 | `cron.maxConcurrentRuns` | number | `1` | — | 同時執行 job 上限 |
+| `dashboard.port` | number | — | — | Web Dashboard 監聽埠 |
 
-> config.json（實際為 `catclaw.json`）支援 JSONC（`//` 行尾 / 整行註解）。排程 job 定義在 `data/cron-jobs.json`。`claude.cwd` / `claude.command` 已移除，改由環境變數控制。
+> catclaw.json 支援 JSONC（`//` 行尾 / 整行註解）。字串值符合 `${ENV_VAR_NAME}` 格式時自動展開環境變數。
 
 ## Session 策略
 
 | 場景 | Session Key | 行為 |
 |------|------------|------|
-| Guild 頻道 | `channelId` → UUID | 同頻道所有人共享對話 |
+| Guild 頻道 | `channelId` | 同頻道所有人共享對話 context |
 | DM | `channelId`（每人唯一） | per-user session |
 
-- 首次 → claude CLI 建立 session → `system/init` 取得 UUID → 快取 + 持久化
-- 後續 → `--resume <UUID>` 延續
+- 首次 → agent-loop 建立 session → SessionManager 持久化
+- 後續 → 載入既有 context 繼續
+- ContextEngine 管理 token budget → 超閾值自動 compaction
 - 超過 TTL → 開新 session
-- 錯誤時保留 session，下次繼續 `--resume`
-- 重啟 → `loadSessions()` 從 `data/sessions.json` 載入
+- 錯誤時保留 session，下次繼續
+- 重啟 → SessionManager 從磁碟載入
 
 ## PM2 重啟流程
 
@@ -230,17 +437,17 @@ index.ts ready 事件 → 讀 signal/RESTART
   → 刪除 signal/RESTART
 ```
 
-> CATCLAW_CHANNEL_ID 環境變數由 acp.ts spawn claude 時傳入。
-
 ## 重要常數速查表
 
 | 常數 | 值 | 說明 | 所在檔案 |
 |------|-----|------|---------|
-| `TEXT_LIMIT` | 2000 | Discord 訊息字數硬上限 | reply.ts |
-| `CODE_FENCE_RESERVE` | 8 | flush 時預留給 fence 補開/補關的空間 | reply.ts |
-| `FLUSH_DELAY_MS` | 3000ms | 定時 flush 延遲 | reply.ts |
+| `MAX_LOOPS` | 20 | Agent Loop 單次 turn 最大迴圈數 | agent-loop.ts |
+| `MAX_CONTINUATIONS` | 3 | Output Token Recovery 最多自動續接次數 | agent-loop.ts |
+| `DEFAULT_RESULT_TOKEN_CAP` | 8000 | Tool result 截斷 token 上限（≈32000 chars） | agent-loop.ts |
+| `TEXT_LIMIT` | 2000 | Discord 訊息字數硬上限 | reply-handler.ts |
+| `FLUSH_DELAY_MS` | 3000ms | chunk 模式定時 flush 延遲 | reply-handler.ts |
+| `EDIT_INTERVAL_MS` | 800ms | streaming 模式最快 edit 間隔 | reply-handler.ts |
 | `debounceMs` | 500ms（預設） | 多則訊息合併等待，config 可調 | discord.ts/config.ts |
-| `typingInterval` | 8000ms | Typing indicator 重發間隔 | reply.ts |
 | `turnTimeoutMs` | 300000ms（預設） | 基礎回應超時（5分鐘），config 可調 | config.ts |
 | `turnTimeoutToolCallMs` | turnTimeoutMs×1.6（預設） | tool_call 延長超時（預設 8 分鐘），config 可調 | config.ts |
 | `sessionTtlHours` | 168h（預設） | Session 閒置超時（7天），config 可調 | config.ts |
@@ -248,18 +455,12 @@ index.ts ready 事件 → 讀 signal/RESTART
 | `MIN_TIMER_MS` | 2000ms | cron timer 最短間隔 | cron.ts |
 | `MAX_TIMER_MS` | 60000ms | cron timer 最長間隔 | cron.ts |
 | `BACKOFF_SCHEDULE_MS` | [30000, 60000, 300000] | cron 重試退避：30s / 1min / 5min | cron.ts |
-| `maxConcurrentRuns` | 1（預設） | cron 同時執行 job 上限，config 可調 | config.ts |
-| `selfWriting` reset | 1000ms | cron saveStore 後多久重置 selfWriting flag | cron.ts |
-| `maxAgeMs` (crash recovery) | 600000ms (10min) | active-turn 超過此時間視為過期，不接續 | session.ts |
-| `processedMessages` | 1000 | 去重 Set 超過此數清空 | discord.ts |
-| `UPLOAD_DIR` | /tmp/claude-discord-uploads | 附件暫存根目錄 | discord.ts |
-| `SIGTERM delay` | 250ms | abort 後等多久若未結束才 SIGKILL | acp.ts |
-| `stderrTail` | 500 chars | 保留 stderr 最後幾字元用於錯誤診斷 | acp.ts |
+| `TIER_ORDER` | public→standard→elevated→admin→owner | Tool Tier 排序 | permission-gate.ts |
+| `BACKUP_KEEP` | 5 | Dashboard config 備份保留數 | dashboard.ts |
 
 ## Log 控制
 
 | 層級 | 內容 |
 |------|------|
-| `info`（預設） | session 載入/建立、bot 上線、錯誤 |
-| `debug` | session 決策、event 流、過濾判斷 |
-| `ACP_TRACE=1`（環境變數） | acp.ts stdout/stderr raw chunks（獨立於 logLevel） |
+| `info`（預設） | session 載入/建立、bot 上線、provider 初始化、錯誤 |
+| `debug` | session 決策、agent loop event、tool 執行、context 壓縮、權限判斷 |

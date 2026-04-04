@@ -83,43 +83,18 @@
   "logLevel": "info",            // 日誌層級：debug / info / warn / error / silent
 
   // ══════════════════════════════════════════════════════════════
-  // V2 三層分離設定（推薦，2026-04-02 新增）
-  // 格式："provider/model"（如 "anthropic/claude-sonnet-4-6"）
-  // 認證放 auth-profile.json，模型目錄自動從內建 + 自訂合併
+  // 模型設定現在在 models-config.json（唯一真相源）
+  // catclaw.json 不再放 agentDefaults / modelsConfig / modelRouting
+  // 詳見下方 models-config.json 區段
   // ══════════════════════════════════════════════════════════════
-
-  "agentDefaults": {
-    "model": {
-      "primary": "sonnet",                         // alias 或 "provider/model" 格式
-      "fallbacks": ["anthropic/claude-opus-4-6"]   // primary 不可用時依序嘗試
-    },
-    "models": {                                     // 模型對照表：key = "provider/model"，alias = 簡短名
-      "anthropic/claude-sonnet-4-6": { "alias": "sonnet" },
-      "anthropic/claude-opus-4-6": { "alias": "opus" },
-      "anthropic/claude-haiku-4-5-20251001": { "alias": "haiku" }
-    }
-  },
-
-  // modelsConfig（可選）— 自訂 provider 在此新增，mode="merge" 與內建合併
-  // "modelsConfig": { "mode": "merge", "providers": { "ollama": { ... } } },
 
   // authConfig（可選）— 輪替順序和 cooldown
   // 實際 credential 放 {workspace}/agents/default/auth-profile.json
   // "authConfig": { "order": { "anthropic": ["anthropic:default"] } },
 
   "providerRouting": {
-    "roles": { "default": "sonnet" }   // 值可以是 alias 或 "provider/model"
-    // "channels": { "<頻道 ID>": "opus" }
-  },
-
-  // ── V1 舊格式（保留相容，有 agentDefaults 時以 V2 優先）────────
-  "provider": "claude",
-  "providers": {
-    "claude": {
-      "type": "claude",
-      "mode": "token",
-      "model": "claude-sonnet-4-6"
-    }
+    "failoverChain": ["anthropic", "ollama"],  // provider 層級降級
+    "circuitBreaker": { "threshold": 3, "cooldownMs": 60000 }
   },
 
   // ── 排程（job 定義在 data/cron-jobs.json）──────────────────────
@@ -152,9 +127,60 @@
 | guild `allowFrom` | `[]` | 不限制 |
 | channel `autoThread` | `false` | 每則訊息建 Thread |
 | provider `mode` | auto | claude 認證模式：token（OAuth）/ api（API key） |
-| `agentDefaults.model.primary` | — | V2 主要模型（alias 或 provider/model 格式） |
-| `agentDefaults.model.fallbacks` | `[]` | V2 備援模型清單 |
-| `modelsConfig.mode` | `"merge"` | 模型目錄合併模式：merge / replace |
+
+---
+
+## models-config.json（模型設定唯一真相源）
+
+位置：`$CATCLAW_CONFIG_DIR/models-config.json`。
+啟動時由 `config.ts` 讀取並合成 `agentDefaults` / `modelsConfig` / `modelRouting`。
+Dashboard「模型設定」面板可 GUI 操作。
+
+```jsonc
+{
+  "primary": "sonnet",           // 預設模型（alias 或 provider/model）
+  "fallbacks": ["haiku"],        // primary 不可用時依序嘗試
+  "aliases": {                   // alias → "provider/model" 對照
+    "sonnet": "anthropic/claude-sonnet-4-6",
+    "opus":   "anthropic/claude-opus-4-6",
+    "haiku":  "anthropic/claude-haiku-4-5-20251001",
+    "gemma4": "ollama/gemma3:12b"
+  },
+  "providers": {                 // per-provider 設定（合併到 modelsConfig）
+    "ollama": {
+      "baseUrl": "http://localhost:11434",
+      "embeddingModel": "nomic-embed-text:latest"
+    }
+  },
+  "routing": {                   // 模型路由（channel/project/role 覆蓋）
+    "default": "sonnet",         // 未匹配時的預設（通常等於 primary）
+    "channels": {                // channelId → model（最高優先）
+      "123456789": "opus"
+    },
+    "roles": {},                 // roleName → model
+    "projects": {}               // projectId → model
+  }
+}
+```
+
+### 欄位說明
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `primary` | string | 全域預設模型（alias 或 "provider/model"） |
+| `fallbacks` | string[] | 備援模型清單，依序嘗試 |
+| `aliases` | Record<string, string> | 簡短名 → "provider/model" 對照 |
+| `providers` | Record<string, object> | per-provider 設定（baseUrl、embeddingModel 等） |
+| `routing.default` | string | 路由預設模型（省略時用 primary） |
+| `routing.channels` | Record<string, string> | channelId → model（最高優先） |
+| `routing.roles` | Record<string, string> | roleName → model |
+| `routing.projects` | Record<string, string> | projectId → model |
+
+### 優先級
+
+```
+routing.channels[channelId] > routing.projects[projectId] > routing.roles[role] > routing.default > primary
+```
 
 ---
 

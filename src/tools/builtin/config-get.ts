@@ -1,23 +1,19 @@
 /**
  * @file tools/builtin/config-get.ts
- * @description config_get — 讓 Claude 讀取 catclaw.json 設定
+ * @description config_get — 讓 Claude 讀取 catclaw 設定（已解析的完整 config）
  *
+ * 讀取的是 runtime 合成後的 BridgeConfig（包含 models-config.json 合成的
+ * modelRouting / agentDefaults 等），而非原始 catclaw.json。
  * 敏感欄位（token/apiKey/secret/password）自動遮蔽為 ***。
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Tool } from "../types.js";
-import { resolveCatclawDir } from "../../core/config.js";
+import { config } from "../../core/config.js";
 
-const SECRET_SEGMENTS = new Set(["token", "apikey", "secret", "password", "apikey"]);
+const SECRET_SEGMENTS = new Set(["token", "apikey", "secret", "password"]);
 
 function containsSecret(path: string): boolean {
   return path.toLowerCase().split(".").some(seg => SECRET_SEGMENTS.has(seg));
-}
-
-function readRaw(): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(resolveCatclawDir(), "catclaw.json"), "utf-8")) as Record<string, unknown>;
 }
 
 function getNestedPath(obj: unknown, path: string): unknown {
@@ -41,10 +37,10 @@ function filterSecrets(obj: unknown, depth = 0): unknown {
 export const tool: Tool = {
   name: "config_get",
   description: [
-    "讀取 catclaw.json 設定。",
+    "讀取 catclaw 設定（已解析的完整 config，包含 models-config.json 合成結果）。",
     "path 省略則回傳完整 config；指定 dot-path 則回傳該欄位值。",
     "敏感欄位（token/apiKey/secret）自動遮蔽。",
-    "範例：path=\"memory.recall\" 回傳 recall 區塊；path=\"discord.guilds\" 回傳所有 guild 設定。",
+    "範例：path=\"modelRouting\" 回傳模型路由；path=\"discord.guilds\" 回傳所有 guild 設定。",
   ].join(" "),
   tier: "admin",
   resultTokenCap: 1000,
@@ -54,7 +50,7 @@ export const tool: Tool = {
     properties: {
       path: {
         type: "string",
-        description: "dot-path，例如 \"memory\" 或 \"discord.guilds.123.channels\"。省略則回傳完整 config。",
+        description: "dot-path，例如 \"modelRouting\" 或 \"discord.guilds.123.channels\"。省略則回傳完整 config。",
       },
     },
     required: [],
@@ -65,8 +61,7 @@ export const tool: Tool = {
       return { error: "禁止讀取敏感欄位（token/apiKey/secret/password）" };
     }
     try {
-      const raw = readRaw();
-      const val = path ? getNestedPath(raw, path) : raw;
+      const val = path ? getNestedPath(config, path) : config;
       if (val === undefined) return { error: `路徑不存在：${path}` };
       return { result: filterSecrets(val) };
     } catch (err) {
