@@ -78,20 +78,99 @@ const MAX_LOOPS = 20;
 const MAX_CONTINUATIONS = 3;  // Output Token Recovery：max_tokens 截斷時最多自動續接次數
 const DEFAULT_RESULT_TOKEN_CAP = 8000;   // 1 token ≈ 4 chars → 32000 chars
 
-// ── Tool result 截斷 ──────────────────────────────────────────────────────────
+// ── Tool result 智慧截斷 ──────────────────────────────────────────────────────
 
-function truncateToolResult(text: string, tokenCap: number): string {
+/** 依 tool 類型套用不同截斷策略 */
+function truncateToolResult(text: string, tokenCap: number, toolName?: string): string {
   if (tokenCap === 0) return text;                       // 0 = 無限制
   const charCap = tokenCap * 4;
   if (text.length <= charCap) return text;
 
   const lines = text.split("\n");
   const totalLines = lines.length;
-  const head = lines.slice(0, 50).join("\n");
-  const tail = lines.slice(-20).join("\n");
-  const notice = `\n[結果過長已截斷。原始共 ${totalLines} 行 / ${text.length} 字元，顯示前 50 行 + 末 20 行]\n`;
+
+  // ── 策略分派 ──
+  const strategy = toolName ? TRUNCATION_STRATEGIES[toolName] : undefined;
+  if (strategy) {
+    return strategy(text, lines, totalLines, charCap);
+  }
+
+  // ── 預設策略：head + tail ──
+  return defaultTruncation(lines, totalLines, text.length, charCap);
+}
+
+function defaultTruncation(lines: string[], totalLines: number, totalChars: number, charCap: number): string {
+  const headLines = Math.min(50, Math.floor(totalLines * 0.7));
+  const tailLines = Math.min(20, totalLines - headLines);
+  const head = lines.slice(0, headLines).join("\n");
+  const tail = lines.slice(-tailLines).join("\n");
+  const notice = `\n[截斷：原始 ${totalLines} 行 / ${totalChars} 字元，顯示前 ${headLines} + 末 ${tailLines} 行]\n`;
   return head + notice + tail;
 }
+
+/** read_file：保留頭部（含行號）+ 尾部，中間截斷並標示行號範圍 */
+function truncateReadFile(text: string, lines: string[], totalLines: number, charCap: number): string {
+  const headCount = Math.min(80, Math.floor(charCap / 4 / 60 * 0.7));  // 估算：每行約 60 chars
+  const tailCount = Math.min(30, Math.floor(charCap / 4 / 60 * 0.3));
+  const head = lines.slice(0, headCount).join("\n");
+  const tail = lines.slice(-tailCount).join("\n");
+  const skipped = totalLines - headCount - tailCount;
+  const notice = `\n[... 省略中間 ${skipped} 行（第 ${headCount + 1}~${totalLines - tailCount} 行）...]\n`;
+  return head + notice + tail;
+}
+
+/** grep / glob：限制匹配數量，保留前 N 筆 */
+function truncateSearchResult(_text: string, lines: string[], totalLines: number, charCap: number): string {
+  const maxLines = Math.floor(charCap / 60);  // 每行約 60 chars
+  const kept = lines.slice(0, maxLines).join("\n");
+  const omitted = totalLines - maxLines;
+  if (omitted > 0) {
+    return kept + `\n[... 還有 ${omitted} 筆結果未顯示（共 ${totalLines} 筆）]`;
+  }
+  return kept;
+}
+
+/** run_command：保留 stderr + exit code + 尾部 stdout */
+function truncateRunCommand(text: string, lines: string[], totalLines: number, charCap: number): string {
+  // 嘗試找到 stderr 區段（通常是 error 或 warning 行）
+  const stderrLines: string[] = [];
+  const stdoutLines: string[] = [];
+  let hasStderr = false;
+
+  for (const line of lines) {
+    // 常見 stderr 模式：Error, Warning, error:, WARN, ERR, fatal
+    if (/^(error|warning|fatal|ERR|WARN|Error:|TypeError|SyntaxError)/i.test(line.trim())) {
+      hasStderr = true;
+    }
+    if (hasStderr && stderrLines.length < 30) {
+      stderrLines.push(line);
+    } else {
+      stdoutLines.push(line);
+    }
+  }
+
+  const tailCount = Math.min(40, Math.floor(charCap / 4 / 60));
+  const tail = stdoutLines.slice(-tailCount).join("\n");
+
+  if (stderrLines.length > 0) {
+    const stderrBlock = stderrLines.join("\n");
+    const notice = `[截斷：原始 ${totalLines} 行。以下為 stderr/error 區段 + 最後 ${tailCount} 行 stdout]`;
+    return `${notice}\n\n--- stderr ---\n${stderrBlock}\n\n--- stdout (tail) ---\n${tail}`;
+  }
+
+  // 無明顯 stderr：僅保留尾部
+  const notice = `[截斷：原始 ${totalLines} 行 / ${text.length} 字元，僅保留最後 ${tailCount} 行]`;
+  return `${notice}\n${tail}`;
+}
+
+/** tool-specific 截斷策略表 */
+const TRUNCATION_STRATEGIES: Record<string, (text: string, lines: string[], totalLines: number, charCap: number) => string> = {
+  read_file: truncateReadFile,
+  grep: truncateSearchResult,
+  glob: truncateSearchResult,
+  web_search: truncateSearchResult,
+  run_command: truncateRunCommand,
+};
 
 /**
  * 計算工具結果的有效 token cap。
@@ -712,12 +791,41 @@ export async function* agentLoop(
   eventBus.on("file:modified", _onFileEditForRecovery);
   _wfListeners.push(() => eventBus.off("file:modified", _onFileEditForRecovery));
 
+  // ── Background Agent Result Queue ─────────────────────────────────────────
+  // 監聽 subagent:completed/failed 事件，累積結果，在下次 LLM 呼叫前注入
+  const pendingBgResults: Array<{ type: "completed" | "failed"; runId: string; label: string; content: string }> = [];
+  const _onBgCompleted = (_parentKey: string, runId: string, label: string, result: string) => {
+    if (_parentKey !== sessionKey) return;
+    pendingBgResults.push({ type: "completed", runId, label, content: result });
+  };
+  const _onBgFailed = (_parentKey: string, runId: string, label: string, error: string) => {
+    if (_parentKey !== sessionKey) return;
+    pendingBgResults.push({ type: "failed", runId, label, content: error });
+  };
+  eventBus.on("subagent:completed", _onBgCompleted);
+  eventBus.on("subagent:failed", _onBgFailed);
+  _wfListeners.push(
+    () => eventBus.off("subagent:completed", _onBgCompleted),
+    () => eventBus.off("subagent:failed", _onBgFailed),
+  );
+
   log.debug(`[agent-loop] ── turn 開始 ── sessionKey=${sessionKey} turnCount=${session.turnCount} accountId=${accountId} history=${processedHistory.length} msgs systemPrompt=${systemPrompt.length} chars`);
 
   try {
     while (loopCount++ < MAX_LOOPS) {
       // ── abort 快速出口（/stop 或 timeout 觸發後，下一輪不再呼叫 LLM）────
       if (controller.signal.aborted) break;
+
+      // ── Background Agent 結果注入 ──────────────────────────────────────────
+      if (pendingBgResults.length > 0) {
+        const parts = pendingBgResults.splice(0).map(r => {
+          const status = r.type === "completed" ? "✅ 完成" : "❌ 失敗";
+          const preview = r.content.slice(0, 2000);
+          return `[背景 Agent ${status}] ${r.label} (${r.runId.slice(0, 8)})\n${preview}`;
+        });
+        messages.push({ role: "user", content: `[系統通知] 背景子 agent 已完成：\n\n${parts.join("\n\n---\n\n")}` });
+        log.debug(`[agent-loop] 注入 ${parts.length} 個背景 agent 結果`);
+      }
 
       // ── 5a. LLM 呼叫（帶重試）────────────────────────────────────────────
       log.debug(`[agent-loop] [loop=${loopCount}] 呼叫 LLM msgs=${messages.length}`);
@@ -873,7 +981,7 @@ export async function* agentLoop(
           }
           const rawText = toolResult.error ? `錯誤：${toolResult.error}` : JSON.stringify(toolResult.result ?? null);
           const tokenCap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens, opts.modePreset?.resultTokenCap);
-          const resultText = truncateToolResult(rawText, tokenCap);
+          const resultText = truncateToolResult(rawText, tokenCap, call.name);
           events.push({ type: "tool_result", name: call.name, id: call.id, result: toolResult.result, error: toolResult.error });
           return {
             toolResult: { tool_use_id: call.id, content: resultText, is_error: Boolean(toolResult.error) },
@@ -937,7 +1045,7 @@ export async function* agentLoop(
           }
           const rawText = toolResult.error ? `錯誤：${toolResult.error}` : JSON.stringify(toolResult.result ?? null);
           const tokenCap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens, opts.modePreset?.resultTokenCap);
-          const resultText = truncateToolResult(rawText, tokenCap);
+          const resultText = truncateToolResult(rawText, tokenCap, call.name);
           events.push({ type: "tool_result", name: call.name, id: call.id, result: toolResult.result, error: toolResult.error });
           return {
             toolResult: { tool_use_id: call.id, content: resultText, is_error: Boolean(toolResult.error) },
@@ -1083,7 +1191,7 @@ export async function* agentLoop(
           ? `錯誤：${toolResult.error}`
           : JSON.stringify(toolResult.result ?? null);
         const cap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens, opts.modePreset?.resultTokenCap);
-        const resultText = truncateToolResult(rawResultText, cap);
+        const resultText = truncateToolResult(rawResultText, cap, call.name);
         if (resultText.length < rawResultText.length) {
           log.debug(`[agent-loop] [使用工具] (${call.name}) :: result truncated ${rawResultText.length} → ${resultText.length} chars`);
         }

@@ -252,7 +252,7 @@ export const tool: Tool = {
   name: "spawn_subagent",
   description: `產生隔離子 agent 執行任務。
 - async:false（預設）：同步等待完成，結果直接回傳。
-- async:true：立即回傳 runId，子 agent 背景執行，完成時推送 Discord 通知。
+- async:true：立即回傳 runId，子 agent 背景執行。完成後自動透過 EventBus 通知 parent，結果會在你的下次回應前自動注入。同時推送 Discord 通知。
 多個任務可同時呼叫（同一輪並行執行，時間 = max(A,B)）。`,
   tier: "standard",
   deferred: true,
@@ -482,12 +482,21 @@ export const tool: Tool = {
       // 非同步：背景執行，立即回傳 runId（SUB-4）
       runChildFn()
         .then(async () => {
+          // EventBus 通知 parent（agent-loop 在下次 LLM 呼叫前注入結果）
+          const { eventBus } = await import("../../core/event-bus.js");
+          eventBus.emit("subagent:completed", record.parentSessionKey, record.runId, record.label ?? record.task.slice(0, 60), record.result ?? "");
+
           const { sendSubagentNotification } = await import("../../core/subagent-discord-bridge.js");
           await sendSubagentNotification(record);
         })
         .catch(async (err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           log.warn(`[spawn-subagent] async background error runId=${record.runId}: ${msg}`);
+
+          // EventBus 通知 parent（失敗）
+          const { eventBus } = await import("../../core/event-bus.js");
+          eventBus.emit("subagent:failed", record.parentSessionKey, record.runId, record.label ?? record.task.slice(0, 60), msg);
+
           const { sendSubagentNotification } = await import("../../core/subagent-discord-bridge.js");
           await sendSubagentNotification(record, { error: true });
         });

@@ -100,6 +100,10 @@ export interface CatClawEvents {
   "cron:executed":       [jobId: string];
   "skill:invoked":       [skillName: string, accountId: string];
 
+  // ── Subagent ──
+  "subagent:completed":  [parentSessionKey: string, runId: string, label: string, result: string];
+  "subagent:failed":     [parentSessionKey: string, runId: string, label: string, error: string];
+
   // ── 帳號 ──
   "account:created":     [accountId: string];
   "account:linked":      [accountId: string, platform: string];

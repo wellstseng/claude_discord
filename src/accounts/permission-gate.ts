@@ -13,6 +13,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolTier, ToolDefinition } from "../tools/types.js";
 import { toDefinition } from "../tools/types.js";
 import { log } from "../logger.js";
+import { getRoleExtraTools, getRoleDenyTools } from "./role-tool-sets.js";
 
 // ── Tier 排序 ─────────────────────────────────────────────────────────────────
 
@@ -68,9 +69,12 @@ export class PermissionGate {
 
     const permissions = (account as Account & { permissions?: { allow?: string[]; deny?: string[] } }).permissions;
 
-    // 1. deny 優先
+    // 1. deny 優先（帳號層級 + 角色層級）
     if (permissions?.deny?.includes(toolName)) {
       return { allowed: false, reason: "帳號層級禁止" };
+    }
+    if (getRoleDenyTools(account.role).includes(toolName)) {
+      return { allowed: false, reason: `角色 ${account.role} 禁止使用此工具` };
     }
 
     // 2. allow 覆寫（突破 tier 但有上限）
@@ -91,7 +95,12 @@ export class PermissionGate {
       }
     }
 
-    // 3. Tier 檢查
+    // 3. Role Tool Set：角色額外允許
+    if (getRoleExtraTools(account.role).includes(toolName)) {
+      return { allowed: true };
+    }
+
+    // 4. Tier 檢查
     const tool = this.toolRegistry.get(toolName);
     if (!tool) return { allowed: false, reason: `未知工具：${toolName}` };
 
@@ -147,6 +156,21 @@ export class PermissionGate {
           tools.push(tool);
         }
       }
+    }
+
+    // Role Tool Set：角色額外允許的 tool（補充 tier 過濾）
+    const roleExtras = getRoleExtraTools(account.role);
+    for (const name of roleExtras) {
+      if (tools.find(t => t.name === name)) continue;
+      const tool = this.toolRegistry.get(name);
+      if (tool) tools.push(tool);
+    }
+
+    // Role Tool Set：角色強制排除的 tool
+    const roleDeny = getRoleDenyTools(account.role);
+    if (roleDeny.length > 0) {
+      const denySet = new Set(roleDeny);
+      tools = tools.filter(t => !denySet.has(t.name));
     }
 
     return tools.map(t => toDefinition(t));
