@@ -14,6 +14,7 @@
  * 參考架構文件第 6 節（Agent Loop + Tool 執行引擎）。
  */
 
+import { existsSync } from "node:fs";
 import { log } from "../logger.js";
 import { makeToolResultMessage } from "../providers/base.js";
 import type { LLMProvider, Message, ProviderEvent, ImageBlock, ContentBlock } from "../providers/base.js";
@@ -336,7 +337,7 @@ type BeforeToolResult =
 
 function runBeforeToolCall(
   call: { id: string; name: string; params: Record<string, unknown> },
-  ctx: { accountId: string; role?: string; recentCalls: ToolCallRecord[] },
+  ctx: { accountId: string; role?: string; recentCalls: ToolCallRecord[]; readFiles?: Set<string> },
   permissionGate: PermissionGate,
   safetyGuard: SafetyGuard,
 ): BeforeToolResult {
@@ -348,14 +349,29 @@ function runBeforeToolCall(
   const guard = safetyGuard.check(call.name, call.params, { accountId: ctx.accountId, role: ctx.role });
   if (guard.blocked) return { blocked: true, reason: guard.reason ?? "安全規則阻擋" };
 
-  // 3. Tool Loop Detection（同一 tool 連續 5 次）
+  // 3. Read-before-Write enforcement
+  // write_file / edit_file 的目標路徑必須先被 read_file 讀過（新建檔案除外）
+  if (ctx.readFiles && (call.name === "write_file" || call.name === "edit_file")) {
+    const targetPath = String(call.params["path"] ?? call.params["file_path"] ?? "");
+    if (targetPath && !ctx.readFiles.has(targetPath)) {
+      // 檢查檔案是否存在：存在但未讀 → 阻擋；不存在 → 允許新建
+      try {
+        if (existsSync(targetPath)) {
+          return { blocked: true, reason: `請先用 read_file 讀取 ${targetPath} 再進行修改（Read-before-Write 規則）` };
+        }
+      } catch {
+        // 無法判斷 → 放行（寧可通過也不誤擋）
+      }
+    }
+  }
+
+  // 4. Tool Loop Detection（同一 tool 連續 5 次）
   const recentSame = ctx.recentCalls.slice(-5).filter(c => c.name === call.name);
   if (recentSame.length >= 5) {
     return { blocked: true, reason: `偵測到工具迴圈：${call.name} 連續呼叫超過 5 次` };
   }
 
-  // 3b. Alternating Tool Cycle Detection（period-2：A→B→A→B→A…）
-  // 最近 4 次呼叫為 [X, Y, X, Y]，且當前要再呼叫 X → 封鎖
+  // 4b. Alternating Tool Cycle Detection（period-2：A→B→A→B→A…）
   if (ctx.recentCalls.length >= 4) {
     const r4 = ctx.recentCalls.slice(-4).map(c => c.name);
     if (r4[0] === r4[2] && r4[1] === r4[3] && r4[0] !== r4[1] && call.name === r4[0]) {
@@ -395,6 +411,8 @@ export async function* agentLoop(
   const trace = opts.trace;
   // Post-compact recovery：追蹤最近編輯的檔案（最多 5 個），壓縮後重新注入
   const recentlyEditedFiles: string[] = [];
+  // Read-before-Write：追蹤本 turn 已讀取的檔案路徑
+  const readFiles = new Set<string>();
   // allowSpawn: depth ≥ 2 強制 false（最多 3 層）；opts.allowSpawn 明確 false 也關閉
   const allowSpawn = opts.allowSpawn !== false && spawnDepth < 2;
 
@@ -809,7 +827,7 @@ export async function* agentLoop(
           const events: SpawnEvent[] = [];
           const hookResult = runBeforeToolCall(
             { id: call.id, name: call.name, params },
-            { accountId, role: opts.speakerRole, recentCalls: tracker.toolCalls },
+            { accountId, role: opts.speakerRole, recentCalls: tracker.toolCalls, readFiles },
             permissionGate, safetyGuard,
           );
           if (hookResult.blocked) {
@@ -879,7 +897,7 @@ export async function* agentLoop(
 
           const hookResult = runBeforeToolCall(
             { id: call.id, name: call.name, params },
-            { accountId, role: opts.speakerRole, recentCalls: tracker.toolCalls },
+            { accountId, role: opts.speakerRole, recentCalls: tracker.toolCalls, readFiles },
             permissionGate, safetyGuard,
           );
           if (hookResult.blocked) {
@@ -913,6 +931,11 @@ export async function* agentLoop(
           toolResults.push(batch.toolResult);
           turnToolResultTokens += Math.ceil(batch.toolResult.content.length / 4);
           tracker.recordToolCall(batch.toolRecord.name, batch.toolRecord.params, batch.toolRecord.result, batch.toolRecord.error, batch.toolRecord.durationMs);
+          // Read-before-Write：batch 中的 read_file 成功後記錄路徑
+          if (batch.toolRecord.name === "read_file" && !batch.toolRecord.error) {
+            const rp = String((batch.toolRecord.params as Record<string, unknown>)["path"] ?? (batch.toolRecord.params as Record<string, unknown>)["file_path"] ?? "");
+            if (rp) readFiles.add(rp);
+          }
           trace?.recordToolCall({ name: batch.toolRecord.name, durationMs: batch.toolRecord.durationMs, error: batch.toolRecord.error, resultPreview: toolResultPreview(batch.toolRecord.result, batch.toolRecord.error), paramsPreview: toolParamsPreview(batch.toolRecord.name, batch.toolRecord.params) });
           if (batch.fileModified) eventBus.emit("file:modified", batch.fileModified.path, batch.fileModified.tool, accountId);
         }
@@ -1016,6 +1039,11 @@ export async function* agentLoop(
         }
 
         tracker.recordToolCall(call.name, hookResult.params, toolResult.result, toolResult.error, durationMs);
+        // Read-before-Write：read_file 成功後記錄路徑
+        if (call.name === "read_file" && !toolResult.error) {
+          const readPath = String(hookResult.params["path"] ?? hookResult.params["file_path"] ?? "");
+          if (readPath) readFiles.add(readPath);
+        }
         // Trace: tool call 記錄
         trace?.recordToolCall({
           name: call.name,
