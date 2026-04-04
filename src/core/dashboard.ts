@@ -498,10 +498,17 @@ label.cfg-toggle { min-width: 36px; }
   <div id="trace-detail"></div>
 </div>
 
-<!-- Auth Profiles -->
+<!-- Auth Profiles & Models -->
 <div id="pane-auth" class="pane">
   <div class="card">
-    <h2>Auth Profiles（OAuth 憑證管理）
+    <h2>模型設定（models-config.json）
+      <button class="btn btn-sm" style="float:right" onclick="loadModelsConfig()">↻ 重新載入</button>
+    </h2>
+    <div id="models-config-msg" class="msg"></div>
+    <div id="models-config-panel" style="margin-top:8px">載入中...</div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2>Auth Profiles（憑證管理）
       <button class="btn btn-sm" style="float:right" onclick="loadAuthProfiles()">↻ 讀取</button>
     </h2>
     <div id="auth-msg" class="msg"></div>
@@ -509,8 +516,18 @@ label.cfg-toggle { min-width: 36px; }
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid #2a2d3e">
       <h3 style="font-size:0.82rem;color:#818cf8;margin-bottom:8px">新增憑證</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input id="auth-new-id" placeholder="ID (如 key-3)" style="flex:0 0 120px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
-        <input id="auth-new-cred" type="password" placeholder="Credential (sk-ant-oat...)" style="flex:1;min-width:200px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
+        <select id="auth-new-provider" style="flex:0 0 130px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem">
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+          <option value="openai-codex">Codex</option>
+          <option value="ollama">Ollama</option>
+        </select>
+        <input id="auth-new-id" placeholder="名稱（如 key-1）" style="flex:0 0 120px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
+        <select id="auth-new-type" style="flex:0 0 100px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem">
+          <option value="api_key">API Key</option>
+          <option value="token">Token</option>
+        </select>
+        <input id="auth-new-cred" type="password" placeholder="Token / API Key" style="flex:1;min-width:200px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
         <button class="btn btn-green btn-sm" onclick="addAuthProfile()">+ 新增</button>
       </div>
     </div>
@@ -588,7 +605,7 @@ function switchTab(id, el) {
   if (id === 'logs') connectLogStream();
   if (id !== 'logs') disconnectLogStream();
   if (id === 'ops') { loadSubagents(); }
-  if (id === 'auth') loadAuthProfiles();
+  if (id === 'auth') { loadModelsConfig(); loadAuthProfiles(); }
   if (id === 'traces') loadTraces();
   if (id === 'cron') loadCron();
   if (id === 'config') loadCfg();
@@ -1024,14 +1041,7 @@ const CFG_SCHEMA = [
     {k:'discord.dm.enabled',t:'bool',l:'DM 啟用',d:'是否允許私訊觸發 bot'},
     {k:'admin.allowedUserIds',t:'list',l:'管理員 User IDs',d:'擁有 owner 權限的 Discord User ID 清單'},
   ]},
-  { key:'modelRouting', label:'Model Routing（模型路由）', fields:[
-    {k:'modelRouting.default',t:'text',l:'預設模型',d:'全域預設模型（alias 或 provider/model）。優先級：channel > project > role > default'},
-    {k:'modelRouting.fallbacks',t:'list',l:'降級鏈',d:'預設模型不可用時的備援模型清單，依序嘗試'},
-  ], maps:[
-    {k:'modelRouting.channels',l:'Channel → Model（頻道覆蓋，最高優先）'},
-    {k:'modelRouting.roles',l:'Role → Model（角色覆蓋）'},
-    {k:'modelRouting.projects',l:'Project → Model（專案覆蓋）'},
-  ]},
+  /* modelRouting 已移至 models-config.json，由「模型設定」面板管理 */
   { key:'guilds', label:'Guilds', dynamic:true, dynamicPath:'discord.guilds', entryFields:[
     {k:'allow',t:'bool',l:'Allow',d:'是否允許此 guild 使用 bot'},
     {k:'requireMention',t:'bool',l:'Require Mention',d:'需要 @mention 才觸發回覆'},
@@ -1454,6 +1464,108 @@ async function loadModelsJson() {
   } catch(e) { document.getElementById('models-json-viewer').innerHTML = '<span class="msg err">讀取失敗：' + e + '</span>'; }
 }
 
+// ── Models Config ────────────────────────────────────────────────────────────
+async function loadModelsConfig() {
+  const panel = document.getElementById('models-config-panel');
+  const msg = document.getElementById('models-config-msg');
+  try {
+    const d = await authFetch('/api/models-config').then(r => r.json());
+    if (!d.exists) { panel.innerHTML = '<p style="color:#888">models-config.json 不存在</p>'; return; }
+    const mc = d.data;
+    const primary = mc.primary || '(未設定)';
+    const fallbacks = (mc.fallbacks || []).join(', ') || '(無)';
+    const aliases = mc.aliases || {};
+    const aliasKeys = Object.keys(aliases);
+
+    let html = '<div style="margin-bottom:12px"><strong style="color:#818cf8">當前模型：</strong><span style="color:#34d399;font-size:1.1em;font-weight:bold">' + primary + '</span>';
+    html += '  <span style="color:#888;font-size:0.8em;margin-left:8px">fallback: ' + fallbacks + '</span></div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">';
+    for (const alias of aliasKeys) {
+      const isCurrent = alias === primary;
+      const btnClass = isCurrent ? 'btn btn-green btn-sm' : 'btn btn-sm';
+      html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + alias + '&quot;)" ' + (isCurrent ? 'disabled' : '') + '>' + alias + '</button>';
+    }
+    html += '</div>';
+    // routing 區塊
+    const routing = mc.routing || {};
+    html += '<details style="margin-top:12px;padding-top:10px;border-top:1px solid #2a2d3e"><summary style="cursor:pointer;color:#818cf8;font-size:0.82rem;font-weight:bold">模型路由（channel/project/role 覆蓋）</summary>';
+    html += '<div style="margin-top:8px">';
+    // routing maps
+    const routingMaps = [
+      { key: 'channels', label: 'Channel → Model（最高優先）' },
+      { key: 'roles', label: 'Role → Model' },
+      { key: 'projects', label: 'Project → Model' },
+    ];
+    for (const rm of routingMaps) {
+      const map = routing[rm.key] || {};
+      const entries = Object.entries(map);
+      html += '<div style="margin-bottom:8px"><strong style="font-size:0.78rem;color:#a78bfa">' + rm.label + '</strong>';
+      if (entries.length === 0) {
+        html += '<span style="color:#555;font-size:0.75rem;margin-left:8px">(未設定)</span>';
+      }
+      html += '<div style="margin-top:4px">';
+      for (const [k, v] of entries) {
+        html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px">';
+        html += '<code style="font-size:0.72rem;color:#e0e0e0;min-width:120px">' + k + '</code>';
+        html += '<span style="color:#888">→</span>';
+        html += '<code style="font-size:0.72rem;color:#34d399">' + v + '</code>';
+        html += '<button class="btn btn-red btn-sm" style="font-size:0.65rem;padding:1px 6px" onclick="removeRoutingEntry(&quot;' + rm.key + '&quot;,&quot;' + k + '&quot;)">✕</button>';
+        html += '</div>';
+      }
+      html += '<div style="display:flex;gap:4px;align-items:center;margin-top:4px">';
+      html += '<input id="routing-new-' + rm.key + '-key" placeholder="ID" style="width:120px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:3px;padding:2px 6px;font-size:0.72rem;font-family:monospace">';
+      html += '<span style="color:#888">→</span>';
+      html += '<input id="routing-new-' + rm.key + '-val" placeholder="model alias" style="width:100px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:3px;padding:2px 6px;font-size:0.72rem;font-family:monospace">';
+      html += '<button class="btn btn-green btn-sm" style="font-size:0.65rem;padding:1px 6px" onclick="addRoutingEntry(&quot;' + rm.key + '&quot;)">+</button>';
+      html += '</div></div></div>';
+    }
+    html += '</div></details>';
+
+    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:#888;font-size:0.78rem">Alias 對照表</summary>';
+    html += '<table class="tbl" style="margin-top:4px"><tr><th>Alias</th><th>Provider/Model</th></tr>';
+    for (const [alias, ref] of Object.entries(aliases)) {
+      const isCurrent = alias === primary;
+      html += '<tr' + (isCurrent ? ' style="color:#34d399"' : '') + '><td>' + alias + '</td><td style="font-family:monospace;font-size:0.75rem">' + ref + '</td></tr>';
+    }
+    html += '</table></details>';
+    panel.innerHTML = html;
+    msg.className = 'msg'; msg.textContent = '';
+  } catch(e) { msg.className = 'msg err'; msg.textContent = '載入失敗：' + e; }
+}
+
+async function switchPrimary(alias) {
+  const msg = document.getElementById('models-config-msg');
+  try {
+    const d = await authFetch('/api/models-config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'set-primary',primary:alias})}).then(r=>r.json());
+    if (d.success) {
+      msg.className = 'msg ok'; msg.textContent = '已切換為 ' + alias + '，重啟中...';
+      await authFetch('/api/restart', {method:'POST'});
+      setTimeout(() => { msg.textContent = '已切換為 ' + alias + '（已重啟）'; loadModelsConfig(); }, 3000);
+    } else { msg.className = 'msg err'; msg.textContent = d.error; }
+  } catch(e) { msg.className = 'msg err'; msg.textContent = '切換失敗：' + e; }
+}
+
+async function addRoutingEntry(mapKey) {
+  const key = document.getElementById('routing-new-' + mapKey + '-key').value.trim();
+  const val = document.getElementById('routing-new-' + mapKey + '-val').value.trim();
+  const msg = document.getElementById('models-config-msg');
+  if (!key || !val) { msg.className = 'msg err'; msg.textContent = 'ID 和 model 都要填'; return; }
+  try {
+    const d = await authFetch('/api/models-config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'set-routing', mapKey, key, value: val})}).then(r=>r.json());
+    if (d.success) { msg.className = 'msg ok'; msg.textContent = '已新增 ' + mapKey + '.' + key + ' → ' + val + '，重啟中...'; await authFetch('/api/restart',{method:'POST'}); setTimeout(()=>{ msg.textContent = '路由已更新（已重啟）'; loadModelsConfig(); }, 3000); }
+    else { msg.className = 'msg err'; msg.textContent = d.error; }
+  } catch(e) { msg.className = 'msg err'; msg.textContent = '失敗：' + e; }
+}
+
+async function removeRoutingEntry(mapKey, entryKey) {
+  const msg = document.getElementById('models-config-msg');
+  try {
+    const d = await authFetch('/api/models-config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'remove-routing', mapKey, key: entryKey})}).then(r=>r.json());
+    if (d.success) { msg.className = 'msg ok'; msg.textContent = '已移除 ' + mapKey + '.' + entryKey + '，重啟中...'; await authFetch('/api/restart',{method:'POST'}); setTimeout(()=>{ msg.textContent = '路由已更新（已重啟）'; loadModelsConfig(); }, 3000); }
+    else { msg.className = 'msg err'; msg.textContent = d.error; }
+  } catch(e) { msg.className = 'msg err'; msg.textContent = '失敗：' + e; }
+}
+
 // ── Auth Profiles ────────────────────────────────────────────────────────────
 async function loadAuthProfiles() {
   try {
@@ -1490,12 +1602,16 @@ async function loadAuthProfiles() {
 }
 
 async function addAuthProfile() {
-  const id = document.getElementById('auth-new-id').value.trim();
+  const provider = document.getElementById('auth-new-provider').value;
+  const name = document.getElementById('auth-new-id').value.trim() || 'default';
+  const type = document.getElementById('auth-new-type').value;
   const cred = document.getElementById('auth-new-cred').value.trim();
-  if (!id || !cred) { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = 'ID 和 Credential 都要填'; return; }
+  const id = provider + ':' + name;
+  if (!cred) { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = 'Credential 不能為空'; return; }
+  if (cred.length < 10) { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = 'Credential 長度不足（至少 10 字元）'; return; }
   try {
-    const d = await authFetch('/api/auth-profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',id,credential:cred})}).then(r=>r.json());
-    if (d.success) { document.getElementById('auth-new-id').value = ''; document.getElementById('auth-new-cred').value = ''; loadAuthProfiles(); }
+    const d = await authFetch('/api/auth-profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',id,credential:cred,type})}).then(r=>r.json());
+    if (d.success) { document.getElementById('auth-new-id').value = ''; document.getElementById('auth-new-cred').value = ''; document.getElementById('auth-msg').className = 'msg ok'; document.getElementById('auth-msg').textContent = '已新增 ' + id + '，重啟中...'; await authFetch('/api/restart',{method:'POST'}); setTimeout(() => { document.getElementById('auth-msg').textContent = '已新增 ' + id + '（已重啟）'; loadAuthProfiles(); }, 3000); }
     else { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = d.error; }
   } catch(e) { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = '失敗：' + e; }
 }
@@ -2141,8 +2257,8 @@ export class DashboardServer {
               }
 
               if (body.action === "add" && body.id && body.credential) {
-                const provider = body.provider ?? body.id.split(":")[0] ?? "anthropic";
-                data.profiles[body.id] = { type: "api_key", provider, key: body.credential };
+                const credType = (body as Record<string, unknown>).type === "api_key" ? "api_key" : "token";
+                data.profiles[body.id] = { type: credType, key: body.credential } as any;
               } else if (body.action === "remove" && body.id) {
                 delete data.profiles[body.id];
                 if (data.usageStats) delete data.usageStats[body.id];
@@ -2184,6 +2300,73 @@ export class DashboardServer {
               writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
               renameSync(tmp, fp);
               res.writeHead(200); res.end(JSON.stringify({ success: true }));
+            } catch (err) {
+              res.writeHead(400); res.end(JSON.stringify({ error: String(err) }));
+            }
+          })();
+        });
+        return;
+      }
+
+      // GET /api/models-config — 讀取 models-config.json
+      if (url === "/api/models-config" && method === "GET") {
+        void (async () => {
+          try {
+            const { resolveCatclawDir } = await import("./config.js");
+            const p = join(resolveCatclawDir(), "models-config.json");
+            if (!existsSync(p)) {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ exists: false }));
+              return;
+            }
+            const data = JSON.parse(readFileSync(p, "utf-8"));
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ exists: true, data, path: p }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // POST /api/models-config — 修改 models-config.json（切換模型等）
+      if (url === "/api/models-config" && method === "POST") {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          void (async () => {
+            try {
+              const { resolveCatclawDir } = await import("./config.js");
+              const p = join(resolveCatclawDir(), "models-config.json");
+              const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as Record<string, unknown>;
+              const data = existsSync(p) ? JSON.parse(readFileSync(p, "utf-8")) : {};
+
+              if (body.action === "set-primary" && body.primary) {
+                const aliases = data.aliases as Record<string, string> | undefined;
+                if (aliases && !Object.keys(aliases).includes(body.primary as string) && !Object.values(aliases).includes(body.primary as string)) {
+                  throw new Error(`模型 '${body.primary}' 不存在。可用：${Object.keys(aliases).join(", ")}`);
+                }
+                data.primary = body.primary;
+              } else if (body.action === "set-routing" && body.mapKey && body.key) {
+                const validMaps = ["channels", "roles", "projects"];
+                if (!validMaps.includes(body.mapKey as string)) throw new Error(`無效的路由類型：${body.mapKey}`);
+                if (!data.routing) data.routing = {};
+                if (!data.routing[body.mapKey as string]) data.routing[body.mapKey as string] = {};
+                data.routing[body.mapKey as string][body.key as string] = body.value;
+              } else if (body.action === "remove-routing" && body.mapKey && body.key) {
+                if (data.routing?.[body.mapKey as string]) {
+                  delete data.routing[body.mapKey as string][body.key as string];
+                  if (Object.keys(data.routing[body.mapKey as string]).length === 0) delete data.routing[body.mapKey as string];
+                  if (Object.keys(data.routing).length === 0) delete data.routing;
+                }
+              } else {
+                throw new Error("不支援的操作");
+              }
+
+              const tmp = p + ".tmp";
+              writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", "utf-8");
+              renameSync(tmp, p);
+              res.writeHead(200); res.end(JSON.stringify({ success: true, primary: data.primary }));
             } catch (err) {
               res.writeHead(400); res.end(JSON.stringify({ error: String(err) }));
             }

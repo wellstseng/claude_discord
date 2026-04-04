@@ -166,7 +166,8 @@ export async function buildProviderRegistryV2(
   }
   const primaryRef = parseModelRef(primaryRaw, aliases);
   if (!primaryRef) {
-    throw new Error(`[provider-registry-v2] 無法解析 primary model: ${primaryRaw}`);
+    const available = aliases ? Object.values(aliases).map(e => e.alias).filter(Boolean).join(", ") : "(none)";
+    throw new Error(`[provider-registry-v2] 無法解析 primary model: ${primaryRaw}（可用別名：${available}）`);
   }
 
   // 收集所有要建立的 model ref（primary + fallbacks + models 表中所有 key）

@@ -179,11 +179,11 @@ export class OllamaProvider implements LLMProvider {
         finalText += content;
       }
 
-      // tool_calls 通常在 done:true 的最後一個 chunk
-      if (chunk.done && chunk.message?.tool_calls?.length) {
+      // tool_calls：部分模型（如 Gemma 4）在 done:false chunk 送出
+      if (chunk.message?.tool_calls?.length) {
         for (const tc of chunk.message.tool_calls) {
           const call: ToolCall = {
-            id: randomUUID(),
+            id: (tc as Record<string, unknown>).id as string ?? randomUUID(),
             name: tc.function.name,
             params: tc.function.arguments ?? {},
           };

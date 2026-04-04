@@ -255,15 +255,20 @@ export class AuthProfileStore {
 
   private _getProfilesForProvider(provider: string): Array<[string, AuthProfileCredential]> {
     return Object.entries(this._data.profiles)
-      .filter(([, cred]) => cred.provider === provider);
+      .filter(([pid, cred]) => {
+        // 優先用 cred.provider，fallback 從 profileId "provider:name" 解析
+        const credProvider = cred.provider ?? pid.split(":")[0];
+        return credProvider === provider;
+      });
   }
 
   private _extractApiKey(cred: AuthProfileCredential): string | null {
+    // key 是統一欄位，token/access 為相容舊格式
     switch (cred.type) {
       case "api_key": return cred.key || null;
-      case "token": return cred.token || null;
-      case "oauth": return cred.access || null;
-      default: return null;
+      case "token": return cred.key || cred.token || null;
+      case "oauth": return cred.key || cred.access || null;
+      default: return (cred as Record<string, unknown>).key as string || null;
     }
   }
 

@@ -5,10 +5,10 @@
 
 | Atom | Path | Trigger | Confidence |
 |------|------|---------|------------|
-| architecture | architecture.md | 架構, 資料流, 目錄結構, session 策略, config, 環境變數, restart, cron, 安全, PM2, hot-reload, catclaw.json, CATCLAW_WORKSPACE, pi-ai, OAuth, provider, credentials | [固] |
+| architecture | architecture.md | 架構, 資料流, 目錄結構, session 策略, config, 環境變數, restart, cron, 安全, PM2, hot-reload, catclaw.json, CATCLAW_WORKSPACE, pi-ai, OAuth, provider, credentials, 一軌制, agent loop, HTTP API, provider 三層分離 | [固] |
 | modules | modules.md | 模組, config.ts, discord.ts, session.ts, acp.ts, reply.ts, logger, cron.ts, pm2, index.ts, 函式, 介面, BridgeConfig, getChannelAccess, enqueue, AcpEvent, providers, claude-api, auth-profile, skills, configure | [固] |
 | pitfalls-cli | pitfalls-cli.md | 陷阱, pitfall, CLI, stream-json, NDJSON, event, claude -p, debug, thinking, closure, typing, stdin, signal, active-turns | [固] |
-| project-vision | project-vision.md | catclaw 定位, 專案知識, 代理人, agent, session 策略 | [固] |
+| project-vision | project-vision.md | catclaw 定位, 專案知識, 代理人, agent, session 策略, 多人平台, 一軌制, HTTP API | [固] |
 | dev-principles | decisions-dev-principles.md | 開發原則, 程式碼優先, token, 精準度, 設計決策 | [固] |
 | platform-plan | catclaw-platform-plan.md | 平台升級, 全系統藍圖, agent loop, tool 系統, provider 抽換, 記憶搬遷, 七大子系統, Sprint | [固] |
 | catclaw-v2-plan | catclaw-v2-plan.md | V2, catclaw v2, context engineering, inbound history, CE, compaction, token追蹤, turn audit, session snapshot, rollback, /stop | [固] |

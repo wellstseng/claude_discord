@@ -137,9 +137,9 @@ export type ModelApi = "anthropic-messages" | "openai-completions" | "openai-cod
 
 /** auth-profile.json 中單一 credential */
 export type AuthProfileCredential =
-  | { type: "api_key"; provider: string; key: string; email?: string }
-  | { type: "token"; provider: string; token: string; expires?: number; email?: string }
-  | { type: "oauth"; provider: string; access: string; refresh: string; expires: number; clientId?: string; email?: string };
+  | { type: "api_key"; provider?: string; key: string; email?: string }
+  | { type: "token"; provider?: string; key?: string; token?: string; expires?: number; email?: string }
+  | { type: "oauth"; provider?: string; key?: string; access?: string; refresh?: string; expires?: number; clientId?: string; email?: string };
 
 /** auth-profile.json 中單一 profile 的使用統計 */
 export interface ProfileUsageStats {
@@ -771,6 +771,7 @@ export function resolveClaudeBin(): string {
 interface ModelsConfigFile {
   mode?: "merge" | "replace";
   primary?: string;
+  fallbacks?: string[];
   aliases?: Record<string, string>;
   providers?: Record<string, ModelProviderDefinition & {
     embeddingModel?: string;
@@ -779,6 +780,13 @@ interface ModelsConfigFile {
     numPredict?: number;
     timeout?: number;
   }>;
+  /** 模型路由：channel/project/role 覆蓋 */
+  routing?: {
+    default?: string;
+    roles?: Record<string, string>;
+    projects?: Record<string, string>;
+    channels?: Record<string, string>;
+  };
 }
 
 /**
@@ -804,6 +812,7 @@ function synthesizeFromModelsConfig(mcfg: ModelsConfigFile): {
   agentDefaults: AgentDefaultsConfig;
   modelsConfig: ModelsConfig;
   ollamaRaw: Record<string, unknown> | undefined;
+  modelRouting: ModelRoutingConfig | undefined;
 } {
   // aliases: { sonnet: "anthropic/claude-sonnet-4-6" } → models: { "anthropic/claude-sonnet-4-6": { alias: "sonnet" } }
   const models: Record<string, ModelAliasEntry> = {};
@@ -814,7 +823,10 @@ function synthesizeFromModelsConfig(mcfg: ModelsConfigFile): {
   }
 
   const agentDefaults: AgentDefaultsConfig = {
-    model: { primary: mcfg.primary ?? "sonnet" },
+    model: {
+      primary: mcfg.primary ?? "sonnet",
+      ...(mcfg.fallbacks?.length && { fallbacks: mcfg.fallbacks }),
+    },
     models,
   };
 
@@ -850,7 +862,20 @@ function synthesizeFromModelsConfig(mcfg: ModelsConfigFile): {
     };
   }
 
-  return { agentDefaults, modelsConfig, ollamaRaw };
+  // modelRouting: routing 區塊 + primary/fallbacks 作為 default/fallbacks
+  let modelRouting: ModelRoutingConfig | undefined;
+  const routingDefault = mcfg.routing?.default ?? mcfg.primary;
+  if (routingDefault) {
+    modelRouting = {
+      default: routingDefault,
+      ...(mcfg.fallbacks?.length && { fallbacks: mcfg.fallbacks }),
+      ...(mcfg.routing?.roles && { roles: mcfg.routing.roles }),
+      ...(mcfg.routing?.projects && { projects: mcfg.routing.projects }),
+      ...(mcfg.routing?.channels && { channels: mcfg.routing.channels }),
+    };
+  }
+
+  return { agentDefaults, modelsConfig, ollamaRaw, modelRouting };
 }
 
 /**
@@ -996,18 +1021,21 @@ function loadConfig(): BridgeConfig {
 
   const turnTimeoutMs = raw.turnTimeoutMs ?? 300_000;
 
-  // models-config.json 外部載入（優先於 catclaw.json 內的 agentDefaults/modelsConfig/ollama）
-  let resolvedAgentDefaults = raw.agentDefaults as AgentDefaultsConfig | undefined;
-  let resolvedModelsConfig = raw.modelsConfig as ModelsConfig | undefined;
+  // models-config.json 為模型設定唯一真相源
+  let resolvedAgentDefaults: AgentDefaultsConfig | undefined;
+  let resolvedModelsConfig: ModelsConfig | undefined;
   let ollamaRaw = raw.ollama;
 
+  let resolvedModelRouting: ModelRoutingConfig | undefined;
+
   const mcfg = loadModelsConfigFile();
-  if (mcfg && !raw.agentDefaults) {
+  if (mcfg) {
     const syn = synthesizeFromModelsConfig(mcfg);
     resolvedAgentDefaults = syn.agentDefaults;
     resolvedModelsConfig = syn.modelsConfig;
+    resolvedModelRouting = syn.modelRouting;
     if (!raw.ollama) ollamaRaw = syn.ollamaRaw as typeof raw.ollama;
-    log.info(`[config] 從 models-config.json 合成 agentDefaults（primary=${syn.agentDefaults.model?.primary}）`);
+    log.info(`[config] 從 models-config.json 載入模型設定（primary=${syn.agentDefaults.model?.primary}）`);
   }
 
   return {
@@ -1066,13 +1094,13 @@ function loadConfig(): BridgeConfig {
       failoverChain: raw.providerRouting?.failoverChain,
       circuitBreaker: raw.providerRouting?.circuitBreaker,
     },
-    modelRouting: raw.modelRouting?.default ? {
+    modelRouting: resolvedModelRouting ?? (raw.modelRouting?.default ? {
       default: raw.modelRouting.default,
       roles: raw.modelRouting.roles,
       projects: raw.modelRouting.projects,
       channels: raw.modelRouting.channels,
       fallbacks: raw.modelRouting.fallbacks,
-    } : undefined,
+    } : undefined),
     session: {
       ttlHours:          raw.session?.ttlHours ?? 168,
       maxHistoryTurns:   raw.session?.maxHistoryTurns ?? 50,

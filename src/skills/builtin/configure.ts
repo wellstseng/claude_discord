@@ -26,11 +26,26 @@ function getConfigPath(): string {
   return resolve(dir, "catclaw.json");
 }
 
-// ── 讀寫 catclaw.json（保留原始格式，hot-reload 自動生效） ─────────────────────
+function getModelsConfigPath(): string {
+  const dir = process.env.CATCLAW_CONFIG_DIR;
+  if (!dir) throw new Error("CATCLAW_CONFIG_DIR 未設定");
+  return resolve(dir, "models-config.json");
+}
+
+// ── 讀寫設定檔 ───────────────────────────────────────────────────────────────
 
 function readRawConfig(): Record<string, unknown> {
   const raw = readFileSync(getConfigPath(), "utf-8");
   return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function readModelsConfig(): Record<string, unknown> {
+  const raw = readFileSync(getModelsConfigPath(), "utf-8");
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function writeModelsConfig(data: Record<string, unknown>): void {
+  writeFileSync(getModelsConfigPath(), JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
 function writeRawConfig(obj: Record<string, unknown>): void {
@@ -88,38 +103,24 @@ function handleSetModel(args: string): SkillResult {
   }
 
   try {
-    const raw = readRawConfig();
+    const mcfg = readModelsConfig();
+    const aliases = mcfg["aliases"] as Record<string, string> | undefined;
 
-    // V2：修改 agentDefaults.model.primary
-    if (config.agentDefaults?.model?.primary) {
-      const ad = raw["agentDefaults"] as Record<string, unknown> | undefined;
-      if (!ad) {
-        return { text: "❌ catclaw.json 中找不到 agentDefaults", isError: true };
+    // 驗證 modelId 是否為有效的 alias 或 provider/model 格式
+    if (aliases) {
+      const validAliases = Object.keys(aliases);
+      const validRefs = Object.values(aliases);
+      const isValid = validAliases.includes(modelId) || validRefs.includes(modelId);
+      if (!isValid) {
+        const available = validAliases.join(", ");
+        return { text: `❌ 模型 \`${modelId}\` 不存在。可用的別名：${available}`, isError: true };
       }
-      const model = ad["model"] as Record<string, unknown> | undefined;
-      if (!model) {
-        return { text: "❌ catclaw.json 中找不到 agentDefaults.model", isError: true };
-      }
-      // modelId 可以是 alias 或 "provider/model" 格式
-      model["primary"] = modelId;
-      writeRawConfig(raw);
-      log.info(`[configure] agentDefaults.model.primary → ${modelId}`);
-      return { text: `✅ primary model 已設為 \`${modelId}\`（hot-reload 生效中）` };
     }
 
-    // V1
-    const targetProvider = providerId ?? config.provider;
-    if (!config.providers[targetProvider]) {
-      return { text: `❌ Provider 不存在：${targetProvider}`, isError: true };
-    }
-    const providers = raw["providers"] as Record<string, Record<string, unknown>>;
-    if (!providers?.[targetProvider]) {
-      return { text: `❌ catclaw.json 中找不到 provider：${targetProvider}`, isError: true };
-    }
-    providers[targetProvider]!["model"] = modelId;
-    writeRawConfig(raw);
-    log.info(`[configure] provider=${targetProvider} model → ${modelId}`);
-    return { text: `✅ \`${targetProvider}\` model 已設為 \`${modelId}\`（hot-reload 生效中）` };
+    mcfg["primary"] = modelId;
+    writeModelsConfig(mcfg);
+    log.info(`[configure] models-config.json primary → ${modelId}`);
+    return { text: `✅ primary model 已設為 \`${modelId}\`（重啟後生效）` };
   } catch (err) {
     return { text: `❌ ${err instanceof Error ? err.message : String(err)}`, isError: true };
   }
