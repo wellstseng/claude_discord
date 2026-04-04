@@ -1,7 +1,8 @@
 # PLAN-V5 — CatClaw = Codex 版 Claude Code CLI + 多人 AI 開發平台
 
 > 建立日期：2026-04-04
-> 狀態：規劃中
+> 完成日期：2026-04-05
+> 狀態：✅ 完成（18/20 項已關閉，2 項低優先延後）
 
 ## 願景
 
@@ -248,3 +249,32 @@
 → Read-before-Write 用 hook 強制 ✅
 → Git safety 用 tool 內部偵測 ✅
 → 編碼風格用 prompt ✅（只能靠語意）
+
+---
+
+## Part E — 完成摘要（2026-04-05）
+
+### Sprint 實作紀錄
+
+| Sprint | Commit | 包含項目 |
+|--------|--------|---------|
+| pre-V5 | b959701 | B2.1 Read-before-Write、B2.2 Coding Discipline、B5.3 CATCLAW.md 願景 |
+| S1+S2 | 7fee6f1 | B1.1 Prompt Cache、B1.2 Deferred Tool、B2.3 Git Safety、B3.1 Agent Types、B4.1 Task Management |
+| S3 | 31ef3ac | B3.2 Background Agent Notification、B5.1 Prompt Assembler、B1.3 Smart Truncation、B6.1 Role Tool Sets |
+| S4 | b8c11d0 | B3.3 SendMessage、B3.4 Worktree Isolation、B2.4 Reversibility、B6.2 Project Binding、B6.3 Collab Conflict |
+
+### Gap 關閉狀態：18/20 ✅
+
+| 項目 | 狀態 | 備註 |
+|------|------|------|
+| B4.2 Task UI（Discord embed） | ❌ 延後 | 功能性低，task_manage tool 已足夠 |
+| B5.2 Context-aware prompt injection | ❌ 延後 | 需 prompt-assembler 實戰驗證後再設計 |
+
+### 下一階段建議
+
+PLAN-V5 核心 gap 已關閉。建議進入**穩定化 + 實戰驗證階段**，不急於開 V6：
+
+1. **整合測試強化** — 目前 smoke-v2.mjs 只覆蓋 config/auth/provider，缺少 agent-loop、tool 執行、subagent spawn 的整合測試
+2. **prompt-assembler 接入 discord.ts** — 目前 prompt-assembler 已實作但尚未成為 agent-loop 的預設 system prompt 來源，需接線驗證
+3. **B5.2 Context-aware prompt injection** — 待 prompt-assembler 實戰穩定後，依任務類型動態注入行為模組
+4. **實戰回饋收集** — 用 CatClaw 自己做日常開發，記錄 prompt quality、tool 使用效率、token 消耗等指標

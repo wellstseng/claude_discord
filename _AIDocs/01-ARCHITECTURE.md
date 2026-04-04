@@ -133,7 +133,11 @@ index.ts                          ← 進入點：Discord login + 事件綁定
   ├── core/agent-loop.ts          Agent Loop 核心迴圈
   │     ├── providers/base.ts        LLM Provider 介面
   │     ├── tools/builtin/*          Tool 實作（LLM 可呼叫）
-  │     └── core/context-engine.ts   Context 策略管線
+  │     ├── core/context-engine.ts   Context 策略管線
+  │     ├── core/agent-types.ts      Typed Agent 定義（explore/plan/build/review）
+  │     ├── core/task-store.ts       Per-session 任務追蹤
+  │     ├── core/prompt-assembler.ts System Prompt 模組化組裝
+  │     └── safety/collab-conflict.ts 協作衝突偵測
   ├── core/reply-handler.ts       AgentLoopEvent → Discord 分段回覆
   ├── core/dashboard.ts           Web Dashboard（HTTP server）
   ├── skills/registry.ts          Skill 註冊表
@@ -207,6 +211,16 @@ providers/
 | **Workflow** | 自動化工作流（記憶萃取、同步提醒、失敗偵測、振盪偵測等） |
 | **Subagent** | Agent Loop 可 spawn 的子代理，獨立 context 執行子任務 |
 | **AuthProfileStore** | OAuth profile 持久化（Codex 等外部登入憑證管理） |
+| **AgentType** | Typed Agent 定義（explore/plan/build/review），每型別有 tool 白名單、system prompt、model 覆寫 |
+| **TaskStore** | Per-session 結構化任務追蹤（create/update/list/get/delete），支援 dependencies |
+| **PromptAssembler** | System Prompt 模組化組裝器，按 mode + 角色動態組裝 PromptModule（priority 排序） |
+| **ToolSearch** | Deferred Tool 載入機制——低頻 tool 僅列名稱，LLM 需要時呼叫 tool_search 取得完整 schema |
+| **Deferred Tool** | 標記 `deferred: true` 的 tool，不在每次 LLM 呼叫注入完整 schema，減少 token 開銷 |
+| **RoleToolSet** | 角色 Tool Set 定義，developer=完整 coding set、guest=read-only，疊加 tier 過濾 |
+| **CollabConflict** | 多人同頻道同時編輯同一檔案時的衝突偵測 + EventBus 警告 |
+| **Reversibility** | before_tool_call 評估操作可逆性（destructive score 0-3），≥2 注入警告訊息 |
+| **Worktree Isolation** | spawn_subagent `isolation:"worktree"` → git worktree 隔離分支工作，完成後判定 merge/丟棄 |
+| **Git Safety** | run_command 內建 checkGitSafety，攔截 force push、amend、skip hooks 等危險 git 操作 |
 
 ## 專案結構
 
@@ -241,7 +255,10 @@ providers/
 │   │   ├── session-snapshot.ts    Session snapshot 持久化
 │   │   ├── subagent-registry.ts   Subagent 註冊表
 │   │   ├── subagent-discord-bridge.ts  Subagent ↔ Discord 橋接
-│   │   └── tool-log-store.ts      Tool 執行日誌
+│   │   ├── tool-log-store.ts      Tool 執行日誌
+│   │   ├── agent-types.ts         Typed Agent 定義（explore/plan/build/review + tool 白名單）
+│   │   ├── task-store.ts          Per-session 結構化任務追蹤
+│   │   └── prompt-assembler.ts    System Prompt 模組化組裝器（PromptModule + priority）
 │   │
 │   ├── providers/              ★ LLM Provider 抽象層
 │   │   ├── base.ts                LLMProvider 介面 + Message 格式
@@ -260,7 +277,8 @@ providers/
 │   │   ├── registry.ts            帳號 + 角色管理
 │   │   ├── permission-gate.ts     角色 Tier 權限閘門
 │   │   ├── registration.ts        帳號註冊
-│   │   └── identity-linker.ts     跨平台身份連結
+│   │   ├── identity-linker.ts     跨平台身份連結
+│   │   └── role-tool-sets.ts      角色 Tool Set（developer=完整 coding / guest=read-only）
 │   │
 │   ├── tools/                  ★ LLM 可呼叫 Tool
 │   │   ├── registry.ts            Tool 註冊表
@@ -279,7 +297,9 @@ providers/
 │   │       ├── subagents.ts       子代理管理
 │   │       ├── llm-task.ts        LLM 子任務
 │   │       ├── web-search.ts      網路搜尋
-│   │       └── web-fetch.ts       網頁擷取
+│   │       ├── web-fetch.ts       網頁擷取
+│   │       ├── tool-search.ts     Deferred Tool Schema 查詢
+│   │       └── task-manage.ts     結構化任務管理（create/update/list/get/delete）
 │   │
 │   ├── skills/                 ★ 使用者 / 指令觸發 Skill
 │   │   ├── registry.ts            Skill 註冊表
@@ -329,7 +349,8 @@ providers/
 │   │   └── manager.ts             專案 CRUD
 │   │
 │   ├── safety/                 安全防護
-│   │   └── guard.ts               輸入/輸出檢查
+│   │   ├── guard.ts               輸入/輸出檢查
+│   │   └── collab-conflict.ts     協作衝突偵測（多人同檔編輯警告）
 │   │
 │   ├── workflow/               工作流自動化
 │   │   ├── bootstrap.ts           工作流初始化
