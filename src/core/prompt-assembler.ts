@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { log } from "../logger.js";
 import type { Role } from "../accounts/registry.js";
 import type { ModePreset } from "./config.js";
+import { config } from "./config.js";
 
 // ── Prompt Module 介面 ──────────────────────────────────────────────────────
 
@@ -46,6 +47,8 @@ export interface PromptContext {
   speakerRole?: string;
   /** 工作目錄 */
   workspaceDir?: string;
+  /** 當前 session 已啟用的 MCP server 名稱 */
+  activeMcpServers?: string[];
 }
 
 // ── 內建模組 ─────────────────────────────────────────────────────────────────
@@ -132,6 +135,20 @@ const outputFormatModule: PromptModule = {
   },
 };
 
+const discordReplyModule: PromptModule = {
+  name: "discord-reply",
+  priority: 55,
+  build: (ctx) => {
+    const hasDiscordMcp = ctx.activeMcpServers?.some(s => s.toLowerCase().includes("discord"));
+    if (!hasDiscordMcp) return "";
+    return [
+      "## Discord 回覆規則",
+      "當前 session 已啟用 Discord MCP。所有回覆必須透過 Discord MCP 的 reply 工具發送回 Discord 頻道。",
+      "不要只在本地輸出文字——使用者在 Discord 端等待你的回覆。",
+    ].join("\n");
+  },
+};
+
 const memoryRulesModule: PromptModule = {
   name: "memory-rules",
   priority: 60,
@@ -153,6 +170,7 @@ const builtinModules: PromptModule[] = [
   codingRulesModule,
   gitRulesModule,
   outputFormatModule,
+  discordReplyModule,
   memoryRulesModule,
 ];
 
@@ -177,7 +195,9 @@ export interface AssembleOpts extends PromptContext {
  * 按 priority 排序，依序呼叫每個模組的 build()，串接為一個字串。
  */
 export function assembleSystemPrompt(opts: AssembleOpts): string {
+  const disabledModules = config.promptAssembler?.disabledModules ?? [];
   const allModules = [...builtinModules, ...customModules]
+    .filter(m => !disabledModules.includes(m.name))
     .sort((a, b) => a.priority - b.priority);
 
   const activeModules = opts.moduleFilter

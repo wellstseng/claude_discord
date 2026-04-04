@@ -41,6 +41,7 @@ import { initSubagentRegistry } from "./subagent-registry.js";
 import { initToolLogStore, getToolLogStore } from "./tool-log-store.js";
 import { initInboundHistoryStore } from "../discord/inbound-history.js";
 import { initSessionSnapshotStore, getSessionSnapshotStore } from "./session-snapshot.js";
+import { initCollabConflictDetector, connectToEventBus as connectCollabToEventBus } from "../safety/collab-conflict.js";
 
 // ── 子系統實例（module-level singleton） ─────────────────────────────────────
 
@@ -225,6 +226,15 @@ export async function initPlatform(
   // ── 9.65 Subagent Registry ─────────────────────────────────────────────────
   initSubagentRegistry(config.subagents?.maxConcurrent ?? 3);
   log.info("[platform] SubagentRegistry 初始化完成");
+
+  // ── 9.66 Collab Conflict Detector ─────────────────────────────────────────
+  if (config.safety?.collabConflict?.enabled !== false) {
+    initCollabConflictDetector({
+      windowMs: config.safety?.collabConflict?.windowMs ?? 300_000,
+    });
+    connectCollabToEventBus(eventBus as unknown as { on: (event: string, listener: (...args: unknown[]) => void) => void });
+    log.info("[platform] CollabConflictDetector 初始化完成");
+  }
 
   // ── 9.7 Tool Log Store + Trace Store ────────────────────────────────────────
   const auditDataDir = join(wsDir, "data");

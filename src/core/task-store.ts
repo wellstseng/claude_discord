@@ -136,3 +136,13 @@ export function getTaskStore(sessionKey: string): TaskStore {
 export function deleteTaskStore(sessionKey: string): void {
   stores.delete(sessionKey);
 }
+
+/** 列出所有 session 的 task（供 dashboard 使用） */
+export function listAllTasks(): Array<{ sessionKey: string; tasks: Task[] }> {
+  const result: Array<{ sessionKey: string; tasks: Task[] }> = [];
+  for (const [key, store] of stores) {
+    const tasks = store.list();
+    if (tasks.length > 0) result.push({ sessionKey: key, tasks });
+  }
+  return result;
+}

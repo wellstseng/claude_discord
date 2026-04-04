@@ -395,6 +395,7 @@ label.cfg-toggle { min-width: 36px; }
   <div class="tab" onclick="switchTab('ops',this)">操作</div>
   <div class="tab" onclick="switchTab('cron',this)">排程</div>
   <div class="tab" onclick="switchTab('traces',this)">Traces</div>
+  <div class="tab" onclick="switchTab('tasks',this)">Tasks</div>
   <div class="tab" onclick="switchTab('auth',this)">Auth Profiles</div>
   <div class="tab" onclick="switchTab('config',this)">Config</div>
 </div>
@@ -501,6 +502,16 @@ label.cfg-toggle { min-width: 36px; }
     <button class="btn btn-sm" style="float:right" onclick="document.getElementById('trace-detail-card').style.display='none'">✕ 關閉</button>
   </h2>
   <div id="trace-detail"></div>
+</div>
+
+<!-- Tasks -->
+<div id="pane-tasks" class="pane">
+  <div class="card">
+    <h2>Tasks
+      <button class="btn btn-sm" style="float:right" onclick="loadTasks()">↻ 重新載入</button>
+    </h2>
+    <div id="tasks-list" style="font-size:0.82rem;color:#ccc">載入中...</div>
+  </div>
 </div>
 
 <!-- Auth Profiles & Models -->
@@ -633,6 +644,7 @@ function switchTab(id, el) {
   if (id === 'logs') connectLogStream();
   if (id !== 'logs') disconnectLogStream();
   if (id === 'ops') { loadSubagents(); }
+  if (id === 'tasks') { loadTasks(); }
   if (id === 'auth') { loadModelsConfig(); loadAuthProfiles(); }
   if (id === 'traces') { loadTraces(); _traceAutoRefresh = setInterval(loadTraces, 10000); }
   if (id === 'cron') loadCron();
@@ -1594,6 +1606,31 @@ async function removeRoutingEntry(mapKey, entryKey) {
   } catch(e) { msg.className = 'msg err'; msg.textContent = '失敗：' + e; }
 }
 
+// ── Tasks ────────────────────────────────────────────────────────────────────
+async function loadTasks() {
+  try {
+    const d = await authFetch('/api/tasks').then(r => r.json());
+    const el = document.getElementById('tasks-list');
+    if (!d.sessions?.length) { el.innerHTML = '<p style="color:#888">目前無任務</p>'; return; }
+    const statusIcon = { pending: '⏳', in_progress: '🔄', completed: '✅' };
+    let html = '';
+    for (const sess of d.sessions) {
+      html += '<div style="margin-bottom:12px"><strong style="color:#4fc3f7">Session: ' + sess.sessionKey + '</strong>';
+      html += '<table class="tbl" style="margin-top:4px"><thead><tr><th>#</th><th>狀態</th><th>主題</th><th>說明</th><th>依賴</th><th>更新時間</th></tr></thead><tbody>';
+      for (const t of sess.tasks) {
+        const icon = statusIcon[t.status] || '❓';
+        const blocked = t.blockedBy?.length ? 'blocked by: ' + t.blockedBy.join(', ') : '';
+        const blocks = t.blocks?.length ? 'blocks: ' + t.blocks.join(', ') : '';
+        const deps = [blocked, blocks].filter(Boolean).join(' | ') || '-';
+        const updated = new Date(t.updatedAt).toLocaleTimeString();
+        html += '<tr><td>' + t.id + '</td><td>' + icon + ' ' + t.status + '</td><td>' + (t.subject||'') + '</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">' + (t.description||'-') + '</td><td style="font-size:0.75rem">' + deps + '</td><td>' + updated + '</td></tr>';
+      }
+      html += '</tbody></table></div>';
+    }
+    el.innerHTML = html;
+  } catch (err) { document.getElementById('tasks-list').innerHTML = '<p style="color:#f44">載入失敗: ' + err + '</p>'; }
+}
+
 // ── Auth Profiles ────────────────────────────────────────────────────────────
 async function loadAuthProfiles() {
   try {
@@ -2192,6 +2229,21 @@ export class DashboardServer {
             }
           })();
         });
+        return;
+      }
+
+      // GET /api/tasks — 列出所有 session 的 task
+      if (url === "/api/tasks" && method === "GET") {
+        void (async () => {
+          try {
+            const { listAllTasks } = await import("./task-store.js");
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ sessions: listAllTasks() }));
+          } catch (err) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ sessions: [], error: String(err) }));
+          }
+        })();
         return;
       }
 

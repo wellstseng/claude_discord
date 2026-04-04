@@ -517,7 +517,8 @@ function runBeforeToolCall(
 
   // 5. Reversibility Assessment
   const reversibility = assessReversibility(call.name, call.params);
-  if (reversibility.score >= 2) {
+  const reversibilityThreshold = config.safety?.reversibility?.threshold ?? 2;
+  if (reversibility.score >= reversibilityThreshold) {
     return { blocked: false, params: call.params, warning: reversibility.warning };
   }
 

@@ -391,6 +391,24 @@ export interface SafetyConfig {
     /** 無規則匹配時的預設行為（預設 true = 允許） */
     defaultAllow?: boolean;
   };
+  /** 協作衝突偵測 */
+  collabConflict?: {
+    /** 是否啟用（預設 true） */
+    enabled: boolean;
+    /** 偵測窗口毫秒（預設 300000 = 5 分鐘） */
+    windowMs: number;
+  };
+  /** 可逆性評估 */
+  reversibility?: {
+    /** 觸發警告的分數門檻 0-3（預設 2，>= 此值觸發） */
+    threshold: number;
+  };
+}
+
+/** Prompt Assembler 設定 */
+export interface PromptAssemblerConfig {
+  /** 要停用的模組名稱（如 ["memory-rules"]） */
+  disabledModules?: string[];
 }
 
 /** 工作流設定 */
@@ -579,6 +597,8 @@ export interface BridgeConfig {
     /** 單一 tool 執行超時毫秒（預設 30000，0 = 無限制） */
     toolTimeoutMs?: number;
   };
+  /** Prompt Assembler 模組設定 */
+  promptAssembler?: PromptAssemblerConfig;
   /**
    * 外部 MCP Server 設定表。
    * 每個 server 以 key 作為 serverName，tools 命名為 mcp_{serverName}_{toolName}。
@@ -695,6 +715,7 @@ interface RawConfig {
   contextEngineering?: ContextEngineeringConfig;
   inboundHistory?: InboundHistoryConfig;
   subagents?: Partial<SubagentsConfig>;
+  promptAssembler?: PromptAssemblerConfig;
   mcpServers?: Record<string, {
     command: string;
     args?: string[];
@@ -1161,6 +1182,7 @@ function loadConfig(): BridgeConfig {
       defaultTimeoutMs:  raw.subagents.defaultTimeoutMs ?? 120_000,
       defaultKeepSession: raw.subagents.defaultKeepSession ?? false,
     } : undefined,
+    promptAssembler: raw.promptAssembler,
     mcpServers: raw.mcpServers,
   };
 }

@@ -97,6 +97,28 @@
     "circuitBreaker": { "threshold": 3, "cooldownMs": 60000 }
   },
 
+  // ── Safety ──────────────────────────────────────────────────────
+  "safety": {
+    "enabled": true,
+    "selfProtect": true,
+    "bash": { "blacklist": ["..."] },
+    "filesystem": { "protectedPaths": [], "credentialPatterns": [] },
+    "execApproval": { "enabled": false, "dmUserId": "", "timeoutMs": 60000, "allowedPatterns": [] },
+    "collabConflict": {          // Sprint 4：協作衝突偵測
+      "enabled": true,           // 預設 true
+      "windowMs": 300000         // 偵測窗口（毫秒），預設 5 分鐘
+    },
+    "reversibility": {           // Sprint 4：可逆性評估
+      "threshold": 2             // 0-3，>= 此值觸發警告（預設 2）
+    },
+    "toolPermissions": { "defaultAllow": false }
+  },
+
+  // ── Prompt Assembler ──────────────────────────────────────────
+  "promptAssembler": {           // Sprint 3：system prompt 模組控制
+    "disabledModules": []        // 要停用的模組名稱
+  },
+
   // ── 排程（job 定義在 data/cron-jobs.json）──────────────────────
   "cron": {
     "enabled": false,            // 是否啟用排程服務，預設 false
@@ -127,6 +149,22 @@
 | guild `allowFrom` | `[]` | 不限制 |
 | channel `autoThread` | `false` | 每則訊息建 Thread |
 | provider `mode` | auto | claude 認證模式：token（OAuth）/ api（API key） |
+| `safety.collabConflict.enabled` | `true` | 協作衝突偵測 |
+| `safety.collabConflict.windowMs` | `300000` | 偵測窗口 5 分鐘 |
+| `safety.reversibility.threshold` | `2` | 可逆性警告門檻（0-3） |
+| `promptAssembler.disabledModules` | `[]` | 停用的 prompt 模組 |
+
+### Prompt Assembler 可用模組
+
+| 模組名 | 優先序 | 說明 |
+|--------|--------|------|
+| `identity` | 10 | CatClaw 身份 + 多人場景說話者資訊 |
+| `tools-usage` | 20 | 工具使用規則（read_file/edit_file 等） |
+| `coding-rules` | 30 | 行為約束 / 精密模式載入 coding-discipline.md |
+| `git-rules` | 40 | Git 安全協定 |
+| `output-format` | 50 | 輸出風格（精準、繁中、無廢話） |
+| `discord-reply` | 55 | Discord MCP 啟用時，強制回覆回 Discord |
+| `memory-rules` | 60 | 記憶系統使用規則 |
 
 ---
 

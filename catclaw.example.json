@@ -227,6 +227,34 @@
     "pairingExpireMinutes": 5
   },
 
+  // ── Safety（Sprint 4 新增）────────────────────────────────────────
+  // "safety": {
+  //   "enabled": true,
+  //   "selfProtect": true,
+  //   "bash": { "blacklist": ["rm\\s+(-rf?)\\s+[\\/~]"] },
+  //   "filesystem": { "protectedPaths": [], "credentialPatterns": [] },
+  //   "execApproval": { "enabled": false, "dmUserId": "", "timeoutMs": 60000 },
+  //   // 協作衝突偵測：多人同頻道同時編輯同一檔案時發出警告
+  //   "collabConflict": {
+  //     "enabled": true,       // 是否啟用，預設 true
+  //     "windowMs": 300000     // 偵測窗口毫秒，預設 5 分鐘
+  //   },
+  //   // 可逆性評估：tool 操作風險評分，超過門檻觸發警告
+  //   "reversibility": {
+  //     "threshold": 2         // 0-3，>= 此值觸發警告（預設 2）
+  //   },
+  //   "toolPermissions": { "defaultAllow": false }
+  // },
+
+  // ── Prompt Assembler（Sprint 3 新增）─────────────────────────────
+  // 控制 system prompt 模組化組裝
+  // "promptAssembler": {
+  //   // 要停用的內建模組名稱
+  //   // 可用模組：identity / tools-usage / coding-rules / git-rules /
+  //   //          output-format / discord-reply / memory-rules
+  //   "disabledModules": []
+  // },
+
   // ── 排程 ─────────────────────────────────────────────────────────
   // jobs 亦可寫在 data/cron-jobs.json，此處 jobs 陣列優先
   "cron": {
