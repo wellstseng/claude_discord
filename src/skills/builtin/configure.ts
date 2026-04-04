@@ -10,8 +10,9 @@
  *   /configure models                 — 列出 pi-ai 支援的 anthropic models
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { homedir } from "node:os";
 import type { Skill, SkillContext, SkillResult } from "../types.js";
 import { config } from "../../core/config.js";
 import { log } from "../../logger.js";
@@ -175,6 +176,71 @@ async function handleListModels(): Promise<SkillResult> {
   }
 }
 
+// ── Codex OAuth 登入 ─────────────────────────────────────────────────────────
+
+const CODEX_AUTH_PATH = resolve(homedir(), ".codex/auth.json");
+
+async function handleLoginCodex(ctx: SkillContext): Promise<SkillResult> {
+  const { message } = ctx;
+
+  // 確保 channel 可發送訊息
+  if (!("send" in message.channel)) {
+    return { text: "❌ 此頻道不支援發送訊息", isError: true };
+  }
+  const channel = message.channel as import("discord.js").TextChannel;
+
+  try {
+    // 動態 import pi-ai oauth（避免頂層 import 影響啟動）
+    const { loginOpenAICodex } = await import("@mariozechner/pi-ai/oauth");
+
+    // 通知使用者 OAuth 流程開始
+    await channel.send("正在啟動 OpenAI Codex OAuth 登入流程...\n`localhost:1455` callback server 已就緒");
+
+    const creds = await loginOpenAICodex({
+      onAuth: ({ url }) => {
+        channel.send(
+          `請在瀏覽器開啟此網址登入：\n${url}\n\n` +
+          `登入後瀏覽器會自動跳轉回 localhost:1455 完成認證。\n` +
+          `若自動跳轉失敗，請將重導向 URL 貼回此頻道。`
+        );
+      },
+      onPrompt: async (prompt) => {
+        await channel.send(`自動回呼失敗，請手動貼上：\n${prompt.message}`);
+
+        const collected = await channel.awaitMessages({
+          filter: (m: import("discord.js").Message) => m.author.id === message.author.id,
+          max: 1,
+          time: 60_000,
+        });
+        const reply = collected.first()?.content?.trim();
+        if (!reply) throw new Error("等待回覆逾時");
+        return reply;
+      },
+      onProgress: (msg) => {
+        log.debug(`[codex-oauth] ${msg}`);
+      },
+    });
+
+    // 轉換格式並寫入 ~/.codex/auth.json
+    const authJson = {
+      access_token: creds.access,
+      refresh_token: creds.refresh,
+      expires_at: Math.floor(creds.expires / 1000),  // epoch ms → epoch seconds
+      token_type: "Bearer",
+    };
+
+    mkdirSync(dirname(CODEX_AUTH_PATH), { recursive: true });
+    writeFileSync(CODEX_AUTH_PATH, JSON.stringify(authJson, null, 2), "utf-8");
+    log.info(`[configure] Codex OAuth credentials saved to ${CODEX_AUTH_PATH}`);
+
+    return { text: `✅ Codex OAuth 登入成功！\nToken 已存入 \`${CODEX_AUTH_PATH}\`\n到期時間：${new Date(creds.expires).toLocaleString("zh-TW")}` };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error(`[configure] Codex OAuth login failed: ${msg}`);
+    return { text: `❌ Codex OAuth 登入失敗：${msg}`, isError: true };
+  }
+}
+
 // ── Skill 定義 ────────────────────────────────────────────────────────────────
 
 export const skill: Skill = {
@@ -199,6 +265,13 @@ export const skill: Skill = {
         return handleSetProvider(rest);
       case "models":
         return handleListModels();
+      case "login": {
+        const target = rest.trim().toLowerCase();
+        if (target === "codex" || target === "openai") {
+          return handleLoginCodex(ctx);
+        }
+        return { text: "❌ 用法：`/configure login codex`\n目前僅支援 Codex OAuth 登入", isError: true };
+      }
       default:
         return {
           text: [
@@ -206,7 +279,8 @@ export const skill: Skill = {
             "• `show` — 顯示目前設定",
             "• `model <id> [--provider <id>]` — 更改 model",
             "• `provider <id>` — 切換預設 provider",
-            "• `models` — 列出 pi-ai 支援的 Anthropic 模型",
+            "• `models` — 列出可用模型",
+            "• `login codex` — OpenAI Codex OAuth 登入",
           ].join("\n"),
         };
     }
