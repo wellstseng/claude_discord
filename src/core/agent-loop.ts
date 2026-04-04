@@ -791,6 +791,17 @@ export async function* agentLoop(
     }
   }
 
+  // ── 4e. Trace: Context Snapshot（完整 system prompt + messages）────────────
+  if (trace) {
+    const ceApplied = (contextEngine?.lastBuildBreakdown?.strategiesApplied?.length ?? 0) > 0;
+    trace.recordContextSnapshot({
+      systemPrompt,
+      messagesBeforeCE: ceApplied ? rawHistory as unknown[] : undefined,
+      messagesAfterCE: messages as unknown[],
+      ceApplied,
+    });
+  }
+
   // ── 5. Turn abort signal ───────────────────────────────────────────────────
   const controller = new AbortController();
   if (opts.signal) {

@@ -35,7 +35,7 @@ import { initMemoryEngine, type MemoryEngine } from "../memory/engine.js";
 import { initOllamaClient } from "../ollama/client.js";
 import { initRateLimiter, getRateLimiter, type RateLimiter } from "./rate-limiter.js";
 import { renameSessions } from "../migration/rename-sessions.js";
-import { initTraceStore, getTraceStore } from "./message-trace.js";
+import { initTraceStore, getTraceStore, getTraceContextStore } from "./message-trace.js";
 import { initContextEngine } from "./context-engine.js";
 import { initSubagentRegistry } from "./subagent-registry.js";
 import { initToolLogStore, getToolLogStore } from "./tool-log-store.js";
@@ -248,6 +248,7 @@ export async function initPlatform(
     try { getToolLogStore()?.cleanup(); } catch { /* 靜默 */ }
     try { getSessionSnapshotStore()?.cleanup(); } catch { /* 靜默 */ }
     try { getTraceStore()?.cleanup(); } catch { /* 靜默 */ }
+    try { getTraceContextStore()?.cleanup(); } catch { /* 靜默 */ }
     log.debug("[platform] 日誌滾動清理完成");
   }
   runDataCleanup();

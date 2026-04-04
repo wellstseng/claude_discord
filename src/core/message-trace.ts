@@ -11,7 +11,7 @@
  *   3. agent-loop 結束 → trace.finalize() → TraceStore 持久化
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
@@ -170,6 +170,9 @@ export interface MessageTraceEntry {
     current: number;
   };
   toolDurations?: Record<string, number[]>;
+
+  /** 是否有對應的 context snapshot（lazy-load via /api/traces/:id/context） */
+  hasContextSnapshot?: boolean;
 
   error?: string;
   status: "completed" | "aborted" | "error";
@@ -433,6 +436,29 @@ export class MessageTrace {
     };
   }
 
+  // ── Context Snapshot（完整 system prompt + messages） ──────────────────────
+
+  /** 記錄完整 context snapshot（獨立檔案，lazy-load） */
+  recordContextSnapshot(opts: {
+    systemPrompt: string;
+    messagesBeforeCE?: unknown[];
+    messagesAfterCE: unknown[];
+    ceApplied: boolean;
+  }): void {
+    const store = getTraceContextStore();
+    if (!store) return;
+    store.save({
+      traceId: this.traceId,
+      ts: this.entry.ts,
+      systemPrompt: opts.systemPrompt,
+      messagesBeforeCE: opts.messagesBeforeCE,
+      messagesAfterCE: opts.messagesAfterCE,
+      ceApplied: opts.ceApplied,
+    });
+    // 標記 trace entry 有 context snapshot 可用
+    this.entry.hasContextSnapshot = true;
+  }
+
   // ── Error ─────────────────────────────────────────────────────────────────
 
   recordError(error: string): void {
@@ -574,15 +600,92 @@ export class TraceStore {
   }
 }
 
+// ── TraceContextStore（context snapshot 持久化）─────────────────────────────
+
+/** Context snapshot 記錄（存獨立 JSON，避免 JSONL 過度膨脹） */
+export interface TraceContextSnapshot {
+  traceId: string;
+  ts: string;
+  systemPrompt: string;
+  /** CE 壓縮前的 messages（僅在 CE 觸發時有值） */
+  messagesBeforeCE?: unknown[];
+  /** 最終送入 LLM 的 messages */
+  messagesAfterCE: unknown[];
+  /** 是否有 CE 壓縮 */
+  ceApplied: boolean;
+}
+
+export class TraceContextStore {
+  private dir: string;
+
+  constructor(dataDir: string) {
+    this.dir = resolve(
+      dataDir.startsWith("~") ? dataDir.replace("~", homedir()) : dataDir,
+      "trace-contexts",
+    );
+    mkdirSync(this.dir, { recursive: true });
+  }
+
+  save(snapshot: TraceContextSnapshot): void {
+    try {
+      const datePrefix = snapshot.ts.slice(0, 10);
+      const subDir = join(this.dir, datePrefix);
+      mkdirSync(subDir, { recursive: true });
+      writeFileSync(join(subDir, `${snapshot.traceId}.json`), JSON.stringify(snapshot), "utf-8");
+    } catch (err) {
+      log.warn(`[trace-context] 寫入失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  get(traceId: string): TraceContextSnapshot | null {
+    try {
+      // 搜尋所有日期子目錄
+      const dirs = readdirSync(this.dir).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse();
+      for (const d of dirs) {
+        const filePath = join(this.dir, d, `${traceId}.json`);
+        if (existsSync(filePath)) {
+          return JSON.parse(readFileSync(filePath, "utf-8")) as TraceContextSnapshot;
+        }
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  /** 清理過期檔案（與 TraceStore 同步 ROLLING_DAYS） */
+  cleanup(): void {
+    try {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - ROLLING_DAYS);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+      const dirs = readdirSync(this.dir).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+      for (const d of dirs) {
+        if (d < cutoffStr) {
+          const subDir = join(this.dir, d);
+          for (const f of readdirSync(subDir)) unlinkSync(join(subDir, f));
+          try { rmdirSync(subDir); } catch { /* non-empty or already gone */ }
+          log.debug(`[trace-context] 清理過期 ${d}`);
+        }
+      }
+    } catch { /* ignore */ }
+  }
+}
+
 // ── 全域單例 ─────────────────────────────────────────────────────────────────
 
 let _traceStore: TraceStore | null = null;
+let _traceContextStore: TraceContextStore | null = null;
 
 export function initTraceStore(dataDir: string): TraceStore {
   _traceStore = new TraceStore(dataDir);
+  _traceContextStore = new TraceContextStore(dataDir);
   return _traceStore;
 }
 
 export function getTraceStore(): TraceStore | null {
   return _traceStore;
+}
+
+export function getTraceContextStore(): TraceContextStore | null {
+  return _traceContextStore;
 }

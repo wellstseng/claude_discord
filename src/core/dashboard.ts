@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, readdirSync, unlinkSync, renameSync, exist
 import { dirname, basename, join, join as pathJoin, resolve } from "node:path";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
-import { getTraceStore, type MessageTraceEntry } from "./message-trace.js";
+import { getTraceStore, getTraceContextStore, type MessageTraceEntry } from "./message-trace.js";
 import { getSessionManager } from "./session.js";
 import { getContextEngine } from "./context-engine.js";
 import { getInboundHistoryStore } from "../discord/inbound-history.js";
@@ -1828,6 +1828,63 @@ async function loadTraces() {
   } catch (e) { el.innerHTML = '<div style="color:var(--red2)">載入失敗：' + e + '</div>'; }
 }
 
+// ── Trace Context Helpers ────────────────────────────────────────────────────
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/** 展開/收合 toggle */
+function toggleCollapse(btn, targetId) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  const hidden = el.style.display === 'none';
+  el.style.display = hidden ? 'block' : 'none';
+  btn.textContent = btn.textContent.replace(hidden ? '▶' : '▼', hidden ? '▼' : '▶');
+}
+
+/** 渲染 messages 陣列為 HTML（truncated per-message） */
+function renderMessages(msgs, containerId) {
+  if (!msgs || msgs.length === 0) return '<div style="color:var(--fg2)">（空）</div>';
+  let html = '<div id="' + containerId + '" style="max-height:400px;overflow-y:auto;font-size:0.78rem">';
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    const role = m.role ?? '?';
+    const roleColor = role === 'assistant' ? 'var(--accent)' : role === 'user' ? 'var(--green2)' : 'var(--fg2)';
+    let contentText = '';
+    if (typeof m.content === 'string') {
+      contentText = m.content;
+    } else if (Array.isArray(m.content)) {
+      contentText = m.content.map(b => {
+        if (b.type === 'text') return b.text ?? '';
+        if (b.type === 'tool_use') return '[tool_use: ' + (b.name ?? b.id ?? '?') + ']';
+        if (b.type === 'tool_result') return '[tool_result: ' + (b.tool_use_id ?? '?') + ']';
+        return '[' + (b.type ?? '?') + ']';
+      }).join(' ');
+    }
+    const preview = contentText.length > 300 ? contentText.slice(0, 300) + '…' : contentText;
+    const msgId = containerId + '_msg_' + i;
+    html += '<div style="border-top:1px solid var(--border);padding:4px 0">';
+    html += '<span style="color:' + roleColor + ';font-weight:bold">[' + role + ']</span> ';
+    html += '<span style="color:var(--fg2)" id="' + msgId + '_short">' + esc(preview) + '</span>';
+    if (contentText.length > 300) {
+      html += '<span id="' + msgId + '_full" style="display:none;color:var(--fg2);white-space:pre-wrap;word-break:break-all">' + esc(contentText) + '</span>';
+      html += ' <a href="#" style="color:var(--accent);font-size:0.72rem" onclick="event.preventDefault();var s=document.getElementById(\\'' + msgId + '_short\\'),f=document.getElementById(\\'' + msgId + '_full\\');if(f.style.display===\\'none\\'){f.style.display=\\'inline\\';s.style.display=\\'none\\';this.textContent=\\'收合\\'}else{f.style.display=\\'none\\';s.style.display=\\'inline\\';this.textContent=\\'展開全文\\'}">展開全文</a>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+/** 載入並渲染 context snapshot */
+let _ctxCache = {};
+async function loadTraceContext(traceId) {
+  if (_ctxCache[traceId]) return _ctxCache[traceId];
+  const r = await authFetch('/api/traces/' + traceId + '/context');
+  if (!r.ok) return null;
+  const data = await r.json();
+  _ctxCache[traceId] = data;
+  return data;
+}
+
 async function showTraceDetail(traceId) {
   const card = document.getElementById('trace-detail-card');
   const el = document.getElementById('trace-detail');
@@ -1844,7 +1901,7 @@ async function showTraceDetail(traceId) {
     html += '<div class="card" style="background:var(--bg4)">';
     html += '<h3 style="color:var(--accent);margin-bottom:6px">① Inbound</h3>';
     html += '<div style="font-size:0.82rem">';
-    html += '<div>Text: <span style="color:var(--fg2)">' + (t.inbound?.textPreview ?? '-') + '</span></div>';
+    html += '<div>Text: <span style="color:var(--fg2)">' + esc(t.inbound?.textPreview ?? '-') + '</span></div>';
     html += '<div>Chars: ' + (t.inbound?.charCount ?? 0) + ' | Attachments: ' + (t.inbound?.attachments ?? 0) + '</div>';
     if (t.inbound?.debounceMs) html += '<div>Debounce: ' + t.inbound.debounceMs + 'ms</div>';
     if (t.inbound?.interruptedPrevious) html += '<div style="color:var(--warn)">⚠ Interrupted previous turn</div>';
@@ -1884,7 +1941,6 @@ async function showTraceDetail(traceId) {
     if (t.llmCalls?.length > 0) {
       for (const call of t.llmCalls) {
         html += '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:0.82rem">';
-        // 第一行：Loop # + model + 用途摘要
         const toolNames = (call.toolCalls ?? []).map(tc => tc.name);
         const uniqueTools = [...new Set(toolNames)];
         const toolSummary = uniqueTools.length > 0 ? uniqueTools.slice(0, 3).join(', ') + (uniqueTools.length > 3 ? ' +' + (uniqueTools.length - 3) : '') : '';
@@ -1895,7 +1951,6 @@ async function showTraceDetail(traceId) {
         html += '<span><b>Loop #' + call.iteration + '</b> — ' + (call.model ?? '?') + '<span style="color:var(--fg2)">' + purpose + '</span></span>';
         html += '<span style="color:var(--fg2)">' + (call.durationMs/1000).toFixed(1) + 's</span>';
         html += '</div>';
-        // 第二行：tokens 緊湊排列
         const effIn = call.inputTokens + (call.cacheRead ?? 0) + (call.cacheWrite ?? 0);
         html += '<div style="display:flex;gap:12px;margin-top:2px;color:var(--fg2)">';
         html += '<span>↑ ' + effIn.toLocaleString() + ' <span style="font-size:0.75rem">(new:' + call.inputTokens.toLocaleString() + ')</span></span>';
@@ -1912,9 +1967,9 @@ async function showTraceDetail(traceId) {
             html += '<div style="padding:2px 0;border-top:1px solid var(--border)">';
             html += '<span style="color:' + tcColor + '">🔧 ' + tc.name + '</span>';
             html += ' <span style="color:var(--fg2)">' + tc.durationMs + 'ms</span>';
-            if (tc.paramsPreview) html += ' <span style="color:var(--accent2);font-size:0.75rem">' + tc.paramsPreview.replace(/</g,'&lt;').slice(0, 80) + '</span>';
-            if (tc.error) html += ' <span style="color:var(--red2)">❌ ' + tc.error.slice(0, 60) + '</span>';
-            else if (tc.resultPreview) html += ' <span style="color:var(--fg3);font-size:0.75rem">→ ' + tc.resultPreview.replace(/</g,'&lt;').slice(0, 60) + '</span>';
+            if (tc.paramsPreview) html += ' <span style="color:var(--accent2);font-size:0.75rem">' + esc(tc.paramsPreview).slice(0, 80) + '</span>';
+            if (tc.error) html += ' <span style="color:var(--red2)">❌ ' + esc(tc.error).slice(0, 60) + '</span>';
+            else if (tc.resultPreview) html += ' <span style="color:var(--fg3);font-size:0.75rem">→ ' + esc(tc.resultPreview).slice(0, 60) + '</span>';
             html += '</div>';
           }
           html += '</div>';
@@ -1936,7 +1991,7 @@ async function showTraceDetail(traceId) {
         html += '<div style="padding:2px 0;border-top:1px solid var(--border);font-size:0.82rem">';
         html += '<span style="color:var(--fg2)">' + weTs + '</span> ';
         html += '<span style="color:' + typeColor + ';font-weight:bold">' + we.type + '</span> ';
-        html += '<span style="color:var(--fg2)">' + (we.detail || '').replace(/</g,'&lt;') + '</span>';
+        html += '<span style="color:var(--fg2)">' + esc(we.detail || '') + '</span>';
         html += '</div>';
       }
       html += '</div>';
@@ -1951,8 +2006,8 @@ async function showTraceDetail(traceId) {
     if (t.contextEngineering) {
       html += '<div style="font-size:0.82rem">';
       html += '<div>Strategies: ' + t.contextEngineering.strategiesApplied.join(', ') + '</div>';
-      html += '<div>Before: ' + t.contextEngineering.tokensBeforeCE + ' → After: ' + t.contextEngineering.tokensAfterCE + '</div>';
-      html += '<div style="color:var(--green2)">Saved: ' + t.contextEngineering.tokensSaved + ' tokens</div>';
+      html += '<div>Before: ' + t.contextEngineering.tokensBeforeCE.toLocaleString() + ' → After: ' + t.contextEngineering.tokensAfterCE.toLocaleString() + '</div>';
+      html += '<div style="color:var(--green2)">Saved: ' + t.contextEngineering.tokensSaved.toLocaleString() + ' tokens</div>';
       html += '</div>';
     } else { html += '<div style="color:var(--fg2);font-size:0.82rem">Not triggered</div>'; }
     html += '</div>';
@@ -1986,12 +2041,21 @@ async function showTraceDetail(traceId) {
     if (t.response) {
       html += '<div style="font-size:0.82rem">';
       html += '<div>Chars: ' + t.response.charCount + ' | Duration: ' + (t.response.durationMs/1000).toFixed(1) + 's</div>';
-      html += '<div style="color:var(--fg2);margin-top:4px">' + (t.response.textPreview ?? '') + '</div>';
+      html += '<div style="color:var(--fg2);margin-top:4px">' + esc(t.response.textPreview ?? '') + '</div>';
       html += '</div>';
     } else { html += '<div style="color:var(--fg2);font-size:0.82rem">N/A</div>'; }
     html += '</div>';
 
     html += '</div>'; // close grid
+
+    // ── Context Snapshot（lazy-load 展開區）────────────────────────────────
+    if (t.hasContextSnapshot) {
+      html += '<div class="card" style="background:var(--bg4);margin-top:12px;border:1px solid var(--accent)">';
+      html += '<h3 style="color:var(--accent);margin-bottom:6px;cursor:pointer" onclick="loadAndShowContext(\\'' + traceId + '\\')">';
+      html += '📋 Context Snapshot <span style="font-size:0.78rem;color:var(--fg2)">（點擊載入完整 system prompt + messages）</span></h3>';
+      html += '<div id="ctx-snapshot-' + traceId + '" style="display:none"></div>';
+      html += '</div>';
+    }
 
     // Summary bar
     html += '<div style="margin-top:12px;padding:8px;background:var(--bg3);border-radius:6px;font-size:0.82rem;display:flex;gap:16px;flex-wrap:wrap">';
@@ -2003,11 +2067,66 @@ async function showTraceDetail(traceId) {
     html += '<span>Tools: ' + (t.totalToolCalls ?? 0) + '</span>';
     if (t.estimatedCostUsd) html += '<span style="color:var(--warn)">💰 $' + t.estimatedCostUsd.toFixed(4) + '</span>';
     html += '<span>Status: ' + (t.status === 'completed' ? '✅' : t.status === 'aborted' ? '⏹' : '❌') + ' ' + t.status + '</span>';
-    if (t.error) html += '<span style="color:var(--red2)">Error: ' + t.error + '</span>';
+    if (t.error) html += '<span style="color:var(--red2)">Error: ' + esc(t.error) + '</span>';
     html += '</div>';
 
     el.innerHTML = html;
   } catch (e) { el.innerHTML = '<div style="color:var(--red2)">載入失敗：' + e + '</div>'; }
+}
+
+/** 載入並渲染 context snapshot（lazy） */
+async function loadAndShowContext(traceId) {
+  const container = document.getElementById('ctx-snapshot-' + traceId);
+  if (!container) return;
+  if (container.style.display === 'block') { container.style.display = 'none'; return; }
+  container.style.display = 'block';
+  container.innerHTML = '<div style="color:var(--fg2)">載入 context snapshot…</div>';
+  try {
+    const ctx = await loadTraceContext(traceId);
+    if (!ctx) { container.innerHTML = '<div style="color:var(--fg2)">Context snapshot 不存在或已過期</div>'; return; }
+    let html = '';
+
+    // System Prompt
+    const spLen = (ctx.systemPrompt ?? '').length;
+    const spTokens = Math.ceil(spLen / 4);
+    html += '<div style="margin-bottom:12px">';
+    html += '<h4 style="color:var(--accent2);margin-bottom:4px;cursor:pointer" onclick="var e=document.getElementById(\\'ctx-sp-' + traceId + '\\');e.style.display=e.style.display===\\'none\\'?\\'block\\':\\'none\\'">';
+    html += '▶ System Prompt <span style="font-size:0.78rem;color:var(--fg2)">(' + spLen.toLocaleString() + ' chars, ~' + spTokens.toLocaleString() + ' tokens)</span></h4>';
+    html += '<div id="ctx-sp-' + traceId + '" style="display:none;max-height:500px;overflow-y:auto;background:var(--bg3);padding:8px;border-radius:4px;font-size:0.75rem;white-space:pre-wrap;word-break:break-all;color:var(--fg2)">';
+    html += esc(ctx.systemPrompt ?? '');
+    html += '</div></div>';
+
+    // CE Comparison
+    if (ctx.ceApplied && ctx.messagesBeforeCE) {
+      html += '<div style="margin-bottom:12px;border:1px solid var(--warn);border-radius:6px;padding:8px">';
+      html += '<h4 style="color:var(--warn);margin-bottom:8px">📦 Context Engineering 壓縮對比</h4>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+
+      // Before CE
+      html += '<div>';
+      html += '<div style="font-size:0.78rem;color:var(--fg2);margin-bottom:4px"><b>壓縮前</b> (' + ctx.messagesBeforeCE.length + ' messages)</div>';
+      html += renderMessages(ctx.messagesBeforeCE, 'ctx-before-' + traceId);
+      html += '</div>';
+
+      // After CE
+      html += '<div>';
+      html += '<div style="font-size:0.78rem;color:var(--fg2);margin-bottom:4px"><b>壓縮後</b> (' + ctx.messagesAfterCE.length + ' messages)</div>';
+      html += renderMessages(ctx.messagesAfterCE, 'ctx-after-' + traceId);
+      html += '</div>';
+
+      html += '</div></div>';
+    } else {
+      // No CE — just show messages
+      html += '<div>';
+      html += '<h4 style="color:var(--accent2);margin-bottom:4px;cursor:pointer" onclick="var e=document.getElementById(\\'ctx-msgs-' + traceId + '\\');e.style.display=e.style.display===\\'none\\'?\\'block\\':\\'none\\'">';
+      html += '▶ Messages <span style="font-size:0.78rem;color:var(--fg2)">(' + (ctx.messagesAfterCE?.length ?? 0) + ' messages)</span></h4>';
+      html += '<div id="ctx-msgs-' + traceId + '" style="display:none">';
+      html += renderMessages(ctx.messagesAfterCE, 'ctx-msgs-inner-' + traceId);
+      html += '</div></div>';
+    }
+
+    container.innerHTML = html;
+  } catch (e) { container.innerHTML = '<div style="color:var(--red2)">載入失敗：' + e + '</div>'; }
 }
 
 // ── 初始化 ───────────────────────────────────────────────────────────────────
@@ -2704,6 +2823,18 @@ export class DashboardServer {
       if (url.startsWith("/api/traces") && method === "GET") {
         const traceStore = getTraceStore();
         if (!traceStore) { res.writeHead(500); res.end(JSON.stringify({ error: "TraceStore not initialized" })); return; }
+
+        // /api/traces/:traceId/context — context snapshot（lazy load）
+        const ctxMatch = url.match(/^\/api\/traces\/([a-f0-9-]+)\/context/);
+        if (ctxMatch) {
+          const ctxStore = getTraceContextStore();
+          if (!ctxStore) { res.writeHead(404); res.end(JSON.stringify({ error: "TraceContextStore not initialized" })); return; }
+          const snapshot = ctxStore.get(ctxMatch[1]!);
+          if (!snapshot) { res.writeHead(404); res.end(JSON.stringify({ error: "Context snapshot not found" })); return; }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(snapshot));
+          return;
+        }
 
         // /api/traces/:traceId — 單筆查詢
         const idMatch = url.match(/^\/api\/traces\/([a-f0-9-]+)/);
