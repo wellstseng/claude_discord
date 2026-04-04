@@ -14,14 +14,14 @@ import { MessageTrace } from "../../core/message-trace.js";
 
 export const tool: Tool = {
   name: "subagents",
-  description: "管理子 agent：list（列出）/ kill（終止）/ steer（轉向）/ wait（等待完成）/ status（查詢狀態）/ resume（喚醒已結束的持久 session）",
+  description: "管理子 agent：list / kill / steer（轉向 running agent）/ wait / status / resume（喚醒 keepSession agent）/ send_message（續接已完成的 agent，注入後續指令並背景執行）",
   tier: "standard",
   deferred: true,
   resultTokenCap: 500,
   parameters: {
     type: "object",
     properties: {
-      action:       { type: "string",  description: "list | kill | steer | wait | status | resume" },
+      action:       { type: "string",  description: "list | kill | steer | wait | status | resume | send_message" },
       runId:        { type: "string",  description: "目標 runId（kill/steer/wait 用；kill 省略 = kill all）" },
       message:      { type: "string",  description: "steer 時注入的訊息" },
       timeoutMs:    { type: "number",  description: "wait 最長等待毫秒（預設 60000）" },
@@ -165,12 +165,15 @@ export const tool: Tool = {
             }
             registry.complete(runId!, fullText, turns);
             log.info(`[subagents:resume] 完成 runId=${runId}`);
+            // EventBus 通知 parent
+            eventBus.emit("subagent:completed", record!.parentSessionKey, record!.runId, record!.label ?? record!.task.slice(0, 60), fullText);
             const { sendSubagentNotification } = await import("../../core/subagent-discord-bridge.js");
             await sendSubagentNotification(record!);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             registry.fail(runId!, msg);
             log.warn(`[subagents:resume] 失敗 runId=${runId} err=${msg}`);
+            eventBus.emit("subagent:failed", record!.parentSessionKey, record!.runId, record!.label ?? record!.task.slice(0, 60), msg);
           }
         }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
@@ -178,6 +181,34 @@ export const tool: Tool = {
         });
 
         return { result: { status: "resuming", runId: record.runId, childSessionKey: record.childSessionKey } };
+      }
+
+      case "send_message": {
+        // SendMessage 續接：對已完成（keepSession）的 child agent 發後續指令
+        // 與 resume 相同邏輯，但語意更直覺（Claude Code 的 SendMessage 概念）
+        if (!runId) return { error: "send_message 需要指定 runId" };
+        const msg = params["message"] ? String(params["message"]) : undefined;
+        if (!msg) return { error: "send_message 需要指定 message" };
+
+        const rec = registry.get(runId);
+        if (!rec) return { error: `找不到 runId：${runId}` };
+
+        // running → 用 steer 注入
+        if (rec.status === "running") {
+          const sessionManager = getPlatformSessionManager();
+          sessionManager.addMessages(rec.childSessionKey, [
+            { role: "user", content: `[續接指令]\n${msg}` },
+          ]);
+          return { result: `✅ 訊息已注入 running agent ${runId.slice(0, 8)}` };
+        }
+
+        // completed/failed → keepSession 才能續接
+        if (!rec.keepSession) return { error: `該子 agent 未啟用 keepSession，無法續接` };
+        if (rec.status === "killed") return { error: `子 agent 已 killed，無法續接` };
+
+        // 重用 resume 邏輯
+        params["action"] = "resume";
+        return this.execute(params, ctx);
       }
 
       case "status": {

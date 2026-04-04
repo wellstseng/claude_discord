@@ -408,11 +408,68 @@ class TurnTracker {
   }
 }
 
+// ── Reversibility Assessment ──────────────────────────────────────────────────
+
+/**
+ * 評估 tool 操作的可逆性分數（0-3）
+ * 0 = 完全可逆（read-only）
+ * 1 = 低風險（本地寫入，可 undo）
+ * 2 = 中風險（影響共享狀態，難以還原）
+ * 3 = 高風險（破壞性操作，不可逆）
+ */
+function assessReversibility(toolName: string, params: Record<string, unknown>): { score: number; warning?: string } {
+  if (["read_file", "glob", "grep", "web_search", "web_fetch", "memory_recall", "tool_search", "task_manage"].includes(toolName)) {
+    return { score: 0 };
+  }
+
+  if (toolName === "write_file" || toolName === "edit_file") {
+    return { score: 1 };
+  }
+
+  if (toolName === "run_command") {
+    const cmd = String(params["command"] ?? "").trim();
+
+    // 高風險（score 3）：不可逆的破壞性操作
+    const destructive3 = [
+      /\brm\s+-rf?\b/, /\bgit\s+reset\s+--hard\b/, /\bgit\s+push\s+--force\b/,
+      /\bgit\s+push\s+-f\b/, /\bgit\s+clean\s+-f/, /\bdrop\s+(table|database)\b/i,
+      /\btruncate\s+table\b/i, /\bgit\s+branch\s+-D\b/,
+    ];
+    for (const pattern of destructive3) {
+      if (pattern.test(cmd)) {
+        return { score: 3, warning: `高風險操作：${cmd.slice(0, 80)}。這是不可逆的破壞性操作，請確認是否真的需要執行。` };
+      }
+    }
+
+    // 中風險（score 2）：影響共享狀態
+    const shared2 = [
+      /\bgit\s+push\b/, /\bgit\s+merge\b/, /\bgit\s+rebase\b/,
+      /\bgit\s+checkout\s+\./, /\bgit\s+restore\s+\./,
+      /\bkill\b/, /\bpkill\b/, /\bnpm\s+publish\b/,
+    ];
+    for (const pattern of shared2) {
+      if (pattern.test(cmd)) {
+        return { score: 2, warning: `此操作影響共享狀態：${cmd.slice(0, 80)}。請確認後再執行。` };
+      }
+    }
+
+    // 其他 run_command 預設 score 1
+    return { score: 1 };
+  }
+
+  if (toolName === "spawn_subagent") {
+    return { score: 1 };
+  }
+
+  // 未知 tool 預設 score 1
+  return { score: 1 };
+}
+
 // ── before_tool_call hook 鏈 ──────────────────────────────────────────────────
 
 type BeforeToolResult =
   | { blocked: true; reason: string }
-  | { blocked: false; params: Record<string, unknown> };
+  | { blocked: false; params: Record<string, unknown>; warning?: string };
 
 function runBeforeToolCall(
   call: { id: string; name: string; params: Record<string, unknown> },
@@ -456,6 +513,12 @@ function runBeforeToolCall(
     if (r4[0] === r4[2] && r4[1] === r4[3] && r4[0] !== r4[1] && call.name === r4[0]) {
       return { blocked: true, reason: `偵測到交替工具迴圈：${r4[1]}↔${r4[0]}（已重複 2 輪）` };
     }
+  }
+
+  // 5. Reversibility Assessment
+  const reversibility = assessReversibility(call.name, call.params);
+  if (reversibility.score >= 2) {
+    return { blocked: false, params: call.params, warning: reversibility.warning };
   }
 
   return { blocked: false, params: call.params };
@@ -1101,6 +1164,10 @@ export async function* agentLoop(
           continue;
         }
 
+        // ── Reversibility Warning ─────────────────────────────────────────────
+        // score ≥ 2 → 在 tool result 前注入警告（不阻擋，但提醒 LLM）
+        const _reversibilityWarning = hookResult.warning;
+
         // ── Exec Approval（run_command / write_file / edit_file DM 確認）────────
         const _approvalTools = ["run_command", "write_file", "edit_file"];
         if (_approvalTools.includes(call.name) && opts.execApproval?.enabled) {
@@ -1197,9 +1264,14 @@ export async function* agentLoop(
         }
         turnToolResultTokens += Math.ceil(resultText.length / 4);
 
+        // Reversibility warning 前置到結果
+        const finalResultText = _reversibilityWarning
+          ? `⚠️ [可逆性警告] ${_reversibilityWarning}\n\n${resultText}`
+          : resultText;
+
         toolResults.push({
           tool_use_id: call.id,
-          content: resultText,
+          content: finalResultText,
           is_error: Boolean(toolResult.error),
         });
 

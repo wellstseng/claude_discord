@@ -20,6 +20,48 @@ import type { SpawnResult, SubagentRunRecord } from "../../core/subagent-registr
 import { log } from "../../logger.js";
 import { MessageTrace } from "../../core/message-trace.js";
 
+// ── Worktree Isolation helpers ────────────────────────────────────────────────
+
+import { execSync } from "node:child_process";
+
+interface WorktreeInfo {
+  worktreePath: string;
+  branchName: string;
+}
+
+function createWorktree(baseCwd: string, runId: string): WorktreeInfo {
+  const shortId = runId.slice(0, 8);
+  const branchName = `catclaw-agent-${shortId}`;
+  const worktreePath = join(baseCwd, "..", `.catclaw-worktree-${shortId}`);
+  execSync(`git worktree add -b ${branchName} "${worktreePath}" HEAD`, { cwd: baseCwd, stdio: "pipe" });
+  log.info(`[spawn-subagent:worktree] created ${worktreePath} branch=${branchName}`);
+  return { worktreePath, branchName };
+}
+
+function removeWorktree(baseCwd: string, worktreePath: string, branchName: string): void {
+  try {
+    execSync(`git worktree remove "${worktreePath}" --force`, { cwd: baseCwd, stdio: "pipe" });
+    // 刪除分支（如果沒有未合併的 commit 就刪除，否則保留）
+    try {
+      execSync(`git branch -d ${branchName}`, { cwd: baseCwd, stdio: "pipe" });
+    } catch {
+      // 分支有未合併 commit → 保留，讓 parent 決定
+      log.info(`[spawn-subagent:worktree] 保留分支 ${branchName}（有未合併變更）`);
+    }
+  } catch (err) {
+    log.warn(`[spawn-subagent:worktree] 移除 worktree 失敗：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function worktreeHasChanges(worktreePath: string): boolean {
+  try {
+    const status = execSync("git status --porcelain", { cwd: worktreePath, encoding: "utf-8" });
+    return status.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // 延遲 import（防止循環依賴）— 由 runChildAgentLoop 動態取得
 async function getAgentLoopDeps() {
   const [
@@ -271,6 +313,7 @@ export const tool: Tool = {
       keepSession:{ type: "boolean", description: "完成後保留 session（debug 用，預設 false）" },
       mode:       { type: "string",  description: "run（預設，one-shot）| session（持久，需搭配 keepSession:true）" },
       allowNestedSpawn: { type: "boolean", description: "opt-in 允許子 agent 再 spawn（最多 3 層，預設 false）" },
+      isolation:  { type: "string",  description: "worktree = git worktree 隔離分支工作（完成後由 parent 決定 merge 或丟棄）" },
       inputFrom:    { type: "string",  description: "等待指定 runId 的子 agent 完成，以其 result 作為本次 task 的前置輸入（pipeline 模式）" },
       saveToMemory: { type: "boolean", description: "完成後將結果存入記憶系統（預設 false）" },
       memoryTag:    { type: "string",  description: "記憶標籤（saveToMemory:true 時使用，方便後續搜尋）" },
@@ -304,6 +347,7 @@ export const tool: Tool = {
     const keepSession      = params["keepSession"] === true;
     const mode             = (params["mode"] as "run" | "session") ?? "run";
     const allowNestedSpawn = params["allowNestedSpawn"] === true;
+    const isolation        = params["isolation"] === "worktree" ? "worktree" as const : undefined;
     const inputFrom        = params["inputFrom"] ? String(params["inputFrom"]) : undefined;
     const saveToMemory     = params["saveToMemory"] === true;
     const memoryTag        = params["memoryTag"] ? String(params["memoryTag"]) : undefined;
@@ -389,6 +433,20 @@ export const tool: Tool = {
       }
     }
 
+    // ── Worktree Isolation：建立隔離工作區 ─────────────────────────────────
+    let worktreeInfo: WorktreeInfo | undefined;
+    const { resolveWorkspaceDir: _resolveWs } = await import("../../core/config.js");
+    let effectiveWorkspaceDir: string | undefined;
+    if (isolation === "worktree") {
+      try {
+        const baseCwd = _resolveWs();
+        worktreeInfo = createWorktree(baseCwd, record.runId);
+        effectiveWorkspaceDir = worktreeInfo.worktreePath;
+      } catch (err) {
+        log.warn(`[spawn-subagent] worktree 建立失敗，fallback 到原始 cwd：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     const runChildFn = async () => {
       try {
         const { text, turns } = await Promise.race([
@@ -401,6 +459,7 @@ export const tool: Tool = {
             maxTurns,
             timeoutMs,
             signal: record.abortController.signal,
+            workspaceDir: effectiveWorkspaceDir,
             attachmentsDir,
             parentSpawnDepth: ctx.spawnDepth ?? 0,
             allowNestedSpawn,
@@ -443,7 +502,24 @@ export const tool: Tool = {
           try { rmSync(attachmentsDir, { recursive: true }); } catch { /* ignore */ }
         }
 
-        return { text, turns };
+        // Worktree cleanup：無變更 → 自動移除；有變更 → 保留分支，回報路徑
+        let worktreeResult: { worktreePath?: string; branchName?: string; hasChanges?: boolean } | undefined;
+        if (worktreeInfo) {
+          const hasChanges = worktreeHasChanges(worktreeInfo.worktreePath);
+          if (hasChanges) {
+            // 自動 commit 未提交的變更
+            try {
+              execSync("git add -A && git commit -m 'agent work (auto-commit)'", { cwd: worktreeInfo.worktreePath, stdio: "pipe" });
+            } catch { /* 可能沒有變更需要 commit */ }
+            worktreeResult = { worktreePath: worktreeInfo.worktreePath, branchName: worktreeInfo.branchName, hasChanges: true };
+            log.info(`[spawn-subagent:worktree] 保留 ${worktreeInfo.branchName}（有變更）`);
+          } else {
+            removeWorktree(_resolveWs(), worktreeInfo.worktreePath, worktreeInfo.branchName);
+            worktreeResult = { hasChanges: false };
+          }
+        }
+
+        return { text, turns, worktree: worktreeResult };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg === "__TIMEOUT__") {
@@ -462,15 +538,17 @@ export const tool: Tool = {
     if (!isAsync) {
       // 同步：等待完成
       try {
-        const { text, turns } = await runChildFn();
-        return {
-          result: {
+        const childResult = await runChildFn();
+        const result: Record<string, unknown> = {
             status: "completed",
-            result: text,
+            result: childResult.text,
             sessionKey: record.childSessionKey,
-            turns,
-          } satisfies SpawnResult,
+            turns: childResult.turns,
         };
+        if (childResult.worktree) {
+          result["worktree"] = childResult.worktree;
+        }
+        return { result: result as unknown as SpawnResult };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg === "__TIMEOUT__") {

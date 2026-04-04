@@ -30,6 +30,19 @@ export interface Project {
   updatedAt: string;
 }
 
+/** 頻道綁定專案後的解析結果 */
+export interface ProjectBinding {
+  projectId: string;
+  /** 專案工作目錄（CWD） */
+  cwd: string;
+  /** 專案記憶目錄 */
+  memoryDir: string;
+  /** 專案 CLAUDE.md 內容（若存在） */
+  claudeMd?: string;
+  /** 專案物件 */
+  project: Project;
+}
+
 // ── ProjectManager ────────────────────────────────────────────────────────────
 
 export class ProjectManager {
@@ -161,6 +174,31 @@ export class ProjectManager {
     const project = this.get(projectId);
     if (project?.memoryPath) return project.memoryPath;
     return join(globalMemoryRoot, "projects", projectId);
+  }
+
+  /**
+   * 解析專案綁定資訊：cwd、記憶路徑、專案 CLAUDE.md 內容。
+   * 供頻道處理器在建立 agent-loop 前使用。
+   */
+  resolveBinding(projectId: string, globalMemoryRoot: string): ProjectBinding | null {
+    const project = this.get(projectId);
+    if (!project) return null;
+
+    // cwd：以 toolsDir 的父目錄（若有）或 dataDir/projects/{id} 作為工作目錄
+    const projectDir = join(this.projectsDir, projectId);
+    const cwd = project.toolsDir ?? projectDir;
+
+    // 記憶路徑
+    const memoryDir = this.resolveMemoryDir(projectId, globalMemoryRoot);
+
+    // 專案 CLAUDE.md
+    let claudeMd: string | undefined;
+    const claudeMdPath = join(cwd, "CLAUDE.md");
+    if (existsSync(claudeMdPath)) {
+      try { claudeMd = readFileSync(claudeMdPath, "utf-8"); } catch { /* skip */ }
+    }
+
+    return { projectId, cwd, memoryDir, claudeMd, project };
   }
 
   // ── 內部 ──────────────────────────────────────────────────────────────────
