@@ -254,7 +254,7 @@ export async function buildProviderRegistryV2(
       } else if (pType === "codex-oauth") {
         bridgeEntry.type = "codex-oauth";
         const { CodexOAuthProvider } = await import("./codex-oauth.js");
-        provider = new CodexOAuthProvider(providerId, bridgeEntry);
+        provider = new CodexOAuthProvider(providerId, bridgeEntry, authStore ?? undefined);
       } else {
         log.warn(`[provider-registry-v2] 未知 provider type: ${providerName}（api=${providerDef.api}）`);
         continue;

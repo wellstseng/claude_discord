@@ -7,8 +7,10 @@
  * 敏感欄位（token/apiKey/secret/password）自動遮蔽為 ***。
  */
 
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import type { Tool } from "../types.js";
-import { config } from "../../core/config.js";
+import { config, resolveCatclawDir } from "../../core/config.js";
 
 const SECRET_SEGMENTS = new Set(["token", "apikey", "secret", "password"]);
 
@@ -40,7 +42,11 @@ export const tool: Tool = {
     "讀取 catclaw 設定（已解析的完整 config，包含 models-config.json 合成結果）。",
     "path 省略則回傳完整 config；指定 dot-path 則回傳該欄位值。",
     "敏感欄位（token/apiKey/secret）自動遮蔽。",
-    "範例：path=\"modelRouting\" 回傳模型路由；path=\"discord.guilds\" 回傳所有 guild 設定。",
+    "特殊路徑：path=\"models-config\" 回傳 models-config.json 原始 JSON（含 aliases/providers/primary/fallbacks）。",
+    "常用路徑：path=\"agentDefaults\" 回傳模型設定（含 primary model）；",
+    "path=\"agentDefaults.model\" 回傳當前使用的模型 ID；",
+    "path=\"modelRouting\" 回傳模型路由規則；",
+    "path=\"discord.guilds\" 回傳所有 guild 設定。",
   ].join(" "),
   tier: "admin",
   resultTokenCap: 1000,
@@ -61,6 +67,13 @@ export const tool: Tool = {
       return { error: "禁止讀取敏感欄位（token/apiKey/secret/password）" };
     }
     try {
+      // 特殊路徑：直接讀取 models-config.json 原始 JSON
+      if (path === "models-config") {
+        const fp = join(resolveCatclawDir(), "models-config.json");
+        if (!existsSync(fp)) return { error: "models-config.json 不存在" };
+        const raw = JSON.parse(readFileSync(fp, "utf-8")) as unknown;
+        return { result: filterSecrets(raw) };
+      }
       const val = path ? getNestedPath(config, path) : config;
       if (val === undefined) return { error: `路徑不存在：${path}` };
       return { result: filterSecrets(val) };

@@ -20,6 +20,11 @@ import { getSessionManager } from "./session.js";
 import { getContextEngine } from "./context-engine.js";
 import { getInboundHistoryStore } from "../discord/inbound-history.js";
 
+// ── Codex OAuth 狀態 ────────────────────────────────────────────────────────
+let _codexOAuthState: { status: string; authUrl?: string; expiresAt?: string; error?: string } | null = null;
+/** 手動 callback URL 的 resolve 函式（供 onManualCodeInput 使用） */
+let _codexManualResolve: ((value: string) => void) | null = null;
+
 // ── Config 備份 ──────────────────────────────────────────────────────────────
 const BACKUP_KEEP = 5;
 
@@ -516,19 +521,36 @@ label.cfg-toggle { min-width: 36px; }
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid #2a2d3e">
       <h3 style="font-size:0.82rem;color:#818cf8;margin-bottom:8px">新增憑證</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <select id="auth-new-provider" style="flex:0 0 130px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem">
+        <select id="auth-new-provider" onchange="onAuthProviderChange()" style="flex:0 0 130px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem">
           <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-          <option value="openai-codex">Codex</option>
+          <option value="openai-codex">OpenAI Codex</option>
           <option value="ollama">Ollama</option>
         </select>
-        <input id="auth-new-id" placeholder="名稱（如 key-1）" style="flex:0 0 120px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
-        <select id="auth-new-type" style="flex:0 0 100px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem">
-          <option value="api_key">API Key</option>
-          <option value="token">Token</option>
-        </select>
-        <input id="auth-new-cred" type="password" placeholder="Token / API Key" style="flex:1;min-width:200px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
-        <button class="btn btn-green btn-sm" onclick="addAuthProfile()">+ 新增</button>
+        <span id="auth-apikey-fields" style="display:contents">
+          <input id="auth-new-id" placeholder="名稱（如 key-1）" style="flex:0 0 120px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
+          <select id="auth-new-type" style="flex:0 0 100px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem">
+            <option value="api_key">API Key</option>
+            <option value="token">Token</option>
+          </select>
+          <input id="auth-new-cred" type="password" placeholder="Token / API Key" style="flex:1;min-width:200px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
+          <button class="btn btn-green btn-sm" onclick="addAuthProfile()">+ 新增</button>
+        </span>
+        <span id="auth-oauth-fields" style="display:none">
+          <input id="auth-oauth-id" placeholder="名稱（如 default）" value="default" style="flex:0 0 120px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
+          <select id="auth-oauth-type" style="flex:0 0 100px;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem">
+            <option value="token">Token</option>
+            <option value="api_key">API Key</option>
+          </select>
+          <button class="btn btn-green btn-sm" onclick="startCodexOAuth()">OpenAI OAuth 登入</button>
+          <span id="codex-oauth-status" style="font-size:0.78rem;color:#888;margin-left:8px"></span>
+          <div id="codex-oauth-manual" style="display:none;margin-top:8px;width:100%">
+            <p style="font-size:0.75rem;color:#facc15;margin:0 0 4px">瀏覽器登入完成後，若未自動跳轉回來，請複製網址列的 callback URL 貼到下方：</p>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input id="codex-oauth-url" placeholder="http://localhost:1455/callback?code=..." style="flex:1;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace">
+              <button class="btn btn-green btn-sm" onclick="submitCodexCallback()">送出</button>
+            </div>
+          </div>
+        </span>
       </div>
     </div>
   </div>
@@ -1607,6 +1629,86 @@ async function loadAuthProfiles() {
   } catch(e) { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = '讀取失敗：' + e; }
 }
 
+function onAuthProviderChange() {
+  const provider = document.getElementById('auth-new-provider').value;
+  const apikeyFields = document.getElementById('auth-apikey-fields');
+  const oauthFields = document.getElementById('auth-oauth-fields');
+  if (provider === 'openai-codex') {
+    apikeyFields.style.display = 'none';
+    oauthFields.style.display = 'contents';
+  } else {
+    apikeyFields.style.display = 'contents';
+    oauthFields.style.display = 'none';
+  }
+}
+
+let _codexOAuthPollTimer = null;
+function _codexOAuthCleanup(success) {
+  if (_codexOAuthPollTimer) { clearInterval(_codexOAuthPollTimer); _codexOAuthPollTimer = null; }
+  if (!success) document.getElementById('codex-oauth-manual').style.display = 'none';
+}
+
+async function startCodexOAuth() {
+  const statusEl = document.getElementById('codex-oauth-status');
+  const manualEl = document.getElementById('codex-oauth-manual');
+  const msgEl = document.getElementById('auth-msg');
+  statusEl.textContent = '啟動 OAuth 流程...';
+  statusEl.style.color = '#facc15';
+  manualEl.style.display = 'none';
+  try {
+    const oauthName = document.getElementById('auth-oauth-id').value.trim() || 'oauth';
+    const oauthType = document.getElementById('auth-oauth-type').value;
+    const d = await authFetch('/api/codex-oauth-start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileName: oauthName, credType: oauthType }),
+    }).then(r => r.json());
+    if (d.error) { statusEl.textContent = d.error; statusEl.style.color = '#f87171'; return; }
+    if (d.authUrl) {
+      window.open(d.authUrl, '_blank');
+      statusEl.textContent = '已開啟瀏覽器，等待登入完成...（5 分鐘內有效）';
+      manualEl.style.display = 'block';
+      // poll status
+      if (_codexOAuthPollTimer) clearInterval(_codexOAuthPollTimer);
+      _codexOAuthPollTimer = setInterval(async () => {
+        try {
+          const s = await authFetch('/api/codex-oauth-status').then(r => r.json());
+          if (s.status === 'success') {
+            _codexOAuthCleanup(true);
+            manualEl.style.display = 'none';
+            statusEl.textContent = 'OAuth 登入成功！Token 到期：' + s.expiresAt;
+            statusEl.style.color = '#4ade80';
+            msgEl.className = 'msg ok'; msgEl.textContent = 'Codex OAuth 登入完成';
+            loadAuthProfiles();
+          } else if (s.status === 'error') {
+            _codexOAuthCleanup(false);
+            statusEl.textContent = '失敗：' + s.error;
+            statusEl.style.color = '#f87171';
+          }
+        } catch {}
+      }, 2000);
+    }
+  } catch(e) { statusEl.textContent = '啟動失敗：' + e; statusEl.style.color = '#f87171'; }
+}
+
+async function submitCodexCallback() {
+  const urlInput = document.getElementById('codex-oauth-url');
+  const statusEl = document.getElementById('codex-oauth-status');
+  const val = urlInput.value.trim();
+  if (!val) return;
+  statusEl.textContent = '正在處理 callback...';
+  statusEl.style.color = '#facc15';
+  try {
+    const d = await authFetch('/api/codex-oauth-callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callbackUrl: val }),
+    }).then(r => r.json());
+    if (d.error) { statusEl.textContent = '失敗：' + d.error; statusEl.style.color = '#f87171'; }
+    else { statusEl.textContent = '已送出，等待處理...'; }
+  } catch(e) { statusEl.textContent = '送出失敗：' + e; statusEl.style.color = '#f87171'; }
+}
+
 async function addAuthProfile() {
   const provider = document.getElementById('auth-new-provider').value;
   const name = document.getElementById('auth-new-id').value.trim() || 'default';
@@ -2310,6 +2412,171 @@ export class DashboardServer {
               res.writeHead(400); res.end(JSON.stringify({ error: String(err) }));
             }
           })();
+        });
+        return;
+      }
+
+      // POST /api/codex-oauth-start — 啟動 Codex OAuth 登入流程
+      if (url === "/api/codex-oauth-start" && method === "POST") {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+        void (async () => {
+          try {
+            const reqBody = chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString("utf-8")) as Record<string, string> : {};
+            const profileName = reqBody.profileName || "oauth";
+            const credType = reqBody.credType || "oauth";
+
+            if (_codexOAuthState?.status === "pending") {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ authUrl: _codexOAuthState.authUrl }));
+              return;
+            }
+
+            _codexOAuthState = { status: "pending" };
+
+            const { loginOpenAICodex } = await import("@mariozechner/pi-ai/oauth");
+
+            // 用 Promise + 手動 resolve 拿到 authUrl 後立即回傳給前端
+            let resolveAuthUrl: (url: string) => void;
+            const authUrlPromise = new Promise<string>(r => { resolveAuthUrl = r; });
+
+            // 手動 callback 的 Promise（使用者從前端貼 URL 時 resolve）
+            const manualCodePromise = new Promise<string>((r) => { _codexManualResolve = r; });
+
+            // 背景執行 OAuth 流程（browser callback 和手動貼 URL 賽跑）
+            const oauthPromise = loginOpenAICodex({
+              onAuth: ({ url: authUrl }) => {
+                _codexOAuthState!.authUrl = authUrl;
+                resolveAuthUrl!(authUrl);
+              },
+              onPrompt: async (prompt) => {
+                // 等待使用者從 dashboard 手動貼 callback URL（5 分鐘逾時）
+                log.info(`[dashboard:codex-oauth] 等待手動 callback 輸入...`);
+                return Promise.race([
+                  manualCodePromise,
+                  new Promise<string>((_, reject) => setTimeout(() => {
+                    _codexOAuthState = { status: "error", error: "OAuth 逾時（5 分鐘），請重新登入" };
+                    reject(new Error("OAuth 等待逾時（5 分鐘）"));
+                  }, 5 * 60_000)),
+                ]);
+              },
+              onManualCodeInput: () => {
+                // 與 browser callback 賽跑 — 使用者貼 URL 時 resolve
+                return manualCodePromise;
+              },
+              onProgress: (msg) => {
+                log.debug(`[dashboard:codex-oauth] ${msg}`);
+              },
+            });
+
+            // 等 authUrl 回來（通常幾百 ms）
+            const authUrl = await Promise.race([
+              authUrlPromise,
+              new Promise<string>((_, reject) => setTimeout(() => reject(new Error("OAuth 啟動逾時")), 15_000)),
+            ]);
+
+            // 回傳 authUrl 給前端
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ authUrl }));
+
+            // 背景等待 OAuth 完成
+            oauthPromise.then(async (creds) => {
+              // 1. 存入 ~/.codex/auth.json（codex-oauth provider 直接讀此檔）
+              const codexAuthPath = resolve(homedir(), ".codex/auth.json");
+              const authJson = {
+                access_token: creds.access,
+                refresh_token: creds.refresh,
+                expires_at: Math.floor(creds.expires / 1000),
+                token_type: "Bearer",
+              };
+              mkdirSync(dirname(codexAuthPath), { recursive: true });
+              writeFileSync(codexAuthPath, JSON.stringify(authJson, null, 2), "utf-8");
+
+              // 2. 同步寫入 auth-profile.json（讓 Dashboard 顯示 + round-robin 管理）
+              try {
+                const { resolveWorkspaceDirSafe } = await import("./config.js");
+                const ws = resolveWorkspaceDirSafe();
+                const credPath = join(ws, "agents", "default", "auth-profile.json");
+                let apData: { version: number; profiles: Record<string, unknown>; order: Record<string, string[]>; usageStats: Record<string, unknown> };
+                if (existsSync(credPath)) {
+                  const raw = JSON.parse(readFileSync(credPath, "utf-8"));
+                  apData = { version: raw.version ?? 1, profiles: raw.profiles ?? {}, order: raw.order ?? {}, usageStats: raw.usageStats ?? {} };
+                } else {
+                  apData = { version: 1, profiles: {}, order: {}, usageStats: {} };
+                }
+                const apProfileId = `openai-codex:${profileName}`;
+                apData.profiles[apProfileId] = {
+                  type: credType,
+                  provider: "openai-codex",
+                  key: creds.access,
+                  oauthTokenPath: codexAuthPath,
+                };
+                mkdirSync(dirname(credPath), { recursive: true });
+                const tmp = credPath + ".tmp";
+                writeFileSync(tmp, JSON.stringify(apData, null, 2), "utf-8");
+                renameSync(tmp, credPath);
+                log.info(`[dashboard:codex-oauth] auth-profile.json 已更新 ${apProfileId}`);
+              } catch (apErr) {
+                log.warn(`[dashboard:codex-oauth] auth-profile.json 寫入失敗：${apErr instanceof Error ? apErr.message : String(apErr)}`);
+              }
+
+              _codexOAuthState = {
+                status: "success",
+                expiresAt: new Date(creds.expires).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }),
+              };
+              log.info(`[dashboard:codex-oauth] OAuth 登入成功，token 存入 ${codexAuthPath}`);
+            }).catch((err) => {
+              _codexOAuthState = { status: "error", error: err instanceof Error ? err.message : String(err) };
+              log.error(`[dashboard:codex-oauth] OAuth 失敗：${_codexOAuthState.error}`);
+            });
+          } catch (err) {
+            _codexOAuthState = { status: "error", error: err instanceof Error ? err.message : String(err) };
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: _codexOAuthState.error }));
+          }
+        })();
+        });
+        return;
+      }
+
+      // GET /api/codex-oauth-status — 查詢 OAuth 流程狀態
+      if (url === "/api/codex-oauth-status" && method === "GET") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        if (!_codexOAuthState) {
+          res.end(JSON.stringify({ status: "idle" }));
+        } else {
+          res.end(JSON.stringify(_codexOAuthState));
+        }
+        return;
+      }
+
+      // POST /api/codex-oauth-callback — 手動貼 callback URL
+      if (url === "/api/codex-oauth-callback" && method === "POST") {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { callbackUrl: string };
+            if (!body.callbackUrl) {
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "缺少 callbackUrl" }));
+              return;
+            }
+            if (!_codexManualResolve) {
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "目前沒有進行中的 OAuth 流程" }));
+              return;
+            }
+            log.info(`[dashboard:codex-oauth] 收到手動 callback URL`);
+            _codexManualResolve(body.callbackUrl);
+            _codexManualResolve = null;
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: true }));
+          } catch (err) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: String(err) }));
+          }
         });
         return;
       }

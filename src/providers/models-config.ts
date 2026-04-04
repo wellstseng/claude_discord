@@ -86,7 +86,7 @@ const BUILTIN_PROVIDERS: Record<string, ModelProviderDefinition> = {
     ],
   },
   "openai-codex": {
-    baseUrl: "https://api.openai.com",
+    baseUrl: "https://chatgpt.com/backend-api",
     api: "openai-codex-responses",
     models: [
       {

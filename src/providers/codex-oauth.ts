@@ -27,6 +27,7 @@ import type {
   LLMProvider, Message, ProviderOpts, StreamResult, ProviderEvent, ToolCall,
 } from "./base.js";
 import type { ProviderEntry } from "../core/config.js";
+import type { AuthProfileStore, CooldownReason } from "./auth-profile-store.js";
 
 // ── OAuth token JSON 格式 ─────────────────────────────────────────────────────
 
@@ -67,6 +68,11 @@ interface ResponsesChunk {
   response?: {
     status?: string;
     error?: { message?: string };
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      total_tokens?: number;
+    };
   };
 }
 
@@ -74,8 +80,10 @@ interface ResponsesChunk {
 
 const DEFAULT_TOKEN_PATH = "~/.codex/auth.json";
 const DEFAULT_REFRESH_URL = "https://auth.openai.com/oauth/token";
-const DEFAULT_BASE_URL = "https://api.openai.com";
+const DEFAULT_BASE_URL = "https://chatgpt.com/backend-api";
 const DEFAULT_MODEL = "openai-codex/gpt-5.4";
+const JWT_CLAIM_PATH = "https://api.openai.com/auth";
+const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
 // token 提前 5 分鐘刷新
 const REFRESH_BUFFER_MS = 5 * 60_000;
@@ -93,10 +101,11 @@ export class CodexOAuthProvider implements LLMProvider {
   private tokenPath: string;
   private refreshUrl: string;
   private clientId?: string;
+  private authStore?: AuthProfileStore;
   private cachedToken: string | null = null;
   private tokenExpiresAt = 0;  // epoch ms
 
-  constructor(id: string, entry: ProviderEntry) {
+  constructor(id: string, entry: ProviderEntry, authStore?: AuthProfileStore) {
     this.id = id;
     this.baseUrl = (entry.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.modelId = entry.model ?? DEFAULT_MODEL;
@@ -109,6 +118,7 @@ export class CodexOAuthProvider implements LLMProvider {
       ?? DEFAULT_REFRESH_URL;
 
     this.clientId = (entry as unknown as Record<string, unknown>)["oauthClientId"] as string | undefined;
+    this.authStore = authStore;
   }
 
   // ── Token 取得（含自動刷新） ───────────────────────────────────────────────
@@ -165,16 +175,16 @@ export class CodexOAuthProvider implements LLMProvider {
   }
 
   private async _refresh(refreshToken: string): Promise<CodexAuthJson> {
-    const body: Record<string, string> = {
+    const params = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-    };
-    if (this.clientId) body["client_id"] = this.clientId;
+      client_id: this.clientId ?? CODEX_CLIENT_ID,
+    });
 
     const resp = await fetch(this.refreshUrl, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
       signal: AbortSignal.timeout(15_000),
     });
 
@@ -194,10 +204,15 @@ export class CodexOAuthProvider implements LLMProvider {
     };
   }
 
-  // ── 主要串流方法（使用 OpenAI Responses API）──────────────────────────────
+  // ── 主要串流方法（使用 Codex Responses API）─────────────────────────────
 
   async stream(messages: Message[], opts: ProviderOpts = {}): Promise<StreamResult> {
+    // auth-profile-store: 更新 lastUsed（Codex OAuth 用 pickForProvider 記錄使用時間）
+    const pick = this.authStore?.pickForProvider("openai-codex");
+    const activeProfileId = pick?.profileId;
+
     const token = await this.getAccessToken();
+    const accountId = extractAccountId(token);
     const controller = new AbortController();
     if (opts.abortSignal) {
       opts.abortSignal.addEventListener("abort", () => controller.abort());
@@ -209,7 +224,12 @@ export class CodexOAuthProvider implements LLMProvider {
     const body: Record<string, unknown> = {
       model: this.modelId,
       input,
+      store: false,
       stream: true,
+      text: { verbosity: "medium" },
+      include: ["reasoning.encrypted_content"],
+      tool_choice: "auto",
+      parallel_tool_calls: true,
     };
 
     if (opts.systemPrompt) body["instructions"] = opts.systemPrompt;
@@ -221,18 +241,25 @@ export class CodexOAuthProvider implements LLMProvider {
         name: t.name,
         description: t.description,
         parameters: t.input_schema,
+        strict: null,
       }));
     }
 
     if (opts.maxTokens) body["max_output_tokens"] = opts.maxTokens;
 
-    log.debug(`[codex-oauth:${this.id}] POST /v1/responses model=${this.modelId} msgs=${messages.length}`);
+    // Codex 端點：{baseUrl}/codex/responses
+    const codexUrl = resolveCodexUrl(this.baseUrl);
+    log.debug(`[codex-oauth:${this.id}] POST ${codexUrl} model=${this.modelId} msgs=${messages.length}`);
 
-    const response = await fetch(`${this.baseUrl}/v1/responses`, {
+    const response = await fetch(codexUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "accept": "text/event-stream",
         "Authorization": `Bearer ${token}`,
+        "chatgpt-account-id": accountId,
+        "OpenAI-Beta": "responses=experimental",
+        "originator": "pi",
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -240,6 +267,15 @@ export class CodexOAuthProvider implements LLMProvider {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
+      // auth-profile-store: 依 HTTP status 設定 cooldown
+      if (activeProfileId && this.authStore) {
+        const reason: CooldownReason | null =
+          response.status === 401 || response.status === 403 ? "auth" :
+          response.status === 429 ? "rate_limit" :
+          response.status === 402 ? "billing" :
+          response.status === 503 ? "overloaded" : null;
+        if (reason) this.authStore.setCooldown(activeProfileId, reason);
+      }
       throw new Error(`[codex-oauth:${this.id}] HTTP ${response.status}: ${errText.slice(0, 200)}`);
     }
 
@@ -248,6 +284,7 @@ export class CodexOAuthProvider implements LLMProvider {
     const events: ProviderEvent[] = [];
     let finalText = "";
     let finalStopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
+    const parsedUsage: { input: number; output: number; totalTokens: number }[] = [];
     const toolCalls: ToolCall[] = [];
 
     await parseResponsesApiStream(response.body, (chunk) => {
@@ -255,7 +292,11 @@ export class CodexOAuthProvider implements LLMProvider {
       if (event) {
         events.push(event);
         if (event.type === "text_delta") finalText += event.text;
-        if (event.type === "done") finalStopReason = event.stopReason;
+        if (event.type === "done") {
+          finalStopReason = event.stopReason;
+          const u = (event as Extract<ProviderEvent, { type: "done" }>).usage;
+          if (u) parsedUsage.push({ input: u.input, output: u.output, totalTokens: u.totalTokens });
+        }
       }
     });
 
@@ -265,15 +306,19 @@ export class CodexOAuthProvider implements LLMProvider {
       yield* events;
     }
 
-    const estTokens = Math.round(finalText.length / 4);
-    log.debug(`[codex-oauth:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 ~outputTokens=${estTokens}`);
+    const apiUsage = parsedUsage[0];
+    const estimated = !apiUsage;
+    const inputTokens = apiUsage?.input ?? 0;
+    const outputTokens = apiUsage?.output ?? Math.round(finalText.length / 4);
+    const totalTokens = apiUsage?.totalTokens ?? (inputTokens + outputTokens);
+    log.debug(`[codex-oauth:${this.id}] 完成 stopReason=${finalStopReason} text=${finalText.length}字 input=${inputTokens} output=${outputTokens}${estimated ? "(est)" : ""}`);
 
     return {
       events: makeIterable(),
       stopReason: finalStopReason,
       toolCalls,
       text: finalText,
-      usage: { input: 0, output: estTokens, totalTokens: estTokens, model: this.modelId, providerType: "codex-oauth", estimated: true },
+      usage: { input: inputTokens, output: outputTokens, totalTokens, model: this.modelId, providerType: "codex-oauth", estimated },
     };
   }
 }
@@ -396,14 +441,23 @@ function processResponsesChunk(chunk: ResponsesChunk, toolCalls: ToolCall[]): Pr
       }
       return null;
 
-    // 完成
-    case "response.completed": {
+    // 完成（Codex 端點可能回 response.completed 或 response.done）
+    case "response.completed":
+    case "response.done": {
       argBuffers.clear();
       const status = chunk.response?.status;
       const sr = toolCalls.length > 0 ? "tool_use"
         : status === "incomplete" ? "max_tokens"
         : "end_turn";
-      return { type: "done", stopReason: sr, text: "" };
+      const u = chunk.response?.usage;
+      const usage = u ? {
+        input: u.input_tokens ?? 0,
+        output: u.output_tokens ?? 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: u.total_tokens ?? ((u.input_tokens ?? 0) + (u.output_tokens ?? 0)),
+      } : undefined;
+      return { type: "done", stopReason: sr, text: "", usage };
     }
 
     // 截斷（incomplete 也可能單獨事件）
@@ -417,5 +471,29 @@ function processResponsesChunk(chunk: ResponsesChunk, toolCalls: ToolCall[]): Pr
 
     default:
       return null;
+  }
+}
+
+// ── Codex URL 解析（對齊 pi-ai）─────────────────────────────────────────────
+
+function resolveCodexUrl(baseUrl: string): string {
+  const normalized = baseUrl.replace(/\/+$/, "");
+  if (normalized.endsWith("/codex/responses")) return normalized;
+  if (normalized.endsWith("/codex")) return `${normalized}/responses`;
+  return `${normalized}/codex/responses`;
+}
+
+// ── JWT accountId 擷取 ──────────────────────────────────────────────────────
+
+function extractAccountId(token: string): string {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) throw new Error("Invalid JWT");
+    const payload = JSON.parse(atob(parts[1]!));
+    const accountId = payload?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
+    if (!accountId) throw new Error("No chatgpt_account_id in JWT");
+    return accountId as string;
+  } catch (err) {
+    throw new Error(`[codex-oauth] 無法從 token 擷取 accountId：${err instanceof Error ? err.message : String(err)}`);
   }
 }
