@@ -61,6 +61,7 @@ import { setDiscordClient, getSubagentThreadBinding } from "./core/subagent-disc
 import { parseApprovalReply, parseApprovalButtonId, resolveApproval, setApprovalDiscordClient } from "./core/exec-approval.js";
 import { abortRunningTurn } from "./skills/builtin/stop.js";
 import { MessageTrace } from "./core/message-trace.js";
+import { setTaskUiDiscordClient, registerTaskUiListener, handleTaskButtonInteraction } from "./core/task-ui.js";
 
 // ── 訊息去重 ─────────────────────────────────────────────────────────────────
 
@@ -232,22 +233,30 @@ export function createBot(): Client {
   client.once("clientReady", () => {
     setDiscordClient(client);
     setApprovalDiscordClient(client);
+    // Task UI：Discord Components v2
+    setTaskUiDiscordClient(client);
+    registerTaskUiListener((channelId) => `discord:ch:${channelId}`);
   });
 
-  // Exec-approval 按鈕互動處理
+  // 按鈕互動處理（exec-approval + task UI）
   client.on("interactionCreate", (interaction) => {
     if (!interaction.isButton()) return;
-    const parsed = parseApprovalButtonId(interaction.customId);
-    if (!parsed) return;
-    const found = resolveApproval(parsed.approvalId, parsed.approved);
-    if (found) {
-      void interaction.update({
-        content: parsed.approved
-          ? `✅ 已允許執行（approvalId: ${parsed.approvalId}）`
-          : `❌ 已拒絕執行（approvalId: ${parsed.approvalId}）`,
-        components: [],
-      }).catch(() => {});
-    }
+    // Task UI buttons
+    void handleTaskButtonInteraction(interaction).then(handled => {
+      if (handled) return;
+      // Exec-approval buttons (fallback)
+      const parsed = parseApprovalButtonId(interaction.customId);
+      if (!parsed) return;
+      const found = resolveApproval(parsed.approvalId, parsed.approved);
+      if (found) {
+        void interaction.update({
+          content: parsed.approved
+            ? `✅ 已允許執行（approvalId: ${parsed.approvalId}）`
+            : `❌ 已拒絕執行（approvalId: ${parsed.approvalId}）`,
+          components: [],
+        }).catch(() => {});
+      }
+    }).catch(() => {});
   });
 
   return client;

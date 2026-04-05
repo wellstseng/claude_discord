@@ -3,6 +3,7 @@
 > 知識庫變更紀錄（最新在上，超過 8 筆觸發滾動淘汰）
 
 | 日期 | 變更 | 影響文件 |
+| 2026-04-05 | **feat: Task UI Discord Components v2** — task_manage list 自動發送帶按鈕的 task 清單（🔄 In Progress / ✅ Complete / 🗑️ Delete）。新增 task-ui.ts 處理 Components 生成 + button interaction。event-bus 新增 task:ui 事件 + TaskUiPayload 型別 | task-ui.ts(new), task-manage.ts, event-bus.ts, discord.ts |
 | 2026-04-05 | **feat: prompt-assembler 接線 + context-aware intent** — discord.ts 手動 5 區塊拼接改用 assembleSystemPrompt()。新增 date-time module（priority 5）。catclaw-md module 加 auto-create fallback。Context-aware intent detection（coding/research/conversation）動態選擇注入模組，conversation 模式省略 coding-rules + git-rules 節省 token | prompt-assembler.ts, discord.ts |
 | 2026-04-05 | **feat: /commit + /pr prompt-type skills** — 新增兩個 git 規範化流程 skill。/commit：gather→analyze→commit 三步流程（安全規則：不 amend、不 force push、不 skip hooks）。/pr：gather→analyze→push+create 三步流程（分析所有 commits、結構化 PR body） | builtin-prompt/commit/SKILL.md(new), builtin-prompt/pr/SKILL.md(new) |
 | 2026-04-05 | **config: CLI Provider 設定整合** — models-config.json 新增 cli-claude/cli-gemini provider 定義 + aliases。啟動時自動 merge 到 models.json。providers.md 知識庫更新：CliProvider 架構、stream-json 解析、V2 Registry 三層分離 | models-config.json, modules/providers.md |

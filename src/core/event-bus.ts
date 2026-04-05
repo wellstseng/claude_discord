@@ -52,6 +52,14 @@ export interface RutWarning {
   sessions: string[];
 }
 
+export interface TaskUiPayload {
+  id: string;
+  subject: string;
+  status: string;
+  description?: string;
+  blockedBy: string[];
+}
+
 // ── 事件清單（型別安全定義）─────────────────────────────────────────────────
 
 /** CatClaw 平台全域事件，對應架構文件第 11 節 */
@@ -103,6 +111,9 @@ export interface CatClawEvents {
   // ── Subagent ──
   "subagent:completed":  [parentSessionKey: string, runId: string, label: string, result: string];
   "subagent:failed":     [parentSessionKey: string, runId: string, label: string, error: string];
+
+  // ── Task UI ──
+  "task:ui":             [channelId: string, tasks: TaskUiPayload[]];
 
   // ── 帳號 ──
   "account:created":     [accountId: string];

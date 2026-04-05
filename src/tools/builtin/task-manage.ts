@@ -76,6 +76,16 @@ export const tool: Tool = {
           const deps = t.blockedBy.length > 0 ? ` (blocked by #${t.blockedBy.join(",#")})` : "";
           return `${statusIcon} #${t.id} [${t.status}] ${t.subject}${deps}`;
         }).join("\n");
+        // Emit task:ui event for Discord Components v2 rendering
+        if (tasks.length > 0 && ctx.channelId) {
+          ctx.eventBus.emit("task:ui", ctx.channelId, tasks.map(t => ({
+            id: t.id,
+            subject: t.subject,
+            status: t.status,
+            description: t.description,
+            blockedBy: t.blockedBy,
+          })));
+        }
         return { result: { total: tasks.length, tasks, summary } };
       }
 
