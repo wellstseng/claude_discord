@@ -377,6 +377,33 @@ label.cfg-toggle { min-width: 36px; }
 .cfg-dynamic-entry { background: var(--bg4); border-radius: 6px; padding: 10px; margin-bottom: 8px; }
 .cfg-dynamic-entry .entry-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .cfg-dynamic-entry .entry-header input { flex: 1; font-weight: bold; }
+/* ── Mobile responsive ──────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .topbar { padding: 8px 12px; gap: 6px; flex-wrap: wrap; }
+  .topbar h1 { font-size: 0.95rem; }
+  .tabs { padding: 0 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab { padding: 8px 10px; font-size: 0.78rem; white-space: nowrap; }
+  .pane { padding: 10px; }
+  .grid { grid-template-columns: 1fr; gap: 10px; }
+  .stats { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .stat { padding: 8px; }
+  .stat-val { font-size: 1.1rem; }
+  .card { padding: 10px; }
+  .tbl { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cfg-row { flex-direction: column; align-items: stretch; }
+  .cfg-row label { min-width: auto; }
+  .cfg-row input[type=text], .cfg-row input[type=number], .cfg-row input[type=password], .cfg-row select { min-width: auto; }
+  .cfg-section summary { font-size: 0.82rem; padding: 6px 8px; }
+  .cfg-fields { padding: 8px; }
+  textarea { font-size: 0.72rem; }
+}
+@media (max-width: 480px) {
+  .topbar h1 { font-size: 0.85rem; }
+  .stats { grid-template-columns: 1fr 1fr; }
+  .stat-val { font-size: 0.95rem; }
+  .btn { padding: 5px 10px; font-size: 0.75rem; }
+  .tbl th, .tbl td { padding: 4px 5px; font-size: 0.72rem; }
+}
 .cfg-hint { font-size: 0.68rem; color: var(--fg3); margin-left: 4px; }
 </style>
 </head>
@@ -2110,15 +2137,76 @@ async function loadAndShowContext(traceId) {
     if (!ctx) { container.innerHTML = '<div style="color:var(--fg2)">Context snapshot 不存在或已過期</div>'; return; }
     let html = '';
 
-    // System Prompt
+    // System Prompt（雙模式：原始 / 模組）
     const spLen = (ctx.systemPrompt ?? '').length;
     const spTokens = Math.ceil(spLen / 4);
+    const bd = ctx.promptBreakdown;
+    const hasSegments = bd?.segments?.length > 0;
+
     html += '<div style="margin-bottom:12px">';
-    html += '<h4 style="color:var(--accent2);margin-bottom:4px;cursor:pointer" onclick="var e=document.getElementById(\\'ctx-sp-' + traceId + '\\');e.style.display=e.style.display===\\'none\\'?\\'block\\':\\'none\\'">';
-    html += '▶ System Prompt <span style="font-size:0.78rem;color:var(--fg2)">(' + spLen.toLocaleString() + ' chars, ~' + spTokens.toLocaleString() + ' tokens)</span></h4>';
-    html += '<div id="ctx-sp-' + traceId + '" style="display:none;max-height:500px;overflow-y:auto;background:var(--bg3);padding:8px;border-radius:4px;font-size:0.75rem;white-space:pre-wrap;word-break:break-all;color:var(--fg2)">';
+    // Tab 切換（只在有 segments 時顯示）
+    if (hasSegments) {
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
+      html += '<span style="font-size:0.78rem;color:var(--fg2)">System Prompt</span>';
+      html += '<span style="font-size:0.72rem;color:var(--fg2)">(' + spLen.toLocaleString() + ' chars, ~' + spTokens.toLocaleString() + ' tokens)</span>';
+      html += '<div style="display:flex;gap:2px;margin-left:auto">';
+      html += '<button class="btn btn-sm" style="font-size:0.7rem" onclick="document.getElementById(\\'ctx-sp-raw-' + traceId + '\\').style.display=\\'block\\';document.getElementById(\\'ctx-sp-mod-' + traceId + '\\').style.display=\\'none\\';this.style.background=\\'var(--purple)\\';this.nextElementSibling.style.background=\\'var(--bg3)\\'">原始</button>';
+      html += '<button class="btn btn-sm" style="font-size:0.7rem;background:var(--bg3)" onclick="document.getElementById(\\'ctx-sp-mod-' + traceId + '\\').style.display=\\'block\\';document.getElementById(\\'ctx-sp-raw-' + traceId + '\\').style.display=\\'none\\';this.style.background=\\'var(--purple)\\';this.previousElementSibling.style.background=\\'var(--bg3)\\'">模組</button>';
+      html += '</div></div>';
+    } else {
+      html += '<h4 style="color:var(--accent2);margin-bottom:4px;cursor:pointer" onclick="var e=document.getElementById(\\'ctx-sp-raw-' + traceId + '\\');e.style.display=e.style.display===\\'none\\'?\\'block\\':\\'none\\'">';
+      html += '▶ System Prompt <span style="font-size:0.78rem;color:var(--fg2)">(' + spLen.toLocaleString() + ' chars, ~' + spTokens.toLocaleString() + ' tokens)</span></h4>';
+    }
+
+    // 原始模式
+    html += '<div id="ctx-sp-raw-' + traceId + '" style="' + (hasSegments ? '' : 'display:none;') + 'max-height:500px;overflow-y:auto;background:var(--bg3);padding:8px;border-radius:4px;font-size:0.75rem;white-space:pre-wrap;word-break:break-all;color:var(--fg2)">';
     html += esc(ctx.systemPrompt ?? '');
-    html += '</div></div>';
+    html += '</div>';
+
+    // 模組模式
+    if (hasSegments) {
+      html += '<div id="ctx-sp-mod-' + traceId + '" style="display:none">';
+      var segs = bd.segments;
+      var sp = ctx.systemPrompt ?? '';
+      // 摘要列表
+      html += '<div style="font-size:0.78rem;color:var(--fg2);display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:8px">';
+      html += '<span style="color:var(--accent2)">Assembler 模組:</span>';
+      html += '<span>' + (bd.assemblerModules?.length ? bd.assemblerModules.map(function(m) { return '<code style="background:var(--bg3);padding:1px 4px;border-radius:3px;margin-right:3px">' + esc(m) + '</code>'; }).join('') : '—') + '</span>';
+      html += '<span style="color:var(--accent2)">Agent-Loop 區塊:</span>';
+      html += '<span>' + (bd.agentLoopBlocks?.length ? bd.agentLoopBlocks.map(function(b) { return '<code style="background:var(--bg3);padding:1px 4px;border-radius:3px;margin-right:3px">' + esc(b) + '</code>'; }).join('') : '—') + '</span>';
+      html += '</div>';
+      // 各段落可展開
+      for (var si = 0; si < segs.length; si++) {
+        var seg = segs[si];
+        var segContent = sp.substring(seg.offset, seg.offset + seg.length);
+        var segId = 'ctx-seg-' + traceId + '-' + si;
+        html += '<div style="margin-bottom:4px;border-left:3px solid var(--accent);padding-left:8px">';
+        html += '<div style="cursor:pointer;font-size:0.78rem;color:var(--accent2)" onclick="var e=document.getElementById(\\'' + segId + '\\');e.style.display=e.style.display===\\'none\\'?\\'block\\':\\'none\\'">';
+        html += '▶ <code>' + esc(seg.name) + '</code> <span style="color:var(--fg3)">(' + seg.length + ' chars)</span></div>';
+        html += '<div id="' + segId + '" style="display:none;max-height:300px;overflow-y:auto;background:var(--bg3);padding:6px;border-radius:4px;font-size:0.72rem;white-space:pre-wrap;word-break:break-all;color:var(--fg2);margin-top:2px">';
+        html += esc(segContent);
+        html += '</div></div>';
+      }
+      // 未被 segments 覆蓋的殘餘區段（agent-loop 追加的區塊）
+      if (segs.length > 0) {
+        var lastSeg = segs[segs.length - 1];
+        var lastEnd = lastSeg.offset + lastSeg.length;
+        if (lastEnd < sp.length) {
+          var remainder = sp.substring(lastEnd).replace(/^\\n+/, '');
+          if (remainder.length > 0) {
+            var remId = 'ctx-seg-' + traceId + '-rem';
+            html += '<div style="margin-bottom:4px;border-left:3px solid var(--fg3);padding-left:8px">';
+            html += '<div style="cursor:pointer;font-size:0.78rem;color:var(--fg3)" onclick="var e=document.getElementById(\\'' + remId + '\\');e.style.display=e.style.display===\\'none\\'?\\'block\\':\\'none\\'">';
+            html += '▶ <code>agent-loop 追加</code> <span style="color:var(--fg3)">(' + remainder.length + ' chars)</span></div>';
+            html += '<div id="' + remId + '" style="display:none;max-height:300px;overflow-y:auto;background:var(--bg3);padding:6px;border-radius:4px;font-size:0.72rem;white-space:pre-wrap;word-break:break-all;color:var(--fg2);margin-top:2px">';
+            html += esc(remainder);
+            html += '</div></div>';
+          }
+        }
+      }
+      html += '</div>';
+    }
+    html += '</div>';
 
     // CE Comparison
     if (ctx.ceApplied && ctx.messagesBeforeCE) {

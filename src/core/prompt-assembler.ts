@@ -276,15 +276,25 @@ export function registerPromptModule(mod: PromptModule): void {
 
 // ── 組裝器 ───────────────────────────────────────────────────────────────────
 
+/** 組裝段落（name + 原始文字，用於計算 offset） */
+export interface AssembleSegment {
+  name: string;
+  content: string;
+}
+
 /** assembleSystemPrompt 的 trace 輸出 */
 export interface AssembleTraceOutput {
   modulesActive: string[];
   modulesSkipped: string[];
+  /** 按組裝順序的各段落 name + content */
+  segments: AssembleSegment[];
 }
 
 export interface AssembleOpts extends PromptContext {
   /** 額外的 system prompt 片段（CATCLAW.md 內容、記憶 context 等） */
   extraBlocks?: string[];
+  /** extraBlocks 的對應名稱（用於 trace segment 標記），與 extraBlocks 同序 */
+  extraBlockNames?: string[];
   /** 覆寫使用的模組（null = 使用全部） */
   moduleFilter?: string[];
   /** 傳入此物件時，組裝完成後寫入模組追蹤資訊 */
@@ -310,10 +320,17 @@ export function assembleSystemPrompt(opts: AssembleOpts): string {
     : [];
 
   const parts: string[] = [];
+  const segments: AssembleSegment[] = [];
 
-  // 額外區塊（CATCLAW.md 等）優先注入
+  // 額外區塊（記憶 / channel override / mode extras）優先注入
   if (opts.extraBlocks?.length) {
-    parts.push(...opts.extraBlocks.filter(Boolean));
+    const extraNames = opts.extraBlockNames ?? [];
+    for (let i = 0; i < opts.extraBlocks.length; i++) {
+      const blk = opts.extraBlocks[i];
+      if (!blk) continue;
+      parts.push(blk);
+      segments.push({ name: extraNames[i] ?? `extra-${i}`, content: blk });
+    }
   }
 
   for (const mod of activeModules) {
@@ -321,6 +338,7 @@ export function assembleSystemPrompt(opts: AssembleOpts): string {
       const content = mod.build(opts);
       if (content) {
         parts.push(content);
+        segments.push({ name: mod.name, content });
       }
     } catch (err) {
       log.warn(`[prompt-assembler] 模組 ${mod.name} 組裝失敗：${err instanceof Error ? err.message : String(err)}`);
@@ -331,6 +349,7 @@ export function assembleSystemPrompt(opts: AssembleOpts): string {
   if (opts.traceOutput) {
     opts.traceOutput.modulesActive = activeModules.map(m => m.name);
     opts.traceOutput.modulesSkipped = skippedModules.map(m => m.name);
+    opts.traceOutput.segments = segments;
   }
 
   log.debug(`[prompt-assembler] 組裝完成：${activeModules.length} 個模組, ${parts.length} 個區段`);

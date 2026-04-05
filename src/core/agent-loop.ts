@@ -362,6 +362,7 @@ export interface AgentLoopOpts {
     channelOverride?: string;
     modeExtras?: string;
     assemblerModules?: string[];
+    assemblerSegments?: Array<{ name: string; content: string }>;
   };
 }
 
@@ -904,6 +905,31 @@ export async function* agentLoop(
   if (trace) {
     const ceApplied = (contextEngine?.lastBuildBreakdown?.strategiesApplied?.length ?? 0) > 0;
     const hints = opts.promptBreakdownHints;
+
+    // 計算 segments offset（從 assembler segments + agent-loop blocks 的 content 定位）
+    const segments: Array<{ name: string; offset: number; length: number }> = [];
+    if (hints?.assemblerSegments || _agentLoopBlocks.length > 0) {
+      let cursor = 0;
+      // agent-loop prepend: session-note（在最前面）
+      // agent-loop prepend: memory-context（在 assembler 之前）
+      // 然後是 assembler segments
+      // 最後是 agent-loop appends: group-isolation, plan-mode, deferred-tools, token-nudge
+
+      // 用 indexOf 搜尋每段在 systemPrompt 中的位置
+      const allSegments: Array<{ name: string; content: string }> = [];
+      // assembler segments（含 extraBlocks + modules）
+      if (hints?.assemblerSegments) {
+        allSegments.push(...hints.assemblerSegments);
+      }
+      for (const seg of allSegments) {
+        const idx = systemPrompt.indexOf(seg.content, cursor);
+        if (idx >= 0) {
+          segments.push({ name: seg.name, offset: idx, length: seg.content.length });
+          cursor = idx + seg.content.length;
+        }
+      }
+    }
+
     trace.recordContextSnapshot({
       systemPrompt,
       memoryContext: memoryContextBlock || hints?.memoryContext || undefined,
@@ -913,6 +939,7 @@ export async function* agentLoop(
         modeExtras: hints?.modeExtras,
         assemblerModules: hints?.assemblerModules ?? [],
         agentLoopBlocks: _agentLoopBlocks,
+        segments: segments.length > 0 ? segments : undefined,
       },
       messagesBeforeCE: ceApplied ? rawHistory as unknown[] : undefined,
       messagesAfterCE: messages as unknown[],

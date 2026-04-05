@@ -664,8 +664,18 @@ async function handleMessage(
       const moduleFilter = getModulesForIntent(intent);
       log.debug(`[discord] Intent: ${intent}, modules: ${moduleFilter ? moduleFilter.join(",") : "all"}`);
 
-      const assemblerTrace: AssembleTraceOutput = { modulesActive: [], modulesSkipped: [] };
-      const extraBlocks = [systemPromptFromMemory, channelSystemOverride, modeExtrasBlock].filter((s): s is string => !!s);
+      const assemblerTrace: AssembleTraceOutput = { modulesActive: [], modulesSkipped: [], segments: [] };
+      // extraBlocks + extraBlockNames 保持同序（filter 掉空值時同步移除名稱）
+      const _extraRaw: Array<[string, string | undefined]> = [
+        ["memory-recall", systemPromptFromMemory],
+        ["channel-override", channelSystemOverride],
+        ["mode-extras", modeExtrasBlock],
+      ];
+      const extraBlocks: string[] = [];
+      const extraBlockNames: string[] = [];
+      for (const [name, blk] of _extraRaw) {
+        if (blk) { extraBlocks.push(blk); extraBlockNames.push(name); }
+      }
       const combinedSystemPrompt = assembleSystemPrompt({
         role: accountRole as any,
         mode: modePreset,
@@ -677,6 +687,7 @@ async function handleMessage(
         speakerRole: accountRole,
         activeMcpServers: ["discord"], // Discord channel 永遠有 Discord context
         extraBlocks,
+        extraBlockNames,
         moduleFilter,
         traceOutput: assemblerTrace,
       });
@@ -823,6 +834,7 @@ async function handleMessage(
           channelOverride: channelSystemOverride || undefined,
           modeExtras: modeExtrasBlock || undefined,
           assemblerModules: assemblerTrace.modulesActive,
+          assemblerSegments: assemblerTrace.segments,
         },
       }, {
         sessionManager: getPlatformSessionManager(),

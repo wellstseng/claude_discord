@@ -658,6 +658,13 @@ export class TraceStore {
 
 // ── TraceContextStore（context snapshot 持久化）─────────────────────────────
 
+/** System prompt 中的一個段落（用於模組模式檢視） */
+export interface TracePromptSegment {
+  name: string;
+  offset: number;
+  length: number;
+}
+
 /** Prompt 組裝分類明細 */
 export interface TracePromptBreakdown {
   /** Memory recall 注入的原始文字 */
@@ -670,6 +677,8 @@ export interface TracePromptBreakdown {
   assemblerModules: string[];
   /** agent-loop 追加的區塊名稱（memory-context / group-isolation / plan-mode / session-note / deferred-tools / token-nudge） */
   agentLoopBlocks: string[];
+  /** 各段落在 systemPrompt 中的 offset + length（用於模組模式切割顯示） */
+  segments?: TracePromptSegment[];
 }
 
 /** Context snapshot 記錄（存獨立 JSON，避免 JSONL 過度膨脹） */
