@@ -10,12 +10,12 @@
  *   // 結果為完整 system prompt 字串，可直接傳給 agent-loop
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { log } from "../logger.js";
 import type { Role } from "../accounts/registry.js";
 import type { ModePreset } from "./config.js";
-import { config } from "./config.js";
+import { config, resolveWorkspaceDir } from "./config.js";
 
 // ── Prompt Module 介面 ──────────────────────────────────────────────────────
 
@@ -51,7 +51,48 @@ export interface PromptContext {
   activeMcpServers?: string[];
 }
 
+// ── Context-aware Intent Detection ──────────────────────────────────────────
+
+export type PromptIntent = "coding" | "research" | "conversation";
+
+const CODING_KEYWORDS = /\b(git|commit|push|pull|merge|branch|rebase|diff|code|bug|fix|refactor|test|build|compile|deploy|npm|tsc|lint|pr|issue|file|function|class|module|import|error|exception|stack|debug|log)\b/i;
+const RESEARCH_KEYWORDS = /\b(search|find|look up|investigate|research|explain|what is|how does|why|compare|analyze|review|check|inspect|describe|list|show|status)\b/i;
+
+export function detectIntent(userMessage: string): PromptIntent {
+  const codingScore = (userMessage.match(CODING_KEYWORDS) || []).length;
+  const researchScore = (userMessage.match(RESEARCH_KEYWORDS) || []).length;
+
+  if (codingScore >= 2) return "coding";
+  if (researchScore >= 2 && codingScore === 0) return "research";
+  if (codingScore >= 1) return "coding";
+  return "conversation";
+}
+
+/** 根據 intent 決定要啟用哪些模組 */
+export function getModulesForIntent(intent: PromptIntent): string[] | undefined {
+  switch (intent) {
+    case "coding":
+      // 全部模組
+      return undefined;
+    case "research":
+      // 省略 coding-rules、git-rules
+      return ["date-time", "identity", "catclaw-md", "tools-usage", "output-format", "discord-reply", "memory-rules"];
+    case "conversation":
+      // 最小 prompt
+      return ["date-time", "identity", "catclaw-md", "output-format", "discord-reply", "memory-rules"];
+  }
+}
+
 // ── 內建模組 ─────────────────────────────────────────────────────────────────
+
+const dateTimeModule: PromptModule = {
+  name: "date-time",
+  priority: 5,
+  build: () => {
+    const nowStr = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false });
+    return `[系統資訊] 當前時間（Asia/Taipei）：${nowStr}`;
+  },
+};
 
 const identityModule: PromptModule = {
   name: "identity",
@@ -200,16 +241,22 @@ const claudeMdModule: PromptModule = {
   name: "catclaw-md",
   priority: 15, // after identity (10), before tools-usage (20)
   build: (ctx) => {
-    if (!ctx.workspaceDir) return "";
-    const content = loadCatclawMdHierarchy(ctx.workspaceDir);
-    if (!content) return "";
-    return `## Project Instructions (CATCLAW.md)\n\n${content}`;
+    const wsDir = ctx.workspaceDir ?? (() => { try { return resolveWorkspaceDir(); } catch { return ""; } })();
+    if (!wsDir) return "";
+    const content = loadCatclawMdHierarchy(wsDir);
+    if (content) return `## Project Instructions (CATCLAW.md)\n\n${content}`;
+    // Auto-create default CATCLAW.md (mirrors loadBaseSystemPrompt behavior)
+    const defaultContent = `# CATCLAW.md — CatClaw Bot 行為規則\n\n你是 CatClaw，一個專案知識代理人。\n\n## 工作目錄\n\n你的工作目錄是 \`${wsDir}\`。`;
+    const p = join(wsDir, "CATCLAW.md");
+    try { writeFileSync(p, defaultContent, "utf-8"); log.info(`[prompt-assembler] 已產生預設 CATCLAW.md：${p}`); } catch { /* ignore */ }
+    return `## Project Instructions (CATCLAW.md)\n\n${defaultContent}`;
   },
 };
 
 // ── Module Registry ──────────────────────────────────────────────────────────
 
 const builtinModules: PromptModule[] = [
+  dateTimeModule,
   identityModule,
   claudeMdModule,
   toolsUsageModule,

@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { BridgeConfig } from "./core/config.js";
-import { config, getChannelAccess, loadBaseSystemPrompt } from "./core/config.js";
+import { config, getChannelAccess } from "./core/config.js";
 import { enqueue } from "./session.js";
 import { createReplyHandler } from "./reply.js";
 import { matchSkill } from "./skills/registry.js";
@@ -51,11 +51,12 @@ import { resolveProvider, getChannelAccess as getCoreChannelAccess } from "./cor
 import { getProviderRegistry } from "./providers/registry.js";
 import { agentLoop } from "./core/agent-loop.js";
 import { getChannelThinking } from "./skills/builtin/think.js";
-import { getChannelModePreset, getModeThinking } from "./core/mode.js";
+import { getChannelMode, getChannelModePreset, getModeThinking } from "./core/mode.js";
 import { getChannelProviderOverride } from "./skills/builtin/use.js";
 import { getChannelSystemOverride } from "./skills/builtin/system.js";
 import { eventBus } from "./core/event-bus.js";
 import { handleAgentLoopReply } from "./core/reply-handler.js";
+import { assembleSystemPrompt, detectIntent, getModulesForIntent } from "./core/prompt-assembler.js";
 import { setDiscordClient, getSubagentThreadBinding } from "./core/subagent-discord-bridge.js";
 import { parseApprovalReply, parseApprovalButtonId, resolveApproval, setApprovalDiscordClient } from "./core/exec-approval.js";
 import { abortRunningTurn } from "./skills/builtin/stop.js";
@@ -579,10 +580,6 @@ async function handleMessage(
       const isGroupChannel = !!firstMessage.guild;
       const prompt = combinedText;
 
-      // ── Base System Prompt（CATCLAW.md → AGENTS.md，共用函式） ──────────
-      const baseSystemPrompt = loadBaseSystemPrompt();
-      if (baseSystemPrompt) log.debug(`[discord] 載入 base system prompt (${baseSystemPrompt.length} 字)`);
-
       // ── 記憶 Recall（三層：全域+專案+個人） ─────────────────────────────
       trace.recordContextStart();
       let systemPromptFromMemory = "";
@@ -613,11 +610,7 @@ async function handleMessage(
         }
       }
 
-      // ── 當前日期/時間注入 ────────────────────────────────────────────────────
-      const nowStr = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false });
-      const dateBlock = `[系統資訊] 當前時間（Asia/Taipei）：${nowStr}`;
-
-      // ── System Prompt 組裝（不含 inbound history） ──────────────────────
+      // ── System Prompt 組裝（prompt-assembler + 動態區塊） ──────────────
       const channelSystemOverride = getChannelSystemOverride(firstMessage.channelId);
 
       // Mode prompt extras（workspace/prompts/{name}.md）
@@ -628,17 +621,34 @@ async function handleMessage(
         const { readFileSync, existsSync } = await import("node:fs");
         const { join } = await import("node:path");
         const promptsDir = join(resolveWorkspaceDir(), "prompts");
-        const parts: string[] = [];
+        const extras: string[] = [];
         for (const name of modePreset.systemPromptExtras) {
           const p = join(promptsDir, `${name}.md`);
           if (existsSync(p)) {
-            try { parts.push(readFileSync(p, "utf-8")); } catch { /* skip */ }
+            try { extras.push(readFileSync(p, "utf-8")); } catch { /* skip */ }
           }
         }
-        if (parts.length > 0) modeExtrasBlock = parts.join("\n\n");
+        if (extras.length > 0) modeExtrasBlock = extras.join("\n\n");
       }
 
-      const combinedSystemPrompt = [baseSystemPrompt, systemPromptFromMemory, channelSystemOverride, modeExtrasBlock, dateBlock].filter(Boolean).join("\n\n");
+      // Context-aware intent detection → moduleFilter
+      const intent = detectIntent(prompt);
+      const moduleFilter = getModulesForIntent(intent);
+      log.debug(`[discord] Intent: ${intent}, modules: ${moduleFilter ? moduleFilter.join(",") : "all"}`);
+
+      const combinedSystemPrompt = assembleSystemPrompt({
+        role: accountRole as any,
+        mode: modePreset,
+        modeName: getChannelMode(firstMessage.channelId),
+        workspaceDir: undefined, // assembler 自行 resolveWorkspaceDir
+        isGroupChannel,
+        speakerDisplay: firstMessage.author.displayName,
+        accountId,
+        speakerRole: accountRole,
+        activeMcpServers: ["discord"], // Discord channel 永遠有 Discord context
+        extraBlocks: [systemPromptFromMemory, channelSystemOverride, modeExtrasBlock].filter((s): s is string => !!s),
+        moduleFilter,
+      });
 
       // ── Inbound History（注入到 messages 層，非 system prompt）──────────
       let inboundContext: string | undefined;
