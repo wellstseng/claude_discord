@@ -2173,8 +2173,8 @@ function appendChatMsg(role, text) {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/\`\`\`([\s\S]*?)\`\`\`/g, '<pre style="background:var(--bg2);padding:8px;border-radius:4px;overflow-x:auto;text-align:left">$1</pre>')
     .replace(/\`([^\`]+)\`/g, '<code style="background:var(--bg2);padding:1px 4px;border-radius:3px">$1</code>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
+    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+    .replace(/\\n/g, '<br>');
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
   return div;
@@ -2232,7 +2232,7 @@ async function sendChat() {
                 .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                 .replace(/\`\`\`([\s\S]*?)\`\`\`/g, '<pre style="background:var(--bg2);padding:8px;border-radius:4px;overflow-x:auto">$1</pre>')
                 .replace(/\`([^\`]+)\`/g, '<code style="background:var(--bg2);padding:1px 4px;border-radius:3px">$1</code>')
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
                 .replace(/\\n/g, '<br>');
               document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
             } else if (data.type === 'tool_call') {
