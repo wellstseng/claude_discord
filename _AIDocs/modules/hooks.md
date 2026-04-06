@@ -91,13 +91,44 @@ type HookAction =
 ## HookRegistry
 
 ```typescript
-initHookRegistry(hooks: HookDefinition[]): void
-getHookRegistry(): HookRegistry
+initHookRegistry(definitions: HookDefinition[]): HookRegistry
+getHookRegistry(): HookRegistry | null
 
 class HookRegistry {
+  /** 重新載入 hook 定義（config hot-reload 時呼叫） */
+  reload(definitions: HookDefinition[]): void
+
   count(event: HookEvent): number
-  runPreToolUse(input: PreToolUseInput): Promise<{ blocked: boolean; reason?: string; params?: unknown }>
+
+  runPreToolUse(input: PreToolUseInput): Promise<
+    | { blocked: false; params: Record<string, unknown> }
+    | { blocked: true; reason: string }
+  >
+
   runPostToolUse(input: PostToolUseInput): Promise<{ result?: unknown; error?: string }>
+
+  /** fire-and-await，錯誤不拋出（只 log.warn） */
+  runSessionStart(input: SessionStartInput): Promise<void>
+  runSessionEnd(input: SessionEndInput): Promise<void>
+}
+```
+
+### SessionStart / SessionEnd 輸入
+
+```typescript
+interface SessionStartInput {
+  event: "SessionStart";
+  sessionKey: string;
+  accountId: string;
+  channelId: string;
+}
+
+interface SessionEndInput {
+  event: "SessionEnd";
+  sessionKey: string;
+  accountId: string;
+  channelId: string;
+  turnCount: number;
 }
 ```
 

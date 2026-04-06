@@ -181,6 +181,32 @@ index.ts
 | `logLevel` | "debug"/"info"/"warn"/"error"/"silent" | `"info"` | — | Log 層級 |
 | `cron.enabled` | boolean | `false` | — | 啟用排程服務 |
 | `cron.maxConcurrentRuns` | number | `1` | — | 同時執行 job 上限 |
+| **session** | | | | |
+| `session.ttlHours` | number | `168` | — | Session 閒置 TTL（7 天） |
+| `session.maxHistoryTurns` | number | `100` | — | 最大保留 turn 數 |
+| `session.compactAfterTurns` | number | `30` | — | 超過此值觸發 CE 壓縮 |
+| `session.persistPath` | string | `"data/sessions.json"` | — | 持久化路徑 |
+| **memory** | | | | |
+| `memory.enabled` | boolean | `true` | — | 記憶系統開關 |
+| `memory.root` | string | `"memory"` | — | 記憶根目錄 |
+| `memory.contextBudget` | number | `3000` | — | 注入 token 上限 |
+| `memory.recall.vectorSearch` | boolean | `false` | — | 啟用向量搜尋 |
+| `memory.extract.perTurn` | boolean | `true` | — | 每輪自動萃取 |
+| **safety** | | | | |
+| `safety.enabled` | boolean | `true` | — | 安全攔截總開關 |
+| `safety.selfProtect` | boolean | `true` | — | 自我保護（禁止修改自身設定） |
+| `safety.collabConflict.enabled` | boolean | `true` | — | 協作衝突偵測 |
+| `safety.reversibility.threshold` | number | `2` | — | 可逆性警告門檻（0-3） |
+| **workflow** | | | | |
+| `workflow.guardian.enabled` | boolean | `true` | — | Workflow Guardian 總開關 |
+| `workflow.fixEscalation.enabled` | boolean | `true` | — | 精確修正升級 |
+| `workflow.wisdomEngine.enabled` | boolean | `true` | — | 經驗累積引擎 |
+| `workflow.aidocs.enabled` | boolean | `true` | — | _AIDocs 自動維護 |
+| **accounts** | | | | |
+| `accounts.registrationMode` | string | `"invite"` | — | 註冊模式（open/invite/closed） |
+| `accounts.defaultRole` | string | `"member"` | — | 新帳號預設角色 |
+| `accounts.pairingEnabled` | boolean | `true` | — | 是否允許配對 |
+| `accounts.pairingExpireMinutes` | number | `10` | — | 配對邀請過期分鐘 |
 
 > **注意**：config.json（catclaw.json）支援 JSONC（`//` 行尾 / 整行註解）。`claude.cwd` / `claude.command` 已移除，改由環境變數 `CATCLAW_CONFIG_DIR` / `CATCLAW_WORKSPACE` / `CATCLAW_CLAUDE_BIN` 控制。
 

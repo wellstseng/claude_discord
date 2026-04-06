@@ -78,7 +78,7 @@ interface SkillResult {
 | `plan.ts` | plan | 計畫管理 |
 | `project.ts` | project | 專案管理 |
 | `register.ts` | register | 帳號註冊 |
-| `restart.ts` | restart | 重啟 |
+| `restart.ts` | restart | 重啟（trigger: `重啟`、`重啟catclaw`、`重啟 catclaw`、`restart`、`restart catclaw`） |
 | `session-manage.ts` | session | Session 管理 |
 | `subagents.ts` | subagents | 子 agent 管理 |
 | `system.ts` | system | System prompt 覆寫 |

@@ -93,6 +93,25 @@ WriteGateResult：
 - `written: boolean`
 - `reason?: string` — dedup 拒絕原因
 
+### Seed & Rebuild
+
+```typescript
+seedFromDir(
+  dir: string,
+  namespace: string
+): Promise<{ seeded: number; skipped: number; errors: number }>
+```
+
+掃描記憶目錄下所有 atom `.md` 檔，嵌入並寫入 LanceDB。
+用途：首次安裝或手動複製 atom 後補跑 embedding。
+排除：`_vectordb`、`episodic`、`_staging`、`_reference` 目錄和 `MEMORY.md`。
+
+```typescript
+rebuildIndex(namespace: string): Promise<void>
+```
+
+重建指定 namespace 的向量索引（呼叫 VectorService.rebuild）。
+
 ### 狀態
 
 ```typescript

@@ -92,6 +92,66 @@
   // 實際 credential 放 {workspace}/agents/default/auth-profile.json
   // "authConfig": { "order": { "anthropic": ["anthropic:default"] } },
 
+  // ── Session ─────────────────────────────────────────────────────
+  "session": {
+    "ttlHours": 168,             // Session 閒置 TTL（小時），預設 7 天
+    "maxHistoryTurns": 100,      // 最大保留 turn 數
+    "compactAfterTurns": 30,     // 超過此 turn 數觸發 CE 壓縮
+    "persistPath": "data/sessions.json"  // 持久化路徑（相對 CATCLAW_WORKSPACE）
+  },
+
+  // ── Memory ──────────────────────────────────────────────────────
+  "memory": {
+    "enabled": true,
+    "root": "memory",            // 記憶根目錄（相對 catclawDir）
+    "vectorDbPath": "memory/_vectordb",
+    "contextBudget": 3000,       // 注入 token 上限
+    "contextBudgetRatio": { "global": 0.3, "project": 0.4, "account": 0.3 },
+    "writeGate": { "enabled": true, "dedupThreshold": 0.80 },
+    "recall": {
+      "triggerMatch": true,
+      "vectorSearch": false,     // 啟用向量搜尋
+      "relatedEdgeSpreading": false,
+      "vectorMinScore": 0.65,
+      "vectorTopK": 5,
+      "llmSelect": false,
+      "llmSelectMax": 3
+    },
+    "extract": {
+      "enabled": true,
+      "perTurn": true,
+      "onSessionEnd": true,
+      "maxItemsPerTurn": 3,
+      "maxItemsSessionEnd": 5,
+      "minNewChars": 100
+    },
+    "consolidate": {
+      "autoPromoteThreshold": 4,
+      "suggestPromoteThreshold": 2,
+      "decay": { "enabled": true, "halfLifeDays": 30, "archiveThreshold": 0.1 }
+    },
+    "episodic": { "enabled": true, "ttlDays": 30 },
+    "rutDetection": { "enabled": true, "windowSize": 10, "minOccurrences": 3 },
+    "oscillation": { "enabled": true },
+    "sessionMemory": { "enabled": true, "intervalTurns": 5, "maxHistoryTurns": 20 }
+  },
+
+  // ── Workflow ─────────────────────────────────────────────────────
+  "workflow": {
+    "guardian": { "enabled": true, "syncReminder": true, "fileTracking": true },
+    "fixEscalation": { "enabled": true, "retryThreshold": 3 },
+    "wisdomEngine": { "enabled": true },
+    "aidocs": { "enabled": true, "contentGate": true }
+  },
+
+  // ── Accounts ────────────────────────────────────────────────────
+  "accounts": {
+    "registrationMode": "invite",   // "open" | "invite" | "closed"
+    "defaultRole": "member",
+    "pairingEnabled": true,
+    "pairingExpireMinutes": 10
+  },
+
   "providerRouting": {
     "failoverChain": ["anthropic", "ollama"],  // provider 層級降級
     "circuitBreaker": { "threshold": 3, "cooldownMs": 60000 }

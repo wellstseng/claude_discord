@@ -166,6 +166,8 @@ const ch = await client.channels.fetch(channelId);
 | cron exec 輸出亂碼（cp950） | §20 | 注入 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1` |
 | cron exec 失敗時頻道無回報 | §21 | catch 區塊加 Discord 錯誤訊息發送 |
 
+> §18-21 編號已依序排列（2026-04-06 修正）
+
 ## 18. cron exec 在 Windows 失敗（spawn sh ENOENT → cmd 路徑不通）
 
 **現象**：`execFile("sh")` 報 ENOENT；改 `exec()` 後走 cmd.exe，MSYS2 路徑 `/c/Projects/...` 不認。
@@ -173,6 +175,14 @@ const ch = await client.channels.fetch(channelId);
 **原因**：Windows PM2 環境 PATH 沒有 `sh`；`exec()` 預設走 cmd.exe，不支援 MSYS2 路徑和 bash 語法。
 
 **解法**：偵測 `platform() === "win32"` 時用 `execFile("bash", ["-c", cmd])`（Git Bash），Unix 用 `execFile("sh", ["-c", cmd])`。確保 Git Bash 在 PATH 中。
+
+## 19. catclaw.json trailing comma 導致 hot-reload 持續失敗
+
+**現象**：PM2 error log 持續報 `Expected double-quoted property name in JSON at position N`，config 改了但不生效。
+
+**原因**：catclaw.json 支援 JSONC（`//` 註解），但 strip 註解後仍需合法 JSON。guilds 物件最後一個 entry 後面的 trailing comma 在 `JSON.parse()` 時報錯。
+
+**解法**：移除 trailing comma。注意 JSONC ≠ JSON5，只有 `//` 註解會被 strip，其他語法糖（trailing comma）不支援。
 
 ## 20. cron exec 輸出亂碼（Windows cp950）
 
@@ -189,11 +199,3 @@ const ch = await client.channels.fetch(channelId);
 **原因**：`runJob` 的 catch 區塊只記錄 lastError，不送 Discord。
 
 **解法**：catch 區塊加入 Discord 錯誤訊息發送（`⚠️ 排程 **{name}** 執行失敗：{message}`），只在有 channelId 且非 silent 時觸發，發送失敗不影響重試流程。
-
-## 19. catclaw.json trailing comma 導致 hot-reload 持續失敗
-
-**現象**：PM2 error log 持續報 `Expected double-quoted property name in JSON at position N`，config 改了但不生效。
-
-**原因**：catclaw.json 支援 JSONC（`//` 註解），但 strip 註解後仍需合法 JSON。guilds 物件最後一個 entry 後面的 trailing comma 在 `JSON.parse()` 時報錯。
-
-**解法**：移除 trailing comma。注意 JSONC ≠ JSON5，只有 `//` 註解會被 strip，其他語法糖（trailing comma）不支援。

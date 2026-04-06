@@ -44,14 +44,32 @@ Permission Gate → Safety Guard → Hook → Tool 執行
 
 ```typescript
 class SafetyGuard {
-  check(toolName: string, params: unknown, permCtx?: PermissionContext): GuardResult
+  check(toolName: string, params: Record<string, unknown>, ctx?: PermissionContext): GuardResult
 }
 
 interface GuardResult {
   blocked: boolean;
   reason?: string;
 }
+
+/** 呼叫 check() 時傳入的身份上下文 */
+interface PermissionContext {
+  accountId?: string;
+  role?: string;
+}
 ```
+
+### check() 內部分流
+
+| toolName | 檢查項目 |
+|----------|---------|
+| `run_command` | checkBash（黑名單/白名單）→ checkBashProtectedPaths |
+| `read_file` | checkFilesystem(path, "read") |
+| `write_file` / `edit_file` | checkFilesystem(path, "write") |
+| `glob` / `grep` | checkFilesystem(path, "read")（有 path 時） |
+| 其他 | 不攔截 |
+
+所有 tool 在上述檢查前，先跑 `checkToolPermissions()`（per-role / per-account 規則）。
 
 ### 設定
 
