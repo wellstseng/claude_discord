@@ -56,15 +56,15 @@ recall(
 
 RecallResult：
 - `fragments: AtomFragment[]` — 命中的 atom 片段
+- `blindSpot: boolean` — 所有層均無命中時為 true（Blind-Spot 警告）
 - `degraded: boolean` — vector service 離線時降級為 trigger-only
-- `blindSpot?: string` — 未命中的 trigger 提示
 
 ### Context 組裝
 
 ```typescript
 buildContext(
   fragments: AtomFragment[],
-  query: string,
+  prompt: string,
   blindSpot = false
 ): ContextPayload
 ```
@@ -98,8 +98,9 @@ checkWrite(content: string, namespace: string, bypass = false): Promise<WriteGat
 ```
 
 WriteGateResult：
-- `written: boolean`
-- `reason?: string` — dedup 拒絕原因
+- `allowed: boolean`
+- `reason: "bypass" | "injection" | "duplicate" | "ok"`
+- `similarity?: number` — dedup 比對相似度（duplicate 時有值）
 
 ### Seed & Rebuild
 
@@ -159,7 +160,10 @@ recall(query)
 | `recall.vectorMinScore` | 0.65 | 向量最低相關度 |
 | `recall.vectorTopK` | 10 | 向量 top-K |
 | `extract.perTurn` | true | 每輪自動萃取 |
+| `extract.onSessionEnd` | true | Session 結束時全量掃描萃取 |
 | `extract.maxItemsPerTurn` | 3 | 每輪最多萃取數 |
+| `extract.maxItemsSessionEnd` | 5 | Session 結束時最多萃取數 |
+| `extract.minNewChars` | 500 | 逐輪萃取最低新增字元門檻 |
 
 ## 全域單例
 

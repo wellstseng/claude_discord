@@ -315,7 +315,7 @@ Hot-reload：存檔後 500ms 內自動生效，不需重啟。
         "everyMs": 3600000
       },
       "action": {
-        "type": "claude",
+        "type": "claude-acp",
         "channelId": "你的頻道ID",
         "prompt": "請摘要最近的工作進度"
       },
@@ -363,22 +363,25 @@ Hot-reload：存檔後 500ms 內自動生效，不需重啟。
 | `"every"` | `everyMs`（毫秒） | — | 固定間隔，從啟動時起算 |
 | `"at"` | `at`（ISO 8601 字串） | — | 一次性，時間到即執行 |
 
-### CronAction 三種格式
+### CronAction 四種格式
 
 | type | 必填欄位 | 選填欄位 | 說明 |
 |------|---------|---------|------|
 | `"message"` | `channelId`, `text` | — | 直接發送純文字訊息 |
-| `"claude"` | `channelId`, `prompt` | — | spawn Claude turn（每次獨立 session，不 resume） |
-| `"exec"` | `command` | `channelId`, `silent`, `timeoutSec` | 執行 shell 指令（`sh -c`），cwd 為 CATCLAW_WORKSPACE |
+| `"claude-acp"` | `channelId`, `prompt` | `timeoutSec` | 透過 ACP（Claude CLI spawn）執行 turn，每次獨立 session |
+| `"exec"` | `command` | `channelId`, `silent`, `timeoutSec`, `shell`, `background` | 執行 shell 指令，cwd 為 CATCLAW_WORKSPACE |
+| `"subagent"` | `task` | `provider`, `timeoutMs`, `notify` | 透過新平台 agentLoop 執行任務，完成後通知頻道 |
 
 #### exec action 欄位說明
 
 | 欄位 | 型別 | 預設 | 說明 |
 |------|------|------|------|
-| `command` | string | — | shell 指令（透過 `sh -c` 執行） |
+| `command` | string | — | shell 指令（透過偵測到的 shell 執行，Unix: sh, Windows: bash>powershell>cmd） |
 | `channelId` | string | — | 可選，設了會把 stdout 送到 Discord 頻道 |
 | `silent` | boolean | `false` | `true` 時有 channelId 也不送訊息（只在 log） |
 | `timeoutSec` | number | `120` | 逾時秒數，超過後 SIGTERM 終止 |
+| `shell` | string | 自動偵測 | 指定 shell（`"bash"`/`"sh"`/`"cmd"`/`"powershell"`） |
+| `background` | boolean | — | 設為 `false` 時 Windows 不隱藏視窗 |
 
 ### CronJobEntry 所有欄位
 

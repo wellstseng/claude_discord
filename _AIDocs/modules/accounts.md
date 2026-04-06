@@ -25,7 +25,7 @@ type Role = "platform-owner" | "admin" | "developer" | "member" | "guest";
 | admin | standard + elevated + admin |
 | developer | standard + elevated |
 | member | standard |
-| guest | standard（受 rate limit） |
+| guest | public（受 rate limit，extraTools 補 read_file/glob/grep） |
 
 ## Account 型別
 
@@ -67,7 +67,7 @@ interface Identity {
 | `get(accountId)` | 取得帳號（快取優先） |
 | `update(accountId, patch)` | 更新帳號 |
 | `resolveIdentity(platform, platformId)` | 身份反查 → accountId |
-| `linkIdentity(accountId, identity)` | 綁定新身份 |
+| `linkIdentity(accountId, platform, platformId)` | 綁定新身份 |
 | `listAccountIds()` | 列出所有帳號 ID |
 
 ## PermissionGate

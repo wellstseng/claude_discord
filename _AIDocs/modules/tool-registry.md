@@ -26,7 +26,7 @@ class ToolRegistry {
 interface Tool {
   name: string;
   description: string;
-  tier: "standard" | "elevated" | "admin";
+  tier: "public" | "standard" | "elevated" | "admin" | "owner";
   deferred?: boolean;          // true = 名稱注入 system prompt，schema 需 tool_search 載入
   parameters: JsonSchema;
   execute(params: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
@@ -41,16 +41,16 @@ interface ToolContext {
   sessionId: string;
   channelId: string;
   projectId?: string;
-  toolTier?: string;
-  parentRunId?: string;
-  workspaceDir?: string;
-  abortSignal?: AbortSignal;
+  eventBus: Pick<EventEmitter, "emit">;
+  spawnDepth?: number;       // 0=頂層，≥2 時禁止再 spawn
+  parentRunId?: string;      // 父 subagent 的 runId
+  traceId?: string;          // 當前 turn 的 traceId
 }
 ```
 
 ## 17 Builtin Tools
 
-### 檔案操作（standard）
+### 檔案操作（elevated）
 
 | Tool | 說明 |
 |------|------|
@@ -88,7 +88,7 @@ interface ToolContext {
 | `config_get` | 讀取 catclaw.json 設定 |
 | `config_patch` | 修改 catclaw.json 設定 |
 
-### Subagent（elevated）
+### Subagent（standard）
 
 | Tool | 說明 |
 |------|------|
@@ -107,13 +107,13 @@ interface ToolContext {
 |------|------|
 | `task_manage` | 任務 CRUD（TaskStore） |
 
-### LLM（elevated，deferred）
+### LLM（standard，deferred）
 
 | Tool | 說明 |
 |------|------|
 | `llm_task` | 委派子任務給 LLM（非 agent loop，單次推理） |
 
-### Meta
+### Meta（public）
 
 | Tool | 說明 |
 |------|------|
@@ -136,9 +136,11 @@ MCP server 的 tools 透過 `McpClient` 自動注冊到 ToolRegistry。
 
 | Tier | 說明 |
 |------|------|
+| `public` | 未註冊也可用 |
 | `standard` | 所有角色可用 |
 | `elevated` | member 以上 |
-| `admin` | platform-owner / admin |
+| `admin` | admin 以上 |
+| `owner` | platform-owner 專用 |
 
 PermissionGate 根據 accountId 的角色過濾可用 tools。
 

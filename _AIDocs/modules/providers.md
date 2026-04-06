@@ -80,24 +80,28 @@ pi-ai 使用分離的 `ToolResultMessage`（role: "toolResult"）。
 
 多憑證輪替 + cooldown 管理。
 
-### 資料分離
+### 憑證檔格式（V2，對齊 OpenClaw）
 
-| 用途 | 路徑 |
-|------|------|
-| 憑證（user-editable） | `{CATCLAW_WORKSPACE}/agents/default/auth-profile.json` |
-| 狀態（runtime-managed） | `{CATCLAW_WORKSPACE}/data/auth-profiles/{providerId}-profiles.json` |
-
-### 憑證檔格式
+路徑：`{CATCLAW_WORKSPACE}/agents/default/auth-profile.json`
 
 ```json
-[{ "id": "key-1", "credential": "sk-ant-oat01-..." }]
+{
+  "version": 1,
+  "profiles": {
+    "anthropic:default": { "type": "api_key", "provider": "anthropic", "key": "sk-ant-..." }
+  },
+  "order": { "anthropic": ["anthropic:default"] },
+  "usageStats": { "anthropic:default": { "lastUsed": 0, "cooldownUntil": 0 } }
+}
 ```
+
+profileId 格式：`"provider:name"`，credential type：`api_key` / `token` / `oauth`。
 
 ### 生命週期
 
 1. `new AuthProfileStore(filePath: string)` + `load()`
-2. `load()` → 讀 state 檔 → 讀憑證檔 → `_mergeCredentials()`（更新 credential，保留 state）
-3. `pickForProvider(provider: string): PickResult | null` → 找該 provider 下第一個未 disabled + cooldown 未過期的 profile
+2. `load()` → 讀取 auth-profile.json（profiles + order + usageStats）
+3. `pickForProvider(provider: string): PickResult | null` → 依 order 找未 disabled + cooldown 未過期的 profile
 4. 呼叫失敗 → `setCooldown(id, reason)` 設 cooldown 或永久停用
 
 ### Cooldown 時長

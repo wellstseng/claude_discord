@@ -102,7 +102,7 @@ resetVectorService(): void
 
 | 呼叫者 | 用途 |
 |--------|------|
-| `platform.ts` | `initVectorService()` 初始化 |
+| `memory/engine.ts` | `init()` 時呼叫 `initVectorService()` 初始化 |
 | `memory/recall.ts` | `search()` 向量語意搜尋 atom |
 | `memory/engine.ts` | `upsert()` 萃取後索引 atom |
 | `skills/vector.ts` | `/vector` skill 管理介面 |

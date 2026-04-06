@@ -12,7 +12,7 @@
 | 檔案 | 說明 | 訂閱事件 |
 |------|------|---------|
 | `bootstrap.ts` | 統一初始化入口 | — |
-| `file-tracker.ts` | 檔案修改追蹤 | `tool:after` |
+| `file-tracker.ts` | 檔案修改追蹤 | `file:modified` |
 | `sync-reminder.ts` | 未同步提醒 | `file:modified` |
 | `rut-detector.ts` | 重複模式偵測 | `turn:after` |
 | `oscillation-detector.ts` | 擺盪偵測 | `memory:written` |
@@ -49,8 +49,8 @@ interface WorkflowConfig {
 
 ### file-tracker
 
-監聽 `tool:after`，偵測 write_file / edit_file / run_command 的檔案修改。
-發出 `file:modified` 事件，記錄修改路徑和時間。
+監聽 `file:modified` 事件（由 tool 執行後發出），累積每個 session 的修改路徑和時間。
+也監聽 `turn:before`（重置 turn 狀態）和 `session:end`（清理）。
 
 ```typescript
 initFileTracker(eventBus: EventBus): void

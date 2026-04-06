@@ -25,7 +25,7 @@ Discord Gateway
       │  ② getChannelAccess() → allowed / requireMention / allowBot / allowFrom
       │  ③ allowBot / allowFrom 過濾
       │  ④ requireMention → strip mention <@id>
-      │  ⑤ downloadAttachments() → /tmp/claude-discord-uploads/{msgId}/
+      │  ⑤ downloadAttachments() → {tmpdir()}/claude-discord-uploads/{msgId}/
       │  ⑥ text 為空 → 忽略
       ▼
 [discord.ts] debounce(channelId:authorId, debounceMs=500ms)
@@ -149,7 +149,7 @@ index.ts
 | `BACKOFF_SCHEDULE_MS` | [30000, 60000, 300000] | cron 重試退避：30s / 1min / 5min | cron.ts |
 | `maxConcurrentRuns` | 1（預設） | cron 同時執行 job 上限，config 可調 | config.ts |
 | processedMessages 上限 | 1000 | 去重 Set 超過此數清空 | discord.ts |
-| UPLOAD_DIR | /tmp/claude-discord-uploads | 附件暫存根目錄 | discord.ts |
+| UPLOAD_DIR | `tmpdir()/claude-discord-uploads` | 附件暫存根目錄（os.tmpdir()） | discord.ts |
 | SIGTERM delay | 250ms | abort 後等多久若未結束才 SIGKILL | acp.ts |
 | stderrTail | 500 chars | 保留 stderr 最後幾字元用於錯誤診斷 | acp.ts |
 | CODE_FENCE_RESERVE | 8 chars | flush 時預留給 fence 補開/補關的空間 | reply.ts |

@@ -42,7 +42,7 @@ Discord Gateway
       │  ② getChannelAccess() → allowed / requireMention / allowBot / allowFrom
       │  ③ allowBot / allowFrom 過濾
       │  ④ requireMention → strip mention <@id>
-      │  ⑤ downloadAttachments() → /tmp/claude-discord-uploads/{msgId}/
+      │  ⑤ downloadAttachments() → {tmpdir()}/claude-discord-uploads/{msgId}/
       │  ⑥ text 為空 → 忽略
       ▼
 [discord.ts] debounce(channelId:authorId, debounceMs=500ms)
@@ -271,7 +271,8 @@ providers/
 │   │   ├── openai-compat.ts       OpenAI 相容 API
 │   │   ├── codex-oauth.ts         Codex OAuth 登入
 │   │   ├── failover-provider.ts   自動 failover
-│   │   └── circuit-breaker.ts     熔斷器
+│   │   ├── circuit-breaker.ts     熔斷器
+│   │   └── acp-cli.ts             Legacy ACP CLI Provider（spawn claude CLI）
 │   │
 │   ├── accounts/               ★ 帳號 + 權限
 │   │   ├── registry.ts            帳號 + 角色管理
@@ -299,7 +300,8 @@ providers/
 │   │       ├── web-search.ts      網路搜尋
 │   │       ├── web-fetch.ts       網頁擷取
 │   │       ├── tool-search.ts     Deferred Tool Schema 查詢
-│   │       └── task-manage.ts     結構化任務管理（create/update/list/get/delete）
+│   │       ├── task-manage.ts     結構化任務管理（create/update/list/get/delete）
+│   │       └── clear-session.ts  Session 清除
 │   │
 │   ├── skills/                 ★ 使用者 / 指令觸發 Skill
 │   │   ├── registry.ts            Skill 註冊表

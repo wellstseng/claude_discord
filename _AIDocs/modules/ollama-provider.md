@@ -39,7 +39,7 @@ stream(messages, opts)
 | `model` | `qwen3:1.7b` | 模型 ID |
 | `think` | `false` | 啟用 thinking 模式（qwen3 等） |
 | `numPredict` | `4096` | 最大生成 token 數 |
-| `supportsToolUse` | 自動偵測 | init() 時查詢 `/api/show` capabilities |
+| `supportsToolUse` | `true`（預設） | 建構時預設 true，init() 查 `/api/show` capabilities 可覆寫 |
 
 ## init() — 自動偵測 tool_use 能力
 

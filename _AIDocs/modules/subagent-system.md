@@ -26,10 +26,21 @@ type SubagentRuntime = "default" | "coding" | "acp" | "explore" | "plan" | "buil
 | `parentSessionKey` | 父 session key |
 | `childSessionKey` | `{parent}:sub:{uuid}` |
 | `task` | 任務描述 |
+| `label?` | 顯示名稱（通知用） |
 | `mode` | `"run"`（一次性）或 `"session"`（持久 thread） |
 | `runtime` | Agent type（對應 agent-types.ts） |
 | `async` | 是否非同步執行 |
+| `status` | `running` / `completed` / `failed` / `killed` / `timeout` |
+| `result?` | 完成結果文字 |
+| `error?` | 錯誤訊息 |
 | `abortController` | 中止控制器 |
+| `discordChannelId?` | async 模式通知用 |
+| `discordThreadId?` | mode:session thread 綁定 |
+| `keepSession` | 是否保留 session |
+| `accountId` | 繼承父 accountId |
+| `createdAt` | 建立時間（epoch ms） |
+| `endedAt?` | 結束時間（epoch ms） |
+| `turns?` | 執行的 turn 數 |
 | `parentId?` | 父 subagent runId（支援巢狀 spawn） |
 
 ### SpawnResult

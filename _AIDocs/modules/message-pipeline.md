@@ -52,6 +52,10 @@
 |------|------|
 | `systemPrompt` | 組裝完成的 system prompt |
 | `trace` | MessageTrace 實例（傳入 agentLoop） |
+| `memoryContext` | 記憶注入原始文字（用於 promptBreakdownHints） |
+| `channelOverride` | Channel override 原始文字 |
+| `modeExtras` | Mode extras 原始文字 |
+| `intent` | Intent 偵測結果 |
 | `inboundContext` | Inbound History 文字（傳入 agentLoop） |
 | `sessionMemoryOpts` | Session Memory 設定（展開到 agentLoopOpts） |
 | `promptBreakdownHints` | 傳入 agentLoop 的 breakdown 提示 |

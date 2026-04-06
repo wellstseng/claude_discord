@@ -35,10 +35,10 @@ agent-loop → run_command detected
 
 ## 白名單規則
 
-`isCommandAllowed()` 支援 substring match：
-- `cmd === pattern`
-- `cmd.startsWith(pattern + " ")`
-- `cmd.startsWith(pattern + "\n")`
+`isCommandAllowed()` 使用前綴匹配（非 substring）：
+- `cmd === pattern`（完全一致）
+- `cmd.startsWith(pattern + " ")`（前綴 + 空格）
+- `cmd.startsWith(pattern + "\n")`（前綴 + 換行）
 
 設定在 config 的 `allowedPatterns` 陣列。
 

@@ -40,13 +40,14 @@ let currentLevel: LogLevel = "info";  // 預設 info
 
 ```typescript
 export const log = {
-  debug: (...args) => { if (shouldLog("debug")) console.log(...args); },
-  info:  (...args) => { if (shouldLog("info"))  console.log(...args); },
-  warn:  (...args) => { if (shouldLog("warn"))  console.warn(...args); },
-  error: (...args) => { if (shouldLog("error")) console.error(...args); },
+  debug: (...args) => { if (shouldLog("debug")) console.log(ts(), ...args); },
+  info:  (...args) => { if (shouldLog("info"))  console.log(ts(), ...args); },
+  warn:  (...args) => { if (shouldLog("warn"))  console.warn(ts(), ...args); },
+  error: (...args) => { if (shouldLog("error")) console.error(ts(), ...args); },
 };
 ```
 
+每個 log 呼叫自動帶 `ts()` 時間戳前綴（格式 `[HH:MM:SS.mmm]`）。
 `debug` 和 `info` 用 `console.log`，`warn` 用 `console.warn`，`error` 用 `console.error`。
 
 ## API
@@ -64,7 +65,7 @@ log.error("...");        // debug + info + warn + error 層級顯示
 
 ## 設定
 
-`config.json` 的 `logLevel` 欄位，由 `index.ts` 呼叫 `setLogLevel()` 設定。
+`catclaw.json` 的 `logLevel` 欄位，由 `index.ts` 呼叫 `setLogLevel()` 設定。
 
 ## 注意事項
 

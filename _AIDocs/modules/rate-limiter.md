@@ -30,14 +30,14 @@ interface RateLimitResult {
 ```json
 {
   "rateLimit": {
-    "admin": { "requestsPerMinute": 0 },
-    "user":  { "requestsPerMinute": 10 },
-    "guest": { "requestsPerMinute": 3 }
+    "admin":  { "requestsPerMinute": 120 },
+    "member": { "requestsPerMinute": 30 },
+    "guest":  { "requestsPerMinute": 5 }
   }
 }
 ```
 
-`requestsPerMinute <= 0` 或未設定 → 不限制。
+> 以上為 platform.ts 中的預設值。`requestsPerMinute <= 0` 或未設定 → 不限制。
 
 ## 全域單例
 

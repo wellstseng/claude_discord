@@ -57,8 +57,11 @@ assembleSystemPrompt(opts: AssembleOpts): string
 | mode | ModePreset |
 | modeName | "normal" / "precision" |
 | extraBlocks | 額外區塊（memory / systemOverride / modeExtras） |
+| extraBlockNames | extraBlocks 對應名稱（trace segment 標記） |
 | moduleFilter | 指定啟用模組（null = 全部） |
-| traceOutput | 追蹤輸出（modulesActive / modulesSkipped） |
+| traceOutput | 追蹤輸出（modulesActive / modulesSkipped / segments） |
+
+> `AssembleOpts extends PromptContext`，繼承 `projectId`, `isGroupChannel`, `speakerDisplay`, `accountId`, `speakerRole`, `workspaceDir`, `activeMcpServers` 等欄位。
 
 流程：
 1. 合併 builtin + custom modules
@@ -91,6 +94,7 @@ listPromptModules(): Array<{ name: string; priority: number }>
 interface AssembleTraceOutput {
   modulesActive: string[];
   modulesSkipped: string[];
+  segments: Array<{ name: string; content: string }>;
 }
 ```
 

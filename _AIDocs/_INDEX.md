@@ -41,6 +41,8 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | MCP | `src/mcp/` | MCP client + Discord MCP server |
 | Vector | `src/vector/` | Ollama embedding + LanceDB 向量搜尋 |
 | Discord Entry | `src/discord.ts` | Discord Client、訊息過濾、debounce、message-pipeline 呼叫、agent-loop 啟動 |
+| History | `src/history.ts` | 訊息歷史記錄（NDJSON append-only） |
+| Slash Commands | `src/slash.ts` | Discord Slash Commands 管理介面（管理員直接執行，繞過 AI） |
 
 ## 文件清單
 

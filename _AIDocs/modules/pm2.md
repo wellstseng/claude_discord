@@ -83,14 +83,16 @@ module.exports = {
   apps: [{
     name: "catclaw",
     script: "dist/index.js",
-    watch: false,       // 不依賴 watch，/restart 直接呼叫 pm2 restart
+    watch: ["signal"],  // 監聽 signal/ 目錄變更觸發重啟
+    watch_delay: 1000,
     autorestart: true,
-    env: { ... }
+    merge_logs: true,
+    env: { CATCLAW_CONFIG_DIR, CATCLAW_WORKSPACE }  // 從 .env 讀取
   }]
 };
 ```
 
-> **watch 改為 false**（2026-03-22）：原本用 `watch: ["signal"]` 觸發重啟，但 PM2 watch 對 delete+create 偵測不穩定，且會造成 double-restart。改為 slash command 直接呼叫 `pm2 restart`。
+> **watch 機制**：PM2 監聽 `signal/` 目錄，`catclaw.js restart` 同時寫 signal file + 呼叫 `pm2 restart`（雙保險）。`/restart` skill 透過 signal file + `pm2 restart` 觸發。
 
 ## 首次部署
 
