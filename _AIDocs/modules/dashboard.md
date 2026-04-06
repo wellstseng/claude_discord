@@ -1,7 +1,7 @@
 # modules/dashboard — Web Dashboard + REST API
 
-> 檔案：`src/core/dashboard.ts` (~3300 行)
-> 更新日期：2026-04-05
+> 檔案：`src/core/dashboard.ts` (~3400 行)
+> 更新日期：2026-04-06
 
 ## 職責
 
@@ -128,7 +128,8 @@ Bearer token 認證（可選）：
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
-| `/api/chat` | POST | Dashboard 內嵌對話 |
+| `/api/chat` | POST | Dashboard 內嵌對話（SSE streaming） |
+| `/api/chat/history` | GET | Session 對話歷史 `?sessionKey=xxx`（過濾 tool blocks，只回傳 user/assistant 文字） |
 
 ### Logs
 
@@ -137,6 +138,15 @@ Bearer token 認證（可選）：
 | `/api/logs` | GET | PM2 日誌 tail `?lines=N` |
 | `/api/logs/stream` | GET | SSE 即時日誌串流 |
 | `/api/restart` | POST | PM2 重啟 |
+
+## Web Chat
+
+Dashboard 內嵌互動式對話介面，支援：
+
+- Session 選擇器下拉選單（`refreshChatSessions()`）
+- 切換 session 時自動載入歷史訊息（`loadChatHistory()` → `/api/chat/history`）
+- SSE streaming 即時回覆
+- `clearChatSession()` 清空 session（預設同時清除 traces）
 
 ## Config 安全
 
