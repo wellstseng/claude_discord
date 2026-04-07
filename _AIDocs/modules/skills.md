@@ -124,6 +124,22 @@ tier: admin | trigger: `/configure`
 直接讀寫 `$CATCLAW_CONFIG_DIR/catclaw.json`，config 的 hot-reload（fs.watch debounce 500ms）自動套用。
 不需要重啟。
 
+## /migrate skill
+
+tier: admin | trigger: `/migrate`
+
+### 子命令
+
+| 命令 | 說明 |
+|------|------|
+| `/migrate import [--force] [--dry-run]` | 從 `~/.claude/memory/` 匯入記憶 |
+| `/migrate rebuild [<memoryDir>] [--dry-run]` | 重建 `MEMORY.md` 索引 |
+| `/migrate seed [--dry-run]` | 將 global atom 嵌入至 LanceDB |
+| `/migrate vector-resync [--dry-run]` | 全層向量重建（global + `projects/*` + `accounts/*`，復用 `seedFromDir()`） |
+| `/migrate status` | 查看遷移狀態（~/.claude vs catclaw atom 數量） |
+| `/migrate search <query>` | 直查 LanceDB（不過 LLM，minScore=0） |
+| `/migrate stats` | LanceDB table 清單 + 向量數 |
+
 ## /session skill
 
 tier: standard | trigger: `/session`
