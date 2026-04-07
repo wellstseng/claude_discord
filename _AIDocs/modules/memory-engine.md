@@ -13,7 +13,7 @@
 | 檔案 | 職責 |
 |------|------|
 | `engine.ts` | 主引擎：初始化 + API facade |
-| `recall.ts` | Vector-Only recall：embed → search → read atom（5 步管線） |
+| `recall.ts` | Progressive Hybrid recall：keyword 快篩 → vector → ACT-R 混合排序 → related spreading（7 步管線） |
 | `extract.ts` | 知識萃取：從對話中提取 KnowledgeItem |
 | `consolidate.ts` | 整合：promotion / archive / decay |
 | `context-builder.ts` | Context 組裝：budget 截斷（ACT-R/層級預算已移除） |
@@ -129,18 +129,29 @@ rebuildIndex(namespace: string): Promise<void>
 getStatus(): MemoryStatus
 ```
 
-## Recall — Vector-Only 5 步管線
+## Recall — Progressive Hybrid 7 步管線
 
 ```
 recall(query)
-  1. embed query → vector
-  2. LanceDB search(vector, topK=10, minScore=0.65)
-  3. 讀取命中 atom 檔案內容
-  4. 組裝 fragments（去重）
-  5. 回傳 RecallResult
+  1. Cache 檢查（Jaccard ≥ 0.7, 60s TTL）
+  2. Progressive Retrieval — keyword 快篩（MEMORY.md trigger match）
+  3. Embed query → vector
+  4. Vector search（各層並行，LanceDB topK=8, minScore=0.55）
+  5. Merge + dedup + ACT-R activation 混合排序 + keyword bonus
+     finalScore = 0.7 × cosine + 0.3 × activation_norm + kwBonus(0.15)
+  6. Related-Edge Spreading（top-N 的 related atom 展開，score × 0.6 折扣，每 atom 最多展開 3 個）
+  7. touchAtom + cache + return
 ```
 
-> Phase 1-6 重建移除了 trigger match / BFS / ACT-R / LLM select / keyword fallback。
+### 常數
+
+| 常數 | 值 | 說明 |
+|------|------|------|
+| `KEYWORD_BONUS` | 0.15 | keyword trigger 命中加分 |
+| `COSINE_WEIGHT` | 0.7 | cosine 相似度權重 |
+| `ACTIVATION_WEIGHT` | 0.3 | ACT-R activation 權重 |
+| `RELATED_SCORE_DISCOUNT` | 0.6 | related atom 分數折扣 |
+| `RELATED_MAX_EXPAND` | 3 | 每個 atom 最多展開 related 數 |
 
 ## Context Builder
 
