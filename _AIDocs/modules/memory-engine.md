@@ -1,7 +1,7 @@
 # modules/memory-engine — 三層記憶引擎
 
 > 檔案：`src/memory/engine.ts` + `src/memory/` 子模組
-> 更新日期：2026-04-07
+> 更新日期：2026-04-08
 
 ## 職責
 
@@ -13,7 +13,8 @@
 | 檔案 | 職責 |
 |------|------|
 | `engine.ts` | 主引擎：初始化 + API facade |
-| `recall.ts` | Progressive Hybrid recall：keyword 快篩 → vector → ACT-R 混合排序 → related spreading（7 步管線） |
+| `recall.ts` | Vector-First recall：keyword 快篩 → vector → 純 cosine 排序 + keyword 微調（5 步管線） |
+| `memory-api.ts` | Memory 管理 API：atom CRUD + recall-test + stats（供 Dashboard 使用） |
 | `extract.ts` | 知識萃取：從對話中提取 KnowledgeItem |
 | `consolidate.ts` | 整合：promotion / archive / ACT-R decay（與 recall 共用 `computeActivation()`） |
 | `context-builder.ts` | Context 組裝：budget 截斷（ACT-R/層級預算已移除） |
@@ -57,7 +58,7 @@ recall(
 RecallResult：
 - `fragments: AtomFragment[]` — 命中的 atom 片段
 - `blindSpot: boolean` — 所有層均無命中時為 true（Blind-Spot 警告）
-- `degraded: boolean` — vector service 離線時走 keyword fallback（純 keyword + ACT-R 排序）
+- `degraded: boolean` — vector service 離線時走 keyword fallback（固定分數 0.5）
 
 ### Context 組裝
 
@@ -129,18 +130,15 @@ rebuildIndex(namespace: string): Promise<void>
 getStatus(): MemoryStatus
 ```
 
-## Recall — Progressive Hybrid 7 步管線
+## Recall — Vector-First 5 步管線
 
 ```
 recall(query)
   1. Cache 檢查（Jaccard ≥ 0.7, 60s TTL）
-  2. Progressive Retrieval — keyword 快篩（MEMORY.md trigger match）
+  2. Keyword 快篩（MEMORY.md trigger match）→ 微調加分用
   3. Embed query → vector（失敗 → keyword fallback）
   4. Vector search（各層並行，LanceDB topK=8, minScore=0.55）（失敗 → keyword fallback）
-  5. Merge + dedup + ACT-R activation 混合排序 + keyword bonus
-     finalScore = 0.7 × cosine + 0.3 × activation_norm + kwBonus(0.15)
-  6. Related-Edge Spreading（top-N 的 related atom 展開，score × 0.6 折扣，每 atom 最多展開 3 個）
-  7. touchAtom + cache + return
+  5. Merge + dedup + keyword 微調 + touchAtom + cache + return
 ```
 
 ### Keyword Fallback（向量不可用兜底）
@@ -148,7 +146,7 @@ recall(query)
 Step 3 embed 或 Step 4 vector search 失敗時，自動退化為純 keyword 路徑：
 
 - 以 Step 2 的 `keywordHits` 為來源
-- `readAtom()` 讀取 atom → `computeActivation()` 計算 ACT-R 分數排序
+- `readAtom()` 讀取 atom → 固定分數 0.5
 - 回傳 `degraded: true`，下游 trace 可見
 
 ### AtomFragment.matchedBy
@@ -157,17 +155,12 @@ Step 3 embed 或 Step 4 vector search 失敗時，自動退化為純 keyword 路
 |------|------|
 | `"vector"` | 正常向量搜尋命中 |
 | `"keyword"` | keyword fallback 命中 |
-| `"related"` | Related-Edge Spreading 展開 |
 
 ### 常數
 
 | 常數 | 值 | 說明 |
 |------|------|------|
-| `KEYWORD_BONUS` | 0.15 | keyword trigger 命中加分 |
-| `COSINE_WEIGHT` | 0.7 | cosine 相似度權重 |
-| `ACTIVATION_WEIGHT` | 0.3 | ACT-R activation 權重 |
-| `RELATED_SCORE_DISCOUNT` | 0.6 | related atom 分數折扣 |
-| `RELATED_MAX_EXPAND` | 3 | 每個 atom 最多展開 related 數 |
+| `KEYWORD_BONUS` | 0.05 | keyword trigger 命中微調加分 |
 
 ## Context Builder
 

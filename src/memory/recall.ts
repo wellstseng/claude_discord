@@ -1,17 +1,15 @@
 /**
  * @file memory/recall.ts
- * @description 三層記憶檢索（global + project + account）— Progressive Hybrid
+ * @description 三層記憶檢索（global + project + account）— Vector-First
  *
- * 管線（7 步）：
+ * 管線（5 步）：
  *   1. Cache 檢查
- *   2. Progressive Retrieval — keyword 快篩（MEMORY.md trigger match）
+ *   2. Keyword 快篩（MEMORY.md trigger match）→ 微調加分用
  *   3. Embed prompt
  *   4. Vector search（各層並行）
- *   5. Merge + dedup + ACT-R activation 混合排序 + keyword bonus
- *   6. Related-Edge Spreading（top-N 結果展開 related atom）
- *   7. touchAtom + cache + return
+ *   5. Merge + dedup + keyword 微調 + touchAtom + cache + return
  *
- * 降級：Ollama / Vector 離線 → 回傳空結果 + degraded=true
+ * 降級：Ollama / Vector 離線 → keyword fallback + degraded=true
  * 快取：同頻道 60s 內 Jaccard ≥ 0.7 直接回傳
  * Blind-Spot：所有層結果為空 → blindSpot=true
  */
@@ -19,7 +17,7 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { log } from "../logger.js";
-import { readAtom, touchAtom, computeActivation } from "./atom.js";
+import { readAtom, touchAtom } from "./atom.js";
 import { loadIndex, matchTriggers } from "./index-manager.js";
 import { embedOne } from "../vector/embedding.js";
 
@@ -33,8 +31,8 @@ export interface AtomFragment {
   atom: import("./atom.js").Atom;
   /** cosine 相似度 (0–1) */
   score: number;
-  /** 記憶來源：vector=向量搜尋 | keyword=MD fallback | related=展開 */
-  matchedBy: "vector" | "keyword" | "related";
+  /** 記憶來源：vector=向量搜尋 | keyword=MD fallback */
+  matchedBy: "vector" | "keyword";
 }
 
 export interface RecallContext {
@@ -111,16 +109,8 @@ const DEFAULT_TOP_K = 8;
 const DEFAULT_MIN_SCORE = 0.55;
 const DEFAULT_MAX_RESULTS = 5;
 
-// ── Progressive Retrieval: keyword 快篩加分 ────────────────────────────────
-const KEYWORD_BONUS = 0.15;
-
-// ── ACT-R 混合權重 ──────────────────────────────────────────────────────────
-const COSINE_WEIGHT = 0.7;
-const ACTIVATION_WEIGHT = 0.3;
-
-// ── Related-Edge Spreading ──────────────────────────────────────────────────
-const RELATED_SCORE_DISCOUNT = 0.6;
-const RELATED_MAX_EXPAND = 3;  // 最多展開幾個 related atom
+// ── Keyword 快篩微調（加分但不主導排序）────────────────────────────────────
+const KEYWORD_BONUS = 0.05;
 
 // ── Keyword Fallback（向量不可用時的兜底路徑） ────────────────────────────────
 
@@ -145,8 +135,7 @@ function keywordFallback(
       if (!existsSync(atomPath)) continue;
       const atom = readAtom(atomPath);
       if (!atom) continue;
-      const score = computeActivation(atom);
-      fragments.push({ id: atom.name, layer, atom, score, matchedBy: "keyword" });
+      fragments.push({ id: atom.name, layer, atom, score: 0.5, matchedBy: "keyword" });
       break; // 同名 atom 只取第一層命中
     }
   }
@@ -265,62 +254,23 @@ export async function recall(
     return keywordFallback(keywordHits, layerDefs, maxResults, ctx.channelId, prompt);
   }
 
-  // ── Step 5: Merge + dedup + ACT-R 混合排序 + keyword bonus ──
+  // ── Step 5: Merge + dedup + keyword 微調 + 排序 ──
   const best = new Map<string, AtomFragment>();
   for (const f of allFragments) {
     const prev = best.get(f.id);
     if (!prev || f.score > prev.score) best.set(f.id, f);
   }
 
-  // ACT-R activation 正規化 + keyword bonus + 混合排序
+  // 純 cosine score + keyword 微調（不使用 ACT-R activation）
   const scored = Array.from(best.values());
-  const activations = scored.map(f => computeActivation(f.atom));
-  const maxAct = Math.max(...activations, 1);
-  const minAct = Math.min(...activations, 0);
-  const actRange = maxAct - minAct || 1;
-
-  for (let i = 0; i < scored.length; i++) {
-    const cosine = scored[i].score;
-    const actNorm = (activations[i] - minAct) / actRange; // 0~1
-    const kwBonus = keywordHits.has(scored[i].id) ? KEYWORD_BONUS : 0;
-    scored[i].score = COSINE_WEIGHT * cosine + ACTIVATION_WEIGHT * actNorm + kwBonus;
+  for (const f of scored) {
+    if (keywordHits.has(f.id)) f.score += KEYWORD_BONUS;
   }
 
   scored.sort((a, b) => b.score - a.score);
-  let topFragments = scored.slice(0, maxResults);
+  const topFragments = scored.slice(0, maxResults);
 
-  // ── Step 6: Related-Edge Spreading ──
-  const existingIds = new Set(topFragments.map(f => f.id));
-  const relatedFragments: AtomFragment[] = [];
-
-  for (const frag of topFragments) {
-    if (frag.atom.related.length === 0) continue;
-    let expanded = 0;
-    for (const relName of frag.atom.related) {
-      if (existingIds.has(relName) || expanded >= RELATED_MAX_EXPAND) continue;
-      // 嘗試從各層目錄讀取 related atom
-      for (const { layer, dir } of layerDefs) {
-        const relPath = join(dir, `${relName}.md`);
-        if (!existsSync(relPath)) continue;
-        const relAtom = readAtom(relPath);
-        if (!relAtom) continue;
-        const relScore = frag.score * RELATED_SCORE_DISCOUNT;
-        relatedFragments.push({ id: relAtom.name, layer, atom: relAtom, score: relScore, matchedBy: "related" });
-        existingIds.add(relName);
-        expanded++;
-        break;
-      }
-    }
-  }
-
-  if (relatedFragments.length > 0) {
-    log.debug(`[recall] related spreading 展開 ${relatedFragments.length} 個 atom`);
-    topFragments = [...topFragments, ...relatedFragments]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, maxResults);
-  }
-
-  // ── Step 7: touchAtom + cache ──
+  // ── touchAtom + cache ──
   for (const f of topFragments) {
     try { touchAtom(f.atom.path); } catch { /* 靜默 */ }
   }
@@ -331,7 +281,7 @@ export async function recall(
   const result: RecallResult = { fragments: topFragments, blindSpot, degraded: false };
   setCache(ctx.channelId, prompt, result);
 
-  log.debug(`[recall] 命中 ${topFragments.length} 個 atom (kw=${keywordHits.size}, related=${relatedFragments.length})`);
+  log.debug(`[recall] 命中 ${topFragments.length} 個 atom (kw=${keywordHits.size})`);
   return result;
 }
 

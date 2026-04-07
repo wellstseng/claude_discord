@@ -1,7 +1,7 @@
 # Message Lifecycle Trace — 訊息全鏈路追蹤
 
 > 原始碼：`src/core/message-trace.ts`
-> 更新日期：2026-04-07
+> 更新日期：2026-04-08
 
 ## 概述
 

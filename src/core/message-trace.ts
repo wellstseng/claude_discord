@@ -23,7 +23,7 @@ export interface TraceRecallHit {
   name: string;
   layer: "global" | "project" | "account";
   score: number;
-  matchedBy: "vector" | "keyword" | "related";
+  matchedBy: "vector" | "keyword";
 }
 
 /** 記憶 Recall 追蹤 */

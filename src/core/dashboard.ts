@@ -426,6 +426,7 @@ label.cfg-toggle { min-width: 36px; }
   <div class="tab" onclick="switchTab('tasks',this)">Tasks</div>
   <div class="tab" onclick="switchTab('auth',this)">Auth Profiles</div>
   <div class="tab" onclick="switchTab('config',this)">Config</div>
+  <div class="tab" onclick="switchTab('memory',this)">Memory</div>
   <div class="tab" onclick="switchTab('chat',this)" style="color:var(--accent);font-weight:600">💬 Chat</div>
 </div>
 
@@ -618,6 +619,53 @@ label.cfg-toggle { min-width: 36px; }
 </div>
 
 <!-- Chat -->
+<!-- Memory -->
+<div id="pane-memory" class="pane">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <!-- Stats Panel -->
+    <div class="card">
+      <h3 style="margin:0 0 8px">統計</h3>
+      <div id="mem-stats">載入中...</div>
+    </div>
+    <!-- Recall Tester -->
+    <div class="card">
+      <h3 style="margin:0 0 8px">Recall 測試</h3>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="mem-recall-input" type="text" placeholder="輸入查詢 prompt..." style="flex:1;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.85rem" onkeydown="if(event.key==='Enter')testMemRecall()">
+        <button class="btn btn-green btn-sm" onclick="testMemRecall()">測試</button>
+      </div>
+      <div id="mem-recall-result" style="font-size:0.82rem;max-height:300px;overflow-y:auto"></div>
+    </div>
+  </div>
+  <!-- Atom Browser -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3 style="margin:0">Atom 列表</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="mem-filter" type="text" placeholder="搜尋..." style="padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem;width:180px" oninput="filterMemAtoms()">
+        <select id="mem-sort" style="padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem" onchange="sortMemAtoms()">
+          <option value="name">名稱</option>
+          <option value="confirmations">Confirmations ↓</option>
+          <option value="lastUsed">Last Used ↓</option>
+          <option value="confidence">Confidence</option>
+        </select>
+      </div>
+    </div>
+    <div id="mem-atoms" style="max-height:500px;overflow-y:auto">載入中...</div>
+  </div>
+  <!-- Atom Detail Modal -->
+  <div id="mem-detail" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:100;display:none;align-items:center;justify-content:center" onclick="if(event.target===this)closeMemDetail()">
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 id="mem-detail-title" style="margin:0"></h3>
+        <button class="btn btn-sm" onclick="closeMemDetail()">✕</button>
+      </div>
+      <pre id="mem-detail-content" style="white-space:pre-wrap;font-size:0.82rem;background:var(--bg2);padding:12px;border-radius:8px;max-height:50vh;overflow-y:auto"></pre>
+      <div id="mem-detail-meta" style="font-size:0.78rem;color:var(--fg2);margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
 <div id="pane-chat" class="pane">
   <div style="display:flex;flex-direction:column;height:calc(100vh - 140px)">
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
@@ -703,6 +751,7 @@ function switchTab(id, el) {
   if (id === 'traces') { loadTraces(); _traceAutoRefresh = setInterval(loadTraces, 5000); }
   if (id === 'cron') loadCron();
   if (id === 'config') loadCfg();
+  if (id === 'memory') loadMemory();
 }
 
 function refreshAll() { loadOverview(); loadStatus(); }
@@ -2329,6 +2378,128 @@ async function loadAndShowContext(traceId) {
   } catch (e) { container.innerHTML = '<div style="color:var(--red2)">載入失敗：' + e + '</div>'; }
 }
 
+// ── Memory ─────────────────────────────────────────────────────────────────
+let _memAtoms = [];
+
+async function loadMemory() {
+  try {
+    const [atoms, stats] = await Promise.all([
+      authFetch('/api/memory/atoms').then(r => r.json()),
+      authFetch('/api/memory/stats').then(r => r.json()),
+    ]);
+    _memAtoms = atoms;
+    renderMemStats(stats);
+    renderMemAtoms(atoms);
+  } catch (e) {
+    document.getElementById('mem-stats').textContent = '載入失敗: ' + e.message;
+  }
+}
+
+function renderMemStats(s) {
+  const confColors = { '[固]': 'var(--green)', '[觀]': 'var(--accent)', '[臨]': 'var(--warn)' };
+  const confHtml = Object.entries(s.byConfidence).map(([k, v]) =>
+    '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:' + (confColors[k]||'var(--fg2)') + ';color:#fff;font-size:0.78rem;margin-right:4px">' + k + ' ' + v + '</span>'
+  ).join('');
+
+  const distHtml = s.confirmationDistribution.map(d => {
+    const pct = s.totalAtoms ? Math.round(d.count / s.totalAtoms * 100) : 0;
+    return '<div style="display:flex;align-items:center;gap:8px;margin:2px 0"><span style="width:40px;font-size:0.78rem;text-align:right">' + d.range + '</span><div style="flex:1;height:16px;background:var(--bg2);border-radius:4px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--accent);border-radius:4px"></div></div><span style="font-size:0.75rem;width:30px">' + d.count + '</span></div>';
+  }).join('');
+
+  document.getElementById('mem-stats').innerHTML =
+    '<div style="margin-bottom:8px"><strong>' + s.totalAtoms + '</strong> atoms</div>' +
+    '<div style="margin-bottom:8px">' + confHtml + '</div>' +
+    '<div style="margin-bottom:8px"><div style="font-size:0.78rem;color:var(--fg2);margin-bottom:4px">Confirmations 分布</div>' + distHtml + '</div>' +
+    (s.neverRecalled.length ? '<div style="font-size:0.78rem;color:var(--warn)">從未召回: ' + s.neverRecalled.map(a => a.name).join(', ') + '</div>' : '');
+}
+
+function renderMemAtoms(atoms) {
+  if (!atoms.length) { document.getElementById('mem-atoms').innerHTML = '<div style="color:var(--fg3);padding:12px">無 atom</div>'; return; }
+  const confColors = { '[固]': 'var(--green)', '[觀]': 'var(--accent)', '[臨]': 'var(--warn)' };
+  const rows = atoms.map(a =>
+    '<tr style="cursor:pointer" onclick="showMemDetail(\'' + a.name.replace(/'/g,"\\'") + '\')">' +
+    '<td style="font-weight:500">' + a.name + '</td>' +
+    '<td><span style="color:' + (confColors[a.confidence]||'var(--fg2)') + '">' + a.confidence + '</span></td>' +
+    '<td>' + a.confirmations + '</td>' +
+    '<td>' + (a.lastUsed||'-') + '</td>' +
+    '<td style="font-size:0.75rem;color:var(--fg2)">' + (a.triggers||[]).slice(0,4).join(', ') + '</td>' +
+    '<td><button class="btn btn-sm btn-red" onclick="event.stopPropagation();deleteMemAtom(\'' + a.name.replace(/'/g,"\\'") + '\')" title="刪除">🗑</button></td>' +
+    '</tr>'
+  ).join('');
+  document.getElementById('mem-atoms').innerHTML =
+    '<table class="tbl"><thead><tr><th>名稱</th><th>信心</th><th>確認</th><th>Last Used</th><th>Triggers</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function filterMemAtoms() {
+  const q = document.getElementById('mem-filter').value.toLowerCase();
+  const filtered = _memAtoms.filter(a => a.name.includes(q) || (a.triggers||[]).some(t => t.toLowerCase().includes(q)) || (a.description||'').toLowerCase().includes(q));
+  renderMemAtoms(filtered);
+}
+
+function sortMemAtoms() {
+  const key = document.getElementById('mem-sort').value;
+  const sorted = [..._memAtoms];
+  if (key === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name));
+  else if (key === 'confirmations') sorted.sort((a, b) => b.confirmations - a.confirmations);
+  else if (key === 'lastUsed') sorted.sort((a, b) => (b.lastUsed||'').localeCompare(a.lastUsed||''));
+  else if (key === 'confidence') sorted.sort((a, b) => { const o = {'[固]':0,'[觀]':1,'[臨]':2}; return (o[a.confidence]??3) - (o[b.confidence]??3); });
+  renderMemAtoms(sorted);
+}
+
+async function showMemDetail(name) {
+  try {
+    const atom = await authFetch('/api/memory/atoms/' + encodeURIComponent(name)).then(r => r.json());
+    document.getElementById('mem-detail-title').textContent = atom.name;
+    document.getElementById('mem-detail-content').textContent = atom.content || atom.raw || '(空)';
+    document.getElementById('mem-detail-meta').innerHTML =
+      '<strong>Confidence:</strong> ' + atom.confidence + ' | <strong>Scope:</strong> ' + atom.scope +
+      ' | <strong>Confirmations:</strong> ' + atom.confirmations + ' | <strong>Last Used:</strong> ' + (atom.lastUsed||'-') +
+      (atom.triggers?.length ? ' | <strong>Triggers:</strong> ' + atom.triggers.join(', ') : '') +
+      (atom.related?.length ? ' | <strong>Related:</strong> ' + atom.related.join(', ') : '');
+    const modal = document.getElementById('mem-detail');
+    modal.style.display = 'flex';
+  } catch (e) { alert('載入失敗: ' + e.message); }
+}
+
+function closeMemDetail() {
+  document.getElementById('mem-detail').style.display = 'none';
+}
+
+async function deleteMemAtom(name) {
+  if (!confirm('確定刪除 atom "' + name + '"？')) return;
+  try {
+    await authFetch('/api/memory/atoms/' + encodeURIComponent(name), { method: 'DELETE' });
+    loadMemory();
+  } catch (e) { alert('刪除失敗: ' + e.message); }
+}
+
+async function testMemRecall() {
+  const input = document.getElementById('mem-recall-input');
+  const prompt = input.value.trim();
+  if (!prompt) return;
+  const el = document.getElementById('mem-recall-result');
+  el.innerHTML = '<div style="color:var(--fg3)">查詢中...</div>';
+  try {
+    const r = await authFetch('/api/memory/recall-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    }).then(r => r.json());
+    if (r.error) { el.innerHTML = '<div style="color:var(--error)">' + r.error + '</div>'; return; }
+    if (!r.fragments?.length) {
+      el.innerHTML = '<div style="color:var(--warn)">無命中' + (r.degraded ? ' (degraded)' : '') + (r.blindSpot ? ' — Blind Spot' : '') + '</div>';
+      return;
+    }
+    const rows = r.fragments.map((f, i) =>
+      '<tr><td>' + (i+1) + '</td><td style="font-weight:500">' + f.name + '</td>' +
+      '<td>' + f.score + '</td><td>' + f.matchedBy + '</td><td>' + f.confidence + '</td>' +
+      '<td style="font-size:0.75rem;color:var(--fg2);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (f.contentPreview||'').replace(/</g,'&lt;') + '</td></tr>'
+    ).join('');
+    el.innerHTML = (r.degraded ? '<div style="color:var(--warn);margin-bottom:4px">⚠ Degraded mode</div>' : '') +
+      '<table class="tbl"><thead><tr><th>#</th><th>Atom</th><th>Score</th><th>Source</th><th>Conf</th><th>Preview</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div style="color:var(--error)">錯誤: ' + e.message + '</div>'; }
+}
+
 // ── Dashboard Chat ──────────────────────────────────────────────────────────
 let _chatBusy = false;
 
@@ -3634,6 +3805,159 @@ export class DashboardServer {
             }
           })();
         });
+        return;
+      }
+
+      // ══════════════════════════════════════════════════════════════════════
+      // Memory API
+      // ══════════════════════════════════════════════════════════════════════
+
+      // GET /api/memory/atoms — 列出所有 atom
+      if (url === "/api/memory/atoms" && method === "GET") {
+        void (async () => {
+          try {
+            const { listAtoms } = await import("../memory/memory-api.js");
+            const { config } = await import("./config.js");
+            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+            const dirs = [memRoot];
+            // 加入 accounts 子目錄
+            const accountsDir = join(memRoot, "accounts");
+            if (existsSync(accountsDir)) {
+              for (const d of readdirSync(accountsDir)) {
+                const p = join(accountsDir, d);
+                if (existsSync(p)) dirs.push(p);
+              }
+            }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(listAtoms(dirs)));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/memory/stats — 統計
+      if (url === "/api/memory/stats" && method === "GET") {
+        void (async () => {
+          try {
+            const { getStats } = await import("../memory/memory-api.js");
+            const { config } = await import("./config.js");
+            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+            const dirs = [memRoot];
+            const accountsDir = join(memRoot, "accounts");
+            if (existsSync(accountsDir)) {
+              for (const d of readdirSync(accountsDir)) {
+                const p = join(accountsDir, d);
+                if (existsSync(p)) dirs.push(p);
+              }
+            }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(getStats(dirs)));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/memory/atoms/:name — 單一 atom
+      if (url?.startsWith("/api/memory/atoms/") && method === "GET") {
+        void (async () => {
+          try {
+            const name = decodeURIComponent(url!.split("/api/memory/atoms/")[1]);
+            const { getAtom } = await import("../memory/memory-api.js");
+            const { config } = await import("./config.js");
+            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+            const dirs = [memRoot];
+            const accountsDir = join(memRoot, "accounts");
+            if (existsSync(accountsDir)) {
+              for (const d of readdirSync(accountsDir)) dirs.push(join(accountsDir, d));
+            }
+            const atom = getAtom(dirs, name);
+            if (!atom) { res.writeHead(404); res.end(JSON.stringify({ error: "atom not found" })); return; }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(atom));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // DELETE /api/memory/atoms/:name — 刪除 atom
+      if (url?.startsWith("/api/memory/atoms/") && method === "DELETE") {
+        void (async () => {
+          try {
+            const name = decodeURIComponent(url!.split("/api/memory/atoms/")[1]);
+            const { deleteAtom } = await import("../memory/memory-api.js");
+            const { config } = await import("./config.js");
+            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+            const dirs = [memRoot];
+            const ok = deleteAtom(dirs, name);
+            res.writeHead(ok ? 200 : 404);
+            res.end(JSON.stringify({ success: ok }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // POST /api/memory/recall-test — 測試 recall
+      if (url === "/api/memory/recall-test" && method === "POST") {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          void (async () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { prompt: string; accountId?: string };
+              const { testRecall } = await import("../memory/memory-api.js");
+              const { config } = await import("./config.js");
+              const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+              const accountId = body.accountId ?? "test";
+              const result = await testRecall(
+                body.prompt,
+                { accountId, skipCache: true },
+                {
+                  globalDir: memRoot,
+                  accountDir: join(memRoot, "accounts", accountId),
+                },
+              );
+              // 轉換為 JSON-safe 格式（去掉 atom.raw 減少 payload）
+              const safeFragments = result.fragments.map(f => ({
+                name: f.id,
+                layer: f.layer,
+                score: Math.round(f.score * 10000) / 10000,
+                matchedBy: f.matchedBy,
+                confidence: f.atom.confidence,
+                description: f.atom.description,
+                contentPreview: f.atom.content.slice(0, 200),
+              }));
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ...result, fragments: safeFragments }));
+            } catch (err) {
+              res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+            }
+          })();
+        });
+        return;
+      }
+
+      // GET /api/memory/vector/stats — LanceDB 統計
+      if (url === "/api/memory/vector/stats" && method === "GET") {
+        void (async () => {
+          try {
+            const { getVectorService } = await import("../vector/lancedb.js");
+            const vs = getVectorService();
+            const stats = await vs.stats();
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ available: vs.isAvailable(), ...stats }));
+          } catch (err) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ available: false, error: String(err) }));
+          }
+        })();
         return;
       }
 
