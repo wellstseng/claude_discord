@@ -1,7 +1,7 @@
 # CatClaw
 
 Codex 版 Claude Code CLI + 多人 AI 開發平台。
-以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、17+ builtin tools、31 builtin skills、多 provider failover、三層記憶引擎、Context Engineering、subagent 編排、帳號/角色/權限系統、Web Dashboard + Trace 追蹤。
+以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、17+ builtin tools、25 builtin skills、多 provider failover、三層記憶引擎、Context Engineering、subagent 編排、帳號/角色/權限系統、Web Dashboard + Trace 追蹤。
 
 ## 功能
 
@@ -9,7 +9,7 @@ Codex 版 Claude Code CLI + 多人 AI 開發平台。
 
 - **Agent Loop** — Multi-turn 推理迴圈，tool 執行、output token recovery、auto-compact
 - **17+ Builtin Tools** — read/write/edit/glob/grep/run/web/memory/subagent/task...
-- **31 Builtin Skills** — 28 TS + 3 prompt（status/help/configure/mode/plan/restart/...）
+- **25 Builtin Skills** — 22 TS + 3 prompt（status/help/configure/mode/plan/restart/...）
 - **Multi-Provider Failover** — claude-api / codex-oauth / cli-claude / cli-gemini / cli-codex / ollama / openai-compat + circuit-breaker
 - **MCP Support** — MCP client 連線 + tool 自動註冊、Discord MCP server
 
@@ -99,7 +99,7 @@ graph TB
     memory/                 三層記憶引擎（engine, recall, context-builder, extract）
     providers/              LLM Provider 抽象（claude-api, ollama, openai-compat, cli-*...）
     tools/                  Tool Registry + 17 builtin tools
-    skills/                 Skill Registry + 31 builtin skills
+    skills/                 Skill Registry + 25 builtin skills
     hooks/                  Hook 系統（tool 前後觸發）
     safety/                 安全攔截（guard, collab-conflict, reversibility）
     workflow/               工作流引擎（rut, oscillation, fix-escalation, sync, wisdom）
@@ -125,7 +125,7 @@ graph TB
   catclaw.json              主設定檔（JSONC）
   models-config.json        模型設定唯一真相源
   workspace/                CATCLAW_WORKSPACE
-    AGENTS.md               Agent 行為規則
+    CATCLAW.md              Agent 行為規則（system prompt）
     data/
       sessions/             Session 持久化（per-channel 目錄）
       cron-jobs.json        Cron 定義 + 狀態
@@ -158,7 +158,7 @@ pnpm build
 ```bash
 mkdir -p ~/.catclaw/workspace/data/{sessions,active-turns}
 cp catclaw.example.json ~/.catclaw/catclaw.json
-cp models-config.example.json ~/.catclaw/models-config.json
+# models-config.json 手動建立（參考下方範例）或啟動後由 init 自動產生
 ```
 
 ### 3. 編輯設定檔
@@ -201,6 +201,7 @@ cp models-config.example.json ~/.catclaw/models-config.json
 
 ```jsonc
 {
+  "mode": "merge",
   "primary": "sonnet",
   "fallbacks": ["haiku"],
   "aliases": {
@@ -208,7 +209,13 @@ cp models-config.example.json ~/.catclaw/models-config.json
     "opus": "anthropic/claude-opus-4-6",
     "haiku": "anthropic/claude-haiku-4-5-20251001"
   },
-  "routing": { "default": "sonnet" }
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434",
+      "api": "ollama",
+      "embeddingModel": "qwen3-embedding:8b"
+    }
+  }
 }
 ```
 
@@ -285,7 +292,7 @@ claude -p --output-format stream-json --verbose --include-partial-messages \
 | Action type | 說明 |
 | ----------- | ---- |
 | `message` | 發送純文字訊息 |
-| `claude-acp` | 透過 ACP（V1 CLI spawn）執行 turn |
+| `claude-acp` | 透過 ACP（V1 CLI spawn）執行 turn（legacy，建議改用 subagent） |
 | `exec` | 執行 shell 指令 |
 | `subagent` | 透過 V2 Agent Loop 執行任務 |
 

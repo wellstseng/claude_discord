@@ -24,21 +24,25 @@
 
 **解法**：`partials: [Partials.Channel]`
 
-## 4. dotenv 載入順序
+## 4. 環境變數載入機制（PM2 + ecosystem.config.cjs）
 
-**現象**：啟動時 `DISCORD_BOT_TOKEN 環境變數必填` 錯誤。
+**現象**：啟動時缺少 `CATCLAW_CONFIG_DIR` 或 `CATCLAW_WORKSPACE` 錯誤。
 
-**原因**：`import { config }` 在 module evaluation 時就執行 `loadConfig()`，若 dotenv 尚未載入則 `process.env` 為空。
+**原因**：ecosystem.config.cjs 在啟動前手動解析 `.env` 檔案（不依賴 dotenv 模組），若缺少必需環境變數則啟動失敗。
 
-**解法**：`import "dotenv/config"` 必須在 `import { config }` 之前。
+**實現**：PM2 ecosystem.config.cjs 自行逐行解析 `.env`（`KEY=value` 格式，支援去引號），無需外部 dotenv 模組。
 
-## 5. ALLOWED_CHANNEL_IDS 是頻道 ID 不是伺服器 ID
+**解法**：確保 `.env` 包含 `CATCLAW_CONFIG_DIR` 和 `CATCLAW_WORKSPACE`。Discord token 改為在 `catclaw.json` 的 `discord.token` 欄位設定。
+
+## 5. 頻道白名單設定（guildId vs channelId）
 
 **現象**：訊息被白名單過濾，但以為已設定正確。
 
-**原因**：誤填 Guild（伺服器）ID 而非 Channel ID。
+**原因**：`catclaw.json` 中混淆了伺服器 ID（Guild ID）和頻道 ID（Channel ID），或未正確設定 `discord.guilds[guildId].channels[channelId].allow: true`。
 
-**解法**：右鍵頻道 → 複製頻道 ID（非伺服器 ID）。
+**結構**：兩層繼承——`guilds[guildId]` 為伺服器級預設，`channels[channelId]` 為頻道級覆寫，頻道設定優先。
+
+**解法**：右鍵頻道 → 複製頻道 ID（非伺服器 ID），填入 `catclaw.json` 對應位置。需開啟 Discord 開發者模式。
 
 ## 6. TextBasedChannel 的 TS 型別陷阱
 
@@ -147,8 +151,8 @@ const ch = await client.channels.fetch(channelId);
 | stdout 無輸出，process hang | §1 | `stdio: ["ignore", "pipe", "pipe"]` |
 | `stream-json` 格式報錯 | §2 | 加 `--verbose` flag |
 | DM 收不到 messageCreate | §3 | 加 `partials: [Partials.Channel]` |
-| 環境變數必填（.env 存在仍報） | §4 | dotenv import 提到最前 |
-| channels 白名單設好但訊息被過濾 | §5 | 確認是頻道 ID 而非伺服器 ID |
+| .env 缺少 CATCLAW_CONFIG_DIR/WORKSPACE | §4 | 確保 .env 包含必需環境變數 |
+| channels 白名單設好但訊息被過濾 | §5 | 確認是頻道 ID 而非伺服器 ID，設定在 catclaw.json |
 | `Property 'send' does not exist` | §6 | 改用 `SendableChannels` |
 | 回覆內容重複 | §7 | `slice(lastTextLength)` 取 delta |
 | Discord API 400 reject | §8 | flush 切割 + 預留 8 字元 |
