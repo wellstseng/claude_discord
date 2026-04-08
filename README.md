@@ -1,7 +1,18 @@
 # CatClaw
 
-Codex 版 Claude Code CLI + 多人 AI 開發平台。
-以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、20+ builtin tools、18+ builtin skills、多 provider failover、三層記憶引擎、Context Engineering、subagent 編排、帳號/角色/權限系統、Web Dashboard + Trace 追蹤。
+以 Discord 為介面的 AI Agent 運行平台。
+
+**溫蒂（Wendy）** 是運行在 CatClaw 上的第一個 AI 秘書 — 負責訊息處理、任務追蹤、排程提醒與知識管理。CatClaw 提供她運行所需的一切：multi-turn agent loop、工具執行、三層記憶引擎、context 管理、多 LLM provider failover。
+
+## 目標與願景
+
+| 階段 | 定位 | 狀態 |
+| ---- | ---- | ---- |
+| **Phase 1** | 溫蒂的運行平台 — 個人 AI 秘書，處理 Discord 訊息、提醒、追蹤、記憶 | **現階段** |
+| **Phase 2** | 自治開發能力 — 讓 CatClaw 上的 agent 能自主搜尋、規劃、執行開發任務 | 進行中 |
+| **Phase 3** | 通用 Agent 平台 — 多 agent 實例、角色化部署、跨專案協作 | 規劃中 |
+
+架構上已具備多帳號、多 provider、subagent 編排、權限閘門等通用能力，但現階段聚焦在讓溫蒂穩定、好用。
 
 > 📖 詳細架構與核心機制說明請見 **[Wiki](https://github.com/wellstseng/catclaw/wiki)**
 
