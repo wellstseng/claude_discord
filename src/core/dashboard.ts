@@ -427,6 +427,7 @@ label.cfg-toggle { min-width: 36px; }
   <div class="tab" onclick="switchTab('auth',this)">Auth Profiles</div>
   <div class="tab" onclick="switchTab('config',this)">Config</div>
   <div class="tab" onclick="switchTab('memory',this)">Memory</div>
+  <div class="tab" onclick="switchTab('pipeline',this)">Pipeline</div>
   <div class="tab" onclick="switchTab('chat',this)" style="color:var(--accent);font-weight:600">💬 Chat</div>
 </div>
 
@@ -666,6 +667,63 @@ label.cfg-toggle { min-width: 36px; }
   </div>
 </div>
 
+<!-- Pipeline -->
+<div id="pane-pipeline" class="pane">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <!-- 監控區：Ollama 狀態 -->
+    <div class="card">
+      <h3 style="margin:0 0 8px">Ollama 狀態</h3>
+      <div id="pl-ollama-status">載入中...</div>
+    </div>
+    <!-- 監控區：Pipeline 設定 -->
+    <div class="card">
+      <h3 style="margin:0 0 8px">Pipeline 設定</h3>
+      <div id="pl-pipeline-cfg">載入中...</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <!-- 監控區：Vector DB -->
+    <div class="card">
+      <h3 style="margin:0 0 8px">Vector DB</h3>
+      <div id="pl-vector-stats">載入中...</div>
+      <button class="btn btn-green btn-sm" style="margin-top:8px" onclick="pipelineResync()">🔄 Vector Resync</button>
+      <div id="pl-resync-result" style="font-size:0.82rem;margin-top:8px"></div>
+    </div>
+    <!-- 操作區：Embedding 切換 -->
+    <div class="card">
+      <h3 style="margin:0 0 8px">Embedding Model 切換</h3>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <select id="pl-embed-select" style="flex:1;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.85rem"></select>
+        <button class="btn btn-sm" onclick="pipelineSwitchEmbed()">套用</button>
+      </div>
+      <div id="pl-embed-msg" style="font-size:0.82rem"></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <!-- 操作區：Ollama 模型管理 -->
+    <div class="card">
+      <h3 style="margin:0 0 8px">Ollama 模型管理</h3>
+      <div id="pl-models-list" style="max-height:300px;overflow-y:auto;font-size:0.82rem;margin-bottom:8px">載入中...</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="pl-pull-input" type="text" placeholder="模型名稱（如 qwen3:8b）" style="flex:1;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.85rem">
+        <button class="btn btn-green btn-sm" onclick="pipelinePullModel()">Pull</button>
+      </div>
+      <div id="pl-pull-msg" style="font-size:0.82rem;margin-top:8px"></div>
+    </div>
+    <!-- 操作區：Recall Test -->
+    <div class="card">
+      <h3 style="margin:0 0 8px">Recall Test</h3>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="pl-recall-input" type="text" placeholder="輸入查詢..." style="flex:1;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.85rem" onkeydown="if(event.key==='Enter')pipelineRecallTest()">
+        <button class="btn btn-green btn-sm" onclick="pipelineRecallTest()">測試</button>
+      </div>
+      <div id="pl-recall-result" style="font-size:0.82rem;max-height:350px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
 <div id="pane-chat" class="pane">
   <div style="display:flex;flex-direction:column;height:calc(100vh - 140px)">
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
@@ -752,6 +810,7 @@ function switchTab(id, el) {
   if (id === 'cron') loadCron();
   if (id === 'config') loadCfg();
   if (id === 'memory') loadMemory();
+  if (id === 'pipeline') loadPipeline();
 }
 
 function refreshAll() { loadOverview(); loadStatus(); }
@@ -2500,6 +2559,166 @@ async function testMemRecall() {
   } catch (e) { el.innerHTML = '<div style="color:var(--error)">錯誤: ' + e.message + '</div>'; }
 }
 
+// ── Memory Pipeline 面板 ─────────────────────────────────────────────────────
+
+async function loadPipeline() {
+  // 並行載入所有資料
+  const [ollamaStatus, models, pipeline, vectorStats] = await Promise.all([
+    authFetch('/api/ollama/status').then(r => r.json()).catch(() => ({ online: false })),
+    authFetch('/api/ollama/models').then(r => r.json()).catch(() => ({ models: [] })),
+    authFetch('/api/memory/pipeline').then(r => r.json()).catch(() => ({ config: null, activeProvider: null, embeddingDim: 0 })),
+    authFetch('/api/memory/vector/stats').then(r => r.json()).catch(() => ({ available: false })),
+  ]);
+
+  // Ollama 狀態
+  const statusEl = document.getElementById('pl-ollama-status');
+  statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+    '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' +
+    (ollamaStatus.online ? '#4ade80' : '#f87171') + '"></span>' +
+    '<strong>' + (ollamaStatus.online ? '連線中' : '離線') + '</strong>' +
+    (ollamaStatus.version ? ' <span style="color:var(--fg2)">v' + ollamaStatus.version + '</span>' : '') +
+    '</div>' +
+    (ollamaStatus.host ? '<div style="font-size:0.78rem;color:var(--fg2)">Host: ' + ollamaStatus.host + '</div>' : '');
+
+  // Pipeline 設定
+  const cfgEl = document.getElementById('pl-pipeline-cfg');
+  if (pipeline.config) {
+    const e = pipeline.config.embedding || {};
+    const x = pipeline.config.extraction || {};
+    const r = pipeline.config.reranker || {};
+    cfgEl.innerHTML =
+      '<table style="font-size:0.82rem;width:100%"><tbody>' +
+      '<tr><td style="padding:2px 8px 2px 0;color:var(--fg2)">Embedding</td><td><strong>' + (e.provider||'-') + '</strong> / ' + (e.model||'-') + '</td></tr>' +
+      '<tr><td style="padding:2px 8px 2px 0;color:var(--fg2)">Extraction</td><td><strong>' + (x.provider||'-') + '</strong> / ' + (x.model||'-') + '</td></tr>' +
+      '<tr><td style="padding:2px 8px 2px 0;color:var(--fg2)">Reranker</td><td><strong>' + (r.provider||'-') + '</strong> / ' + (r.model||'-') + '</td></tr>' +
+      '<tr><td style="padding:2px 8px 2px 0;color:var(--fg2)">維度</td><td>' + (pipeline.embeddingDim || '-') + 'd</td></tr>' +
+      '</tbody></table>';
+    if (pipeline.activeProvider) {
+      cfgEl.innerHTML += '<div style="font-size:0.78rem;color:var(--fg2);margin-top:6px">Active: ' + pipeline.activeProvider.name + '/' + pipeline.activeProvider.model + '</div>';
+    }
+  } else {
+    cfgEl.innerHTML = '<div style="color:var(--fg2)">未設定（fallback 至 Ollama）</div>';
+  }
+
+  // Vector DB
+  const vecEl = document.getElementById('pl-vector-stats');
+  if (vectorStats.available && vectorStats.tables) {
+    const totalCount = vectorStats.tables.reduce(function(s, t) { return s + t.count; }, 0);
+    vecEl.innerHTML = '<div style="margin-bottom:4px"><strong>' + totalCount + '</strong> vectors in <strong>' + vectorStats.tables.length + '</strong> namespaces</div>' +
+      vectorStats.tables.map(function(t) { return '<div style="font-size:0.78rem;color:var(--fg2)">• ' + t.name + ': ' + t.count + '</div>'; }).join('');
+  } else {
+    vecEl.innerHTML = '<div style="color:var(--warn)">Vector DB 不可用</div>';
+  }
+
+  // Ollama 模型列表
+  renderPipelineModels(models.models || []);
+
+  // Embedding 切換下拉選單（只列出 embedding 模型）
+  const select = document.getElementById('pl-embed-select');
+  const embeddingModels = (models.models || []).filter(function(m) { return m.name.includes('embed'); });
+  const currentModel = pipeline.config?.embedding?.model || '';
+  select.innerHTML = embeddingModels.length
+    ? embeddingModels.map(function(m) { return '<option value="' + m.name + '"' + (m.name === currentModel ? ' selected' : '') + '>' + m.name + '</option>'; }).join('')
+    : '<option value="">（無 embedding 模型）</option>';
+}
+
+function renderPipelineModels(models) {
+  const el = document.getElementById('pl-models-list');
+  if (!models.length) { el.innerHTML = '<div style="color:var(--fg2)">無模型</div>'; return; }
+  el.innerHTML = '<table class="tbl" style="width:100%"><thead><tr><th>Model</th><th>Size</th><th>Family</th><th></th></tr></thead><tbody>' +
+    models.map(function(m) {
+      var sizeGB = (m.size / 1073741824).toFixed(1);
+      return '<tr><td style="font-weight:500">' + m.name + '</td>' +
+        '<td>' + sizeGB + ' GB</td>' +
+        '<td style="color:var(--fg2)">' + (m.details?.family || '-') + '</td>' +
+        '<td><button class="btn btn-sm" style="color:var(--error);font-size:0.72rem" onclick="pipelineDeleteModel(\'' + m.name.replace(/'/g, "\\'") + '\')">刪除</button></td></tr>';
+    }).join('') + '</tbody></table>';
+}
+
+async function pipelineSwitchEmbed() {
+  var select = document.getElementById('pl-embed-select');
+  var model = select.value;
+  if (!model) return;
+  var msgEl = document.getElementById('pl-embed-msg');
+  msgEl.innerHTML = '<div style="color:var(--fg2)">套用中...</div>';
+  try {
+    var r = await authFetch('/api/memory/pipeline', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ embedding: { provider: 'ollama', model: model } }),
+    }).then(function(r) { return r.json(); });
+    msgEl.innerHTML = '<div style="color:var(--success)">' + (r.message || '已更新') + '</div>';
+  } catch (e) { msgEl.innerHTML = '<div style="color:var(--error)">錯誤: ' + e.message + '</div>'; }
+}
+
+async function pipelineResync() {
+  var el = document.getElementById('pl-resync-result');
+  el.innerHTML = '<div style="color:var(--fg2)">重建中（可能需要數十秒）...</div>';
+  try {
+    var r = await authFetch('/api/memory/resync', { method: 'POST' }).then(function(r) { return r.json(); });
+    if (r.error) { el.innerHTML = '<div style="color:var(--error)">' + r.error + '</div>'; return; }
+    var lines = (r.report || []).map(function(l) {
+      return '<div>• ' + l.layer + '：✅ ' + l.seeded + ' embedded, ' + l.skipped + ' skipped, ' + l.errors + ' errors</div>';
+    });
+    el.innerHTML = '<div style="color:var(--success);font-weight:500;margin-bottom:4px">✅ Resync 完成</div>' + lines.join('');
+    // 刷新 vector stats
+    loadPipeline();
+  } catch (e) { el.innerHTML = '<div style="color:var(--error)">錯誤: ' + e.message + '</div>'; }
+}
+
+async function pipelinePullModel() {
+  var input = document.getElementById('pl-pull-input');
+  var name = input.value.trim();
+  if (!name) return;
+  var msgEl = document.getElementById('pl-pull-msg');
+  msgEl.innerHTML = '<div style="color:var(--fg2)">拉取中（大模型可能需數分鐘）...</div>';
+  try {
+    var r = await authFetch('/api/ollama/pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name }),
+    }).then(function(r) { return r.json(); });
+    if (r.error) { msgEl.innerHTML = '<div style="color:var(--error)">' + r.error + '</div>'; return; }
+    msgEl.innerHTML = '<div style="color:var(--success)">✅ ' + name + ' 拉取完成</div>';
+    input.value = '';
+    loadPipeline(); // 刷新模型列表
+  } catch (e) { msgEl.innerHTML = '<div style="color:var(--error)">錯誤: ' + e.message + '</div>'; }
+}
+
+async function pipelineDeleteModel(name) {
+  if (!confirm('確定刪除模型 "' + name + '"？')) return;
+  try {
+    await authFetch('/api/ollama/model/' + encodeURIComponent(name), { method: 'DELETE' });
+    loadPipeline();
+  } catch (e) { alert('刪除失敗: ' + e.message); }
+}
+
+async function pipelineRecallTest() {
+  var input = document.getElementById('pl-recall-input');
+  var prompt = input.value.trim();
+  if (!prompt) return;
+  var el = document.getElementById('pl-recall-result');
+  el.innerHTML = '<div style="color:var(--fg2)">查詢中...</div>';
+  try {
+    var r = await authFetch('/api/memory/recall-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: prompt }),
+    }).then(function(r) { return r.json(); });
+    if (r.error) { el.innerHTML = '<div style="color:var(--error)">' + r.error + '</div>'; return; }
+    if (!r.fragments?.length) {
+      el.innerHTML = '<div style="color:var(--warn)">無命中' + (r.degraded ? ' (degraded)' : '') + '</div>';
+      return;
+    }
+    var rows = r.fragments.map(function(f, i) {
+      return '<tr><td>' + (i+1) + '</td><td style="font-weight:500">' + f.name + '</td>' +
+        '<td>' + f.score + '</td><td>' + f.matchedBy + '</td><td>' + f.confidence + '</td>' +
+        '<td style="font-size:0.75rem;color:var(--fg2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (f.contentPreview||'').replace(/</g,'&lt;') + '</td></tr>';
+    }).join('');
+    el.innerHTML = '<table class="tbl"><thead><tr><th>#</th><th>Atom</th><th>Score</th><th>Source</th><th>Conf</th><th>Preview</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div style="color:var(--error)">錯誤: ' + e.message + '</div>'; }
+}
+
 // ── Dashboard Chat ──────────────────────────────────────────────────────────
 let _chatBusy = false;
 
@@ -3956,6 +4175,204 @@ export class DashboardServer {
           } catch (err) {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ available: false, error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Memory Pipeline API 端點
+      // ══════════════════════════════════════════════════════════════════════════
+
+      // GET /api/ollama/status — Ollama 連線狀態
+      if (url === "/api/ollama/status" && method === "GET") {
+        void (async () => {
+          try {
+            const { config } = await import("./config.js");
+            const host = config.ollama?.primary?.host ?? "http://localhost:11434";
+            const resp = await fetch(`${host}/api/version`, { signal: AbortSignal.timeout(5000) });
+            if (resp.ok) {
+              const data = await resp.json() as { version?: string };
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ online: true, host, version: data.version ?? "unknown" }));
+            } else {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ online: false, host, error: `HTTP ${resp.status}` }));
+            }
+          } catch (err) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ online: false, error: err instanceof Error ? err.message : String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/ollama/models — 已安裝模型列表
+      if (url === "/api/ollama/models" && method === "GET") {
+        void (async () => {
+          try {
+            const { config } = await import("./config.js");
+            const host = config.ollama?.primary?.host ?? "http://localhost:11434";
+            const resp = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(10000) });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json() as { models: Array<{ name: string; size: number; modified_at: string; details?: { parameter_size?: string; family?: string } }> };
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ models: data.models ?? [] }));
+          } catch (err) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ models: [], error: err instanceof Error ? err.message : String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // POST /api/ollama/pull — 拉取模型
+      if (url === "/api/ollama/pull" && method === "POST") {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          void (async () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { name: string };
+              if (!body.name) { res.writeHead(400); res.end(JSON.stringify({ error: "name required" })); return; }
+              const { config } = await import("./config.js");
+              const host = config.ollama?.primary?.host ?? "http://localhost:11434";
+              const pullResp = await fetch(`${host}/api/pull`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: body.name, stream: false }),
+                signal: AbortSignal.timeout(600000),
+              });
+              if (!pullResp.ok) throw new Error(`HTTP ${pullResp.status}`);
+              const result = await pullResp.json();
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: true, status: (result as { status?: string }).status ?? "success" }));
+            } catch (err) {
+              res.writeHead(500); res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+            }
+          })();
+        });
+        return;
+      }
+
+      // DELETE /api/ollama/model/:name — 刪除模型
+      if (url.startsWith("/api/ollama/model/") && method === "DELETE") {
+        void (async () => {
+          try {
+            const modelName = decodeURIComponent(url.slice("/api/ollama/model/".length).split("?")[0]);
+            if (!modelName) { res.writeHead(400); res.end(JSON.stringify({ error: "model name required" })); return; }
+            const { config } = await import("./config.js");
+            const host = config.ollama?.primary?.host ?? "http://localhost:11434";
+            const delResp = await fetch(`${host}/api/delete`, {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: modelName }),
+            });
+            if (!delResp.ok) throw new Error(`HTTP ${delResp.status}`);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/memory/pipeline — 目前管線設定
+      if (url === "/api/memory/pipeline" && method === "GET") {
+        void (async () => {
+          try {
+            const { config } = await import("./config.js");
+            const { hasEmbeddingProvider, getEmbeddingProvider } = await import("../vector/embedding-provider.js");
+            const { getCachedDim } = await import("../vector/embedding.js");
+            const pipeline = config.memoryPipeline;
+            const provider = hasEmbeddingProvider() ? {
+              name: getEmbeddingProvider().providerName,
+              model: getEmbeddingProvider().modelName,
+            } : null;
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              config: pipeline ?? null,
+              activeProvider: provider,
+              embeddingDim: getCachedDim(),
+            }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // PUT /api/memory/pipeline — 更新管線設定（寫回 catclaw.json）
+      if (url === "/api/memory/pipeline" && method === "PUT") {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          void (async () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as {
+                embedding?: { provider: string; model: string; host?: string; apiKey?: string; dimensions?: number };
+              };
+              const { resolveConfigPath } = await import("./config.js");
+              const configPath = resolveConfigPath();
+              const rawText = readFileSync(configPath, "utf-8");
+              const rawJson = JSON.parse(rawText);
+              if (body.embedding) {
+                rawJson.memoryPipeline = rawJson.memoryPipeline ?? {};
+                rawJson.memoryPipeline.embedding = body.embedding;
+              }
+              writeFileSync(configPath, JSON.stringify(rawJson, null, 2), "utf-8");
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: true, message: "已更新 catclaw.json（需 resync 才生效）" }));
+            } catch (err) {
+              res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+            }
+          })();
+        });
+        return;
+      }
+
+      // POST /api/memory/resync — 觸發 vector resync
+      if (url === "/api/memory/resync" && method === "POST") {
+        void (async () => {
+          try {
+            const { getPlatformMemoryEngine } = await import("./platform.js");
+            const engine = getPlatformMemoryEngine();
+            if (!engine) { res.writeHead(500); res.end(JSON.stringify({ error: "MemoryEngine 未啟動" })); return; }
+
+            const status = engine.getStatus();
+            const memRoot = join(homedir(), ".catclaw", "memory");
+            const layers: Array<{ label: string; dir: string; namespace: string }> = [];
+            layers.push({ label: "global", dir: status.globalDir, namespace: "global" });
+
+            const projectsDir = join(memRoot, "projects");
+            if (existsSync(projectsDir)) {
+              for (const sub of readdirSync(projectsDir)) {
+                layers.push({ label: `project/${sub}`, dir: join(projectsDir, sub), namespace: `project/${sub}` });
+              }
+            }
+            const accountsDir = join(memRoot, "accounts");
+            if (existsSync(accountsDir)) {
+              for (const sub of readdirSync(accountsDir)) {
+                layers.push({ label: `account/${sub}`, dir: join(accountsDir, sub), namespace: `account/${sub}` });
+              }
+            }
+
+            const report: Array<{ layer: string; seeded: number; skipped: number; errors: number }> = [];
+            for (const l of layers) {
+              if (!existsSync(l.dir)) continue;
+              try {
+                const result = await engine.seedFromDir(l.dir, l.namespace);
+                report.push({ layer: l.label, ...result });
+              } catch (err) {
+                report.push({ layer: l.label, seeded: 0, skipped: 0, errors: 1 });
+              }
+            }
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, report }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
           }
         })();
         return;

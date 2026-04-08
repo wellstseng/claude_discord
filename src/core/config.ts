@@ -348,6 +348,33 @@ export interface OllamaConfig {
   timeout: number;
 }
 
+/** 記憶管線設定（provider 抽象層） */
+export type EmbeddingProviderType = "ollama" | "google" | "openai" | "voyage";
+export type ExtractionProviderType = "ollama" | "anthropic" | "openai";
+export type RerankerProviderType = "ollama" | "cohere" | "none";
+
+export interface MemoryPipelineConfig {
+  embedding: {
+    provider: EmbeddingProviderType;
+    model: string;
+    host?: string;      // ollama 專用
+    apiKey?: string;     // 雲端專用
+    dimensions?: number; // 部分模型可指定降維
+  };
+  extraction: {
+    provider: ExtractionProviderType;
+    model: string;
+    host?: string;
+    apiKey?: string;
+  };
+  reranker: {
+    provider: RerankerProviderType;
+    model: string;
+    host?: string;
+    apiKey?: string;
+  };
+}
+
 /** 單條工具權限規則 */
 export interface ToolPermissionRule {
   /** 套用對象值（role 名稱或 accountId） */
@@ -566,6 +593,8 @@ export interface BridgeConfig {
   session: SessionConfig;
   /** 記憶系統設定 */
   memory: MemoryConfig;
+  /** 記憶管線設定（provider 抽象層） */
+  memoryPipeline?: MemoryPipelineConfig;
   /** Ollama 設定 */
   ollama?: OllamaConfig;
   /** 安全設定 */
@@ -596,6 +625,8 @@ export interface BridgeConfig {
     perTurnTotalCap?: number;
     /** 單一 tool 執行超時毫秒（預設 30000，0 = 無限制） */
     toolTimeoutMs?: number;
+    /** write_file / edit_file 單次寫入上限 bytes（預設 512000 = 500KB，0 = 無限制） */
+    maxWriteFileBytes?: number;
   };
   /** Prompt Assembler 模組設定 */
   promptAssembler?: PromptAssemblerConfig;
@@ -707,6 +738,7 @@ interface RawConfig {
     persistPath?: string;
   };
   memory?: Partial<MemoryConfig>;
+  memoryPipeline?: Partial<MemoryPipelineConfig>;
   ollama?: Partial<OllamaConfig> & { primary?: Partial<OllamaConfig["primary"]> };
   safety?: Partial<SafetyConfig>;
   workflow?: Partial<WorkflowConfig>;
@@ -716,7 +748,7 @@ interface RawConfig {
   homeClaudeCode?: Partial<HomeClaudeCodeConfig>;
   agents?: AgentsConfig;
   dashboard?: { enabled?: boolean; port?: number; token?: string };
-  toolBudget?: { resultTokenCap?: number; perTurnTotalCap?: number; toolTimeoutMs?: number };
+  toolBudget?: { resultTokenCap?: number; perTurnTotalCap?: number; toolTimeoutMs?: number; maxWriteFileBytes?: number };
   contextEngineering?: ContextEngineeringConfig;
   inboundHistory?: InboundHistoryConfig;
   subagents?: Partial<SubagentsConfig>;
@@ -1000,6 +1032,56 @@ function defaultMemoryConfig(raw: Partial<MemoryConfig> | undefined, workspaceDi
 
 // ── 載入 ──────────────────────────────────────────────────────────────────────
 
+/** 建構 MemoryPipelineConfig：優先用明確設定，fallback 從 ollama.primary 推導 */
+function buildMemoryPipelineConfig(
+  raw: Partial<MemoryPipelineConfig> | undefined,
+  ollamaRaw: RawConfig["ollama"],
+): MemoryPipelineConfig | undefined {
+  if (raw?.embedding) {
+    return {
+      embedding: {
+        provider: raw.embedding.provider ?? "ollama",
+        model:    raw.embedding.model ?? "qwen3-embedding:8b",
+        host:     raw.embedding.host,
+        apiKey:   raw.embedding.apiKey,
+        dimensions: raw.embedding.dimensions,
+      },
+      extraction: {
+        provider: raw.extraction?.provider ?? "ollama",
+        model:    raw.extraction?.model ?? ollamaRaw?.primary?.model ?? "qwen3:8b",
+        host:     raw.extraction?.host,
+        apiKey:   raw.extraction?.apiKey,
+      },
+      reranker: {
+        provider: raw.reranker?.provider ?? "none",
+        model:    raw.reranker?.model ?? "",
+        host:     raw.reranker?.host,
+        apiKey:   raw.reranker?.apiKey,
+      },
+    };
+  }
+  // fallback：從 ollama config 推導
+  if (ollamaRaw?.primary) {
+    return {
+      embedding: {
+        provider: "ollama",
+        model:    ollamaRaw.primary.embeddingModel ?? "qwen3-embedding:8b",
+        host:     ollamaRaw.primary.host ?? "http://localhost:11434",
+      },
+      extraction: {
+        provider: "ollama",
+        model:    ollamaRaw.primary.model ?? "qwen3:8b",
+        host:     ollamaRaw.primary.host ?? "http://localhost:11434",
+      },
+      reranker: {
+        provider: "none",
+        model:    "",
+      },
+    };
+  }
+  return undefined;
+}
+
 function loadConfig(): BridgeConfig {
   const configPath = resolveConfigPath();
   const workspaceDir = resolveWorkspaceDir();
@@ -1135,6 +1217,7 @@ function loadConfig(): BridgeConfig {
       persistPath:       raw.session?.persistPath ?? `${workspaceDir}/data/sessions/`,
     },
     memory: defaultMemoryConfig(raw.memory, workspaceDir),
+    memoryPipeline: buildMemoryPipelineConfig(raw.memoryPipeline, ollamaRaw),
     ollama: ollamaRaw ? {
       enabled:    ollamaRaw.enabled ?? true,
       primary: {

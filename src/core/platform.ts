@@ -33,6 +33,7 @@ import { initIdentityLinker } from "../accounts/identity-linker.js";
 import { initProjectManager, type ProjectManager } from "../projects/manager.js";
 import { initMemoryEngine, type MemoryEngine } from "../memory/engine.js";
 import { initOllamaClient } from "../ollama/client.js";
+import { initEmbeddingProvider } from "../vector/embedding-provider.js";
 import { initRateLimiter, getRateLimiter, type RateLimiter } from "./rate-limiter.js";
 import { renameSessions } from "../migration/rename-sessions.js";
 import { initTraceStore, getTraceStore, getTraceContextStore } from "./message-trace.js";
@@ -162,6 +163,11 @@ export async function initPlatform(
   if (config.ollama?.enabled !== false && config.ollama) {
     initOllamaClient(config.ollama);
     log.info(`[platform] OllamaClient 初始化：${config.ollama.primary?.host ?? "http://localhost:11434"}`);
+  }
+
+  // ── 8.6 Embedding Provider（provider 抽象層）──────────────────────────────
+  if (config.memoryPipeline?.embedding) {
+    initEmbeddingProvider(config.memoryPipeline.embedding);
   }
 
   // ── 9. Memory Engine ───────────────────────────────────────────────────────

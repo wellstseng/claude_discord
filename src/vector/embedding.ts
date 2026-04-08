@@ -1,35 +1,35 @@
 /**
  * @file vector/embedding.ts
- * @description Ollama embedding 服務 — 文字 → 向量，供 LanceDB 索引與搜尋使用
+ * @description Embedding 服務 — 文字 → 向量，供 LanceDB 索引與搜尋使用
  *
- * - 使用 OllamaClient.embed()，支援 primary/fallback 自動切換
- * - Ollama offline 時 graceful fallback：回傳空陣列，讓上層決策
- * - 維護 embeddingDim 快取，避免每次重複查詢
+ * 優先使用 EmbeddingProvider（provider 抽象層），
+ * 若 provider 尚未初始化則 fallback 到 OllamaClient 直接呼叫（向後相容）。
  */
 
 import { log } from "../logger.js";
-import { getOllamaClient } from "../ollama/client.js";
+import { hasEmbeddingProvider, getEmbeddingProvider } from "./embedding-provider.js";
+import type { EmbedResult } from "./embedding-provider.js";
 
-// ── 型別 ─────────────────────────────────────────────────────────────────────
+export type { EmbedResult };
 
-export interface EmbedResult {
-  vectors: number[][];
-  /** 向量維度（0 代表失敗） */
-  dim: number;
-}
-
-// ── 維度快取 ──────────────────────────────────────────────────────────────────
+// ── 維度快取（provider 未初始化時的 fallback 用）────────────────────────────────
 
 let _cachedDim = 0;
 
-export function getCachedDim(): number { return _cachedDim; }
+export function getCachedDim(): number {
+  if (hasEmbeddingProvider()) {
+    // provider 有自己的 dim cache，但這裡也保持同步
+    return _cachedDim;
+  }
+  return _cachedDim;
+}
 export function setCachedDim(dim: number): void { _cachedDim = dim; }
 
 // ── 公開 API ─────────────────────────────────────────────────────────────────
 
 /**
  * 批次 embed 文字
- * @returns EmbedResult — vectors 為空陣列代表 Ollama 不可用（graceful fallback）
+ * @returns EmbedResult — vectors 為空陣列代表 embedding 不可用（graceful fallback）
  */
 export async function embedTexts(
   texts: string[],
@@ -37,7 +37,18 @@ export async function embedTexts(
 ): Promise<EmbedResult> {
   if (!texts.length) return { vectors: [], dim: _cachedDim };
 
+  // 優先走 provider 抽象層
+  if (hasEmbeddingProvider()) {
+    const result = await getEmbeddingProvider().embed(texts);
+    if (result.dim !== _cachedDim && result.dim > 0) {
+      _cachedDim = result.dim;
+    }
+    return result;
+  }
+
+  // fallback：直接呼叫 OllamaClient（向後相容）
   try {
+    const { getOllamaClient } = await import("../ollama/client.js");
     const client = getOllamaClient();
     const vectors = await client.embed(texts, opts);
 
@@ -75,6 +86,9 @@ export async function embedOne(
  * @returns 維度，失敗回傳 0
  */
 export async function getEmbeddingDim(opts: { model?: string } = {}): Promise<number> {
+  if (hasEmbeddingProvider()) {
+    return getEmbeddingProvider().getDimensions();
+  }
   if (_cachedDim > 0) return _cachedDim;
   const result = await embedTexts(["test"], opts);
   return result.dim;
