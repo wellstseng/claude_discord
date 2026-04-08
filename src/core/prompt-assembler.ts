@@ -259,6 +259,34 @@ const claudeMdModule: PromptModule = {
   },
 };
 
+// ── Failure Recall Module ────────────────────────────────────────────────────
+
+/**
+ * 快取的 failure summary（由 refreshFailureRecallCache() 非同步更新）。
+ * prompt module 同步讀取此快取。
+ */
+let _failureRecallCache = "";
+
+/** 重新載入 failure recall 快取。應在 session 開始時呼叫。 */
+export async function refreshFailureRecallCache(): Promise<void> {
+  try {
+    const { getRecentFailureSummary } = await import("../workflow/failure-detector.js");
+    _failureRecallCache = await getRecentFailureSummary();
+    if (_failureRecallCache) {
+      log.info(`[prompt-assembler] failure recall 載入 ${_failureRecallCache.split("\n").length - 1} 條陷阱`);
+    }
+  } catch (err) {
+    log.debug(`[prompt-assembler] failure recall 載入失敗：${err instanceof Error ? err.message : String(err)}`);
+    _failureRecallCache = "";
+  }
+}
+
+const failureRecallModule: PromptModule = {
+  name: "failure-recall",
+  priority: 55, // after coding-rules (40), before memory-rules (60)
+  build: () => _failureRecallCache,
+};
+
 // ── Module Registry ──────────────────────────────────────────────────────────
 
 const builtinModules: PromptModule[] = [
@@ -271,6 +299,7 @@ const builtinModules: PromptModule[] = [
   outputFormatModule,
   discordReplyModule,
   memoryRulesModule,
+  failureRecallModule,
 ];
 
 const customModules: PromptModule[] = [];

@@ -110,8 +110,11 @@ getReflectionMetrics(sessionKey: string): ReflectionMetrics
 監聽 `tool:error`，記錄失敗到 `memory/failures/` 目錄。
 供後續分析和避免重蹈覆轍。
 
+**Failure Recall**：`getRecentFailureSummary()` 掃描 `failures/*.md`，統計近 N 天出現 ≥ minCount 次的失敗模式，回傳摘要字串。由 prompt-assembler 的 `failure-recall` module 在 system prompt 注入「已知 tool 陷阱」，實現跨 session 錯誤學習。
+
 ```typescript
 initFailureDetector(eventBus: EventBus, memoryDir: string): void
+getRecentFailureSummary(opts?: { days?: number; minCount?: number; maxEntries?: number }): Promise<string>
 ```
 
 ### aidocs-manager

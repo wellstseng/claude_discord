@@ -8,7 +8,10 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { log } from "../../logger.js";
+import { config } from "../../core/config.js";
 import type { Tool, ToolContext, ToolResult } from "../types.js";
+
+const DEFAULT_MAX_WRITE_BYTES = 512_000; // 500KB
 
 export const tool: Tool = {
   name: "write_file",
@@ -35,6 +38,15 @@ export const tool: Tool = {
     const content = String(params["content"] ?? "");
 
     if (!filePath) return { error: "path 不能為空" };
+
+    // File size guard
+    const maxBytes = config.toolBudget?.maxWriteFileBytes ?? DEFAULT_MAX_WRITE_BYTES;
+    if (maxBytes > 0) {
+      const byteLen = Buffer.byteLength(content, "utf-8");
+      if (byteLen > maxBytes) {
+        return { error: `寫入內容過大（${byteLen} bytes），超過上限 ${maxBytes} bytes。請分段寫入或縮減內容。` };
+      }
+    }
 
     try {
       // 自動建立父目錄

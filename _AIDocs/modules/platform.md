@@ -29,9 +29,10 @@ initPlatform(config, catclawDir, distDir, workspaceDir)
   ├── 9.66 CollabConflictDetector  — 多人衝突偵測
   ├── 9.7 Stores                   — ToolLogStore + InboundHistoryStore + SessionSnapshotStore + TraceStore
   ├── 9.8 Dashboard                — Web UI（可選）
-  ├── 10. Workflow Engine           — rut/oscillation/sync/wisdom
-  ├── 11. MCP Servers              — 外部 MCP 連線
-  └── 12. Hook Registry            — 工具前後 hook
+  ├── 10.  Workflow Engine           — rut/oscillation/sync/wisdom
+  ├── 10b. Failure Recall Cache     — 非同步預載 failure recall 快取
+  ├── 11.  MCP Servers              — 外部 MCP 連線
+  └── 12.  Hook Registry            — 工具前後 hook
 ```
 
 ## 子系統 Getter

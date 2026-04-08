@@ -9,7 +9,10 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { log } from "../../logger.js";
+import { config } from "../../core/config.js";
 import type { Tool, ToolContext, ToolResult } from "../types.js";
+
+const DEFAULT_MAX_WRITE_BYTES = 1_024_000; // 1MB（edit 允許比 write 大，因為是增量修改）
 
 export const tool: Tool = {
   name: "edit_file",
@@ -73,6 +76,17 @@ export const tool: Tool = {
     const updated = replaceAll
       ? content.split(oldStr).join(newStr)
       : content.replace(oldStr, newStr);
+
+    // File size guard（檢查替換後的結果大小）
+    const maxBytes = config.toolBudget?.maxWriteFileBytes
+      ? config.toolBudget.maxWriteFileBytes * 2  // edit 允許 2 倍，因為是增量修改
+      : DEFAULT_MAX_WRITE_BYTES;
+    if (maxBytes > 0) {
+      const byteLen = Buffer.byteLength(updated, "utf-8");
+      if (byteLen > maxBytes) {
+        return { error: `編輯後檔案過大（${byteLen} bytes），超過上限 ${maxBytes} bytes。請分段修改。` };
+      }
+    }
 
     try {
       await writeFile(filePath, updated, "utf-8");

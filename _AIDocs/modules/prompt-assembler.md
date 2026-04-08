@@ -19,6 +19,7 @@
 | `git-rules` | 40 | Git 安全協定 |
 | `output-format` | 50 | 輸出規則（直球、繁中、不總結） |
 | `discord-reply` | 55 | Discord 回覆規則（有 Discord MCP 才注入） |
+| `failure-recall` | 55 | 跨 session 錯誤學習（已知 tool 陷阱注入） |
 | `memory-rules` | 60 | 記憶系統使用規則 |
 
 ## Context-aware Intent Detection
@@ -99,3 +100,11 @@ interface AssembleTraceOutput {
 ```
 
 Sprint 8 新增。discord.ts 傳入此物件，組裝完成後可讀取哪些模組被注入/跳過。
+
+## Failure Recall Cache
+
+```typescript
+refreshFailureRecallCache(): Promise<void>
+```
+
+啟動時（`platform.ts` 步驟 10b）非同步載入 failure recall 快取。`failure-recall` module 同步讀取此快取注入 system prompt。

@@ -244,7 +244,7 @@ export class MemoryEngine {
     }
 
     // 遞迴掃描，排除 _ 前綴目錄和非 .md 檔
-    const SKIP_DIRS = new Set(["_vectordb", "episodic", "_staging", "_reference"]);
+    const SKIP_DIRS = new Set(["_vectordb", "episodic", "_staging", "_reference", "failures"]);
     function walkMd(d: string): string[] {
       const results: string[] = [];
       for (const entry of readdirSync(d)) {

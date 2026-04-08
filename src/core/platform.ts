@@ -276,6 +276,9 @@ export async function initPlatform(
     process.cwd(),
   );
 
+  // ── 10b. Failure Recall Cache（非同步，不阻塞啟動）────────────────────────
+  import("./prompt-assembler.js").then(m => m.refreshFailureRecallCache()).catch(() => {});
+
   // ── 11. MCP Servers ─────────────────────────────────────────────────────────
   if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
     const { McpClient } = await import("../mcp/client.js");

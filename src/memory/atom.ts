@@ -144,7 +144,7 @@ export function readAllAtoms(dir: string): Atom[] {
 
     for (const entry of entries) {
       const fullPath = join(currentDir, entry);
-      if (entry.startsWith("_")) continue;     // 跳過 _staging / _vectordb 等
+      if (entry.startsWith("_") || entry === "failures") continue; // 跳過 _staging / _vectordb / failures 等
       if (entry === "MEMORY.md") continue;       // 索引檔不是 atom
 
       if (entry.endsWith(".md")) {

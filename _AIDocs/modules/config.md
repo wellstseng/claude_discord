@@ -76,7 +76,7 @@ export 所有型別定義（包括 cron.ts 使用的 `CronSchedule` / `CronActio
 | `subagents` | `SubagentsConfig` | 子 Agent 設定（maxConcurrent / defaultTimeoutMs / defaultKeepSession） |
 | `agents` | `AgentsConfig` | 多 Agent 單一 bot 入口設定 |
 | `dashboard` | `{ enabled, port, token? }` | Token Usage Dashboard |
-| `toolBudget` | `{ resultTokenCap?, perTurnTotalCap?, toolTimeoutMs? }` | Tool 呼叫 token Budget |
+| `toolBudget` | `{ resultTokenCap?, perTurnTotalCap?, toolTimeoutMs?, maxWriteFileBytes? }` | Tool 呼叫 token Budget（含 File Size Guard） |
 | `mcpServers` | `Record<string, McpServerEntry>` | 外部 MCP Server 設定 |
 | `hooks` | `HookDefinition[]` | Hook 系統（agent-loop 關鍵時機點執行 shell command） |
 
