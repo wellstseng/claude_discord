@@ -1,14 +1,14 @@
 # CatClaw Wiki
 
-CatClaw 是以 Discord 為介面的 AI Agent 運行平台。**溫蒂（Wendy）** 是運行在 CatClaw 上的第一個 AI 秘書，負責訊息處理、任務追蹤、排程提醒與知識管理。
+CatClaw 是以 Discord 為介面的 AI Agent 運行平台。透過 multi-turn agent loop 驅動 LLM，讓你在 Discord 上部署自己的 AI agent。
 
 ## 目標與願景
 
 | 階段 | 定位 | 狀態 |
 | ---- | ---- | ---- |
-| **Phase 1** | 溫蒂的運行平台 — 個人 AI 秘書 | **現階段** |
+| **Phase 1** | AI 秘書運行平台 — 訊息處理、任務追蹤、排程提醒、知識管理 | **現階段** |
 | **Phase 2** | 自治開發能力 — agent 自主搜尋、規劃、執行 | 進行中 |
-| **Phase 3** | 通用 Agent 平台 — 多 agent 實例、角色化部署 | 規劃中 |
+| **Phase 3** | 多 Agent 平台 — 多 agent 實例、角色化部署 | 規劃中 |
 
 ## 核心機制
 
