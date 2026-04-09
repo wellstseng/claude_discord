@@ -25,9 +25,9 @@ export interface PermissionContext {
   accountId?: string;
   /** 帳號角色 */
   role?: string;
-  /** Persona agent ID（非 admin 時限定寫入 agents/{personaId}/ ） */
-  personaId?: string;
-  /** 是否為管理者 agent（admin 不受 persona 路徑限制） */
+  /** Agent ID（非 admin 時限定寫入 agents/{agentId}/） */
+  agentId?: string;
+  /** 是否為管理者 agent（admin 不受路徑限制） */
   isAdmin?: boolean;
 }
 
@@ -165,9 +165,9 @@ export class SafetyGuard {
       case "edit_file": {
         const fsResult = this.checkFilesystem(String(params["path"] ?? ""), "write");
         if (fsResult.blocked) return fsResult;
-        // Persona 路徑白名單：非 admin 限定 agents/{self}/
-        if (ctx?.personaId && !ctx.isAdmin) {
-          return this.checkPersonaWritePath(String(params["path"] ?? ""), ctx.personaId);
+        // Agent 路徑白名單：非 admin 限定 agents/{self}/
+        if (ctx?.agentId && !ctx.isAdmin) {
+          return this.checkAgentWritePath(String(params["path"] ?? ""), ctx.agentId);
         }
         return fsResult;
       }
@@ -364,25 +364,24 @@ export class SafetyGuard {
     return { blocked: false };
   }
 
-  // ── Persona 路徑白名單 ──────────────────────────────────────────────────────
+  // ── Agent 路徑白名單 ────────────────────────────────────────────────────────
 
   /**
-   * 非 admin persona 只能寫入自己的 agentDir（~/.catclaw/agents/{personaId}/）。
-   * 額外允許 persona config.json 指定的 workspaceDir（未來 Sprint 接入）。
+   * 非 admin agent 只能寫入自己的 agentDir（~/.catclaw/agents/{agentId}/）。
+   * 額外允許 agent config.json 指定的 workspaceDir（未來 Sprint 接入）。
    */
-  checkPersonaWritePath(filePath: string, personaId: string): GuardResult {
+  checkAgentWritePath(filePath: string, agentId: string): GuardResult {
     const abs = this.expandPath(filePath);
     const catclawDir = resolve(homedir(), ".catclaw");
-    const allowedDir = resolve(catclawDir, "agents", personaId);
+    const allowedDir = resolve(catclawDir, "agents", agentId);
 
     if (abs.startsWith(allowedDir + "/") || abs === allowedDir) {
       return { blocked: false };
     }
 
-    // 不在允許範圍內
     return {
       blocked: true,
-      reason: `Persona「${personaId}」只能寫入 agents/${personaId}/，不可存取：${abs}`,
+      reason: `Agent「${agentId}」只能寫入 agents/${agentId}/，不可存取：${abs}`,
     };
   }
 

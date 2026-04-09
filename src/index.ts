@@ -25,7 +25,7 @@ import { initHistory } from "./history.js";
 import { loadBuiltinSkills, loadPromptSkills, loadExternalSkills, loadExternalPromptSkills } from "./skills/registry.js";
 import { initPlatform } from "./core/platform.js";
 import type { BridgeConfig as CoreBridgeConfig } from "./core/config.js";
-import { parseAgentArg, loadAgentConfig } from "./core/agent-loader.js";
+import { parseAgentArg, loadAgentBootConfig } from "./core/agent-loader.js";
 
 // 在其他模組開始 log 前設定層級
 setLogLevel(config.logLevel);
@@ -58,7 +58,7 @@ const catclawDir = resolveCatclawDir();
 const distDir = dirname(fileURLToPath(import.meta.url));
 const agentId = parseAgentArg();
 const platformConfig = agentId
-  ? loadAgentConfig(config as unknown as CoreBridgeConfig, agentId)
+  ? loadAgentBootConfig(config as unknown as CoreBridgeConfig, agentId)
   : config as unknown as CoreBridgeConfig;
 
 if (agentId) log.info(`[bridge] Agent 模式：${agentId}`);

@@ -53,9 +53,9 @@ export interface ToolContext {
   parentRunId?: string;
   /** 當前 turn 的 traceId（供子 agent 建立 parentTraceId 關聯） */
   traceId?: string;
-  /** Persona agent ID（spawn_subagent 帶 persona 時注入） */
-  personaId?: string;
-  /** 是否為管理者 agent（由 persona config.json 的 admin flag 決定） */
+  /** Agent ID（spawn_subagent 帶 agent 身份時注入） */
+  agentId?: string;
+  /** 是否為管理者 agent（由 agent config.json 的 admin flag 決定） */
   isAdmin?: boolean;
 }
 

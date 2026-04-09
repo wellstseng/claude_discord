@@ -11,7 +11,7 @@
 ```text
  1. import { config }               ← module eval 時執行 loadConfig()，讀 config.json
  2. setLogLevel(config.logLevel)     ← 在其他模組 log 前設定層級（module 頂層執行）
- 3. parseAgentArg() + loadAgentConfig() ← --agent 模式：載入合併設定
+ 3. parseAgentArg() + loadAgentBootConfig() ← --agent 模式：載入合併設定
  4. await initPlatform(config, ...)  ← 初始化所有平台子系統（12 步，見 platform.md）
  5. loadSessions()                   ← 從磁碟載入 session 快取
  6. initHistory()                    ← 初始化訊息歷史 DB
@@ -169,5 +169,5 @@ import { setupSlashCommands, registerSlashCommands } from "./slash.js";
 import { initHistory } from "./history.js";
 import { loadBuiltinSkills, loadPromptSkills, loadExternalSkills, loadExternalPromptSkills } from "./skills/registry.js";
 import { initPlatform } from "./core/platform.js";
-import { parseAgentArg, loadAgentConfig } from "./core/agent-loader.js";
+import { parseAgentArg, loadAgentBootConfig } from "./core/agent-loader.js";
 ```

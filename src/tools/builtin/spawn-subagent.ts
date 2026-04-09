@@ -113,8 +113,8 @@ interface ChildRunOpts {
   parentRunId?: string;
   /** 父層 traceId（建立 parent-child trace 關聯） */
   parentTraceId?: string;
-  /** Persona 專屬 system prompt（覆蓋 agentType 預設 prompt） */
-  personaSystemPrompt?: string;
+  /** Agent 專屬 system prompt（覆蓋 agentType 預設 prompt） */
+  agentSystemPrompt?: string;
 }
 
 // ── ACP Runtime（SUB-6）──────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ async function runChildAgentLoop(opts: ChildRunOpts): Promise<{ text: string; tu
 
   // Agent Type：取得預定義的 system prompt + tool 白名單
   const agentType = getAgentType(opts.runtime);
-  let systemPrompt = opts.personaSystemPrompt ?? agentType.systemPrompt;
+  let systemPrompt = opts.agentSystemPrompt ?? agentType.systemPrompt;
   if (opts.attachmentsDir) {
     systemPrompt += `\n\n可用附件目錄：${opts.attachmentsDir}`;
   }
@@ -315,9 +315,9 @@ export const tool: Tool = {
       keepSession:{ type: "boolean", description: "完成後保留 session（debug 用，預設 false）" },
       mode:       { type: "string",  description: "run（預設，one-shot）| session（持久，需搭配 keepSession:true）" },
       allowNestedSpawn: { type: "boolean", description: "opt-in 允許子 agent 再 spawn（最多 3 層，預設 false）" },
-      persona:    { type: "string",  description: "Persona ID（對應 ~/.catclaw/agents/{id}/），自動載入設定、deterministic session、保留歷史" },
-      model:      { type: "string",  description: "模型 alias 或 provider/model（覆蓋預設，不限 persona）" },
-      workspaceDir: { type: "string", description: "工作目錄（覆蓋預設，不限 persona）" },
+      agent:      { type: "string",  description: "Agent ID（對應 ~/.catclaw/agents/{id}/），自動載入設定、deterministic session、保留歷史" },
+      model:      { type: "string",  description: "模型 alias 或 provider/model（覆蓋預設）" },
+      workspaceDir: { type: "string", description: "工作目錄（覆蓋預設）" },
       isolation:  { type: "string",  description: "worktree = git worktree 隔離分支工作（完成後由 parent 決定 merge 或丟棄）" },
       inputFrom:    { type: "string",  description: "等待指定 runId 的子 agent 完成，以其 result 作為本次 task 的前置輸入（pipeline 模式）" },
       saveToMemory: { type: "boolean", description: "完成後將結果存入記憶系統（預設 false）" },
@@ -344,27 +344,27 @@ export const tool: Tool = {
 
     const task       = String(params["task"] ?? "").trim();
     const label      = params["label"] ? String(params["label"]) : undefined;
-    const persona    = params["persona"] ? String(params["persona"]) : undefined;
+    const agentParam = params["agent"] ? String(params["agent"]) : undefined;
     const modelParam = params["model"] ? String(params["model"]) : undefined;
     const workspaceDirParam = params["workspaceDir"] ? String(params["workspaceDir"]) : undefined;
 
-    // ── Persona config 載入（覆蓋預設值）────────────────────────────────────
-    let personaConfig: import("../../core/config.js").AgentPersonaConfig | undefined;
-    let personaPromptExtra = "";
-    if (persona) {
-      const { loadPersonaConfig, loadPersonaPrompt } = await import("../../core/agent-loader.js");
-      personaConfig = loadPersonaConfig(persona);
-      const catclawMd = loadPersonaPrompt(persona);
-      if (catclawMd) personaPromptExtra = `\n\n# Persona 行為規則\n${catclawMd}`;
+    // ── Agent config 載入（覆蓋預設值）──────────────────────────────────────
+    let agentConfig: import("../../core/config.js").AgentConfig | undefined;
+    let agentPromptExtra = "";
+    if (agentParam) {
+      const { loadAgentConfig, loadAgentPrompt } = await import("../../core/agent-loader.js");
+      agentConfig = loadAgentConfig(agentParam);
+      const catclawMd = loadAgentPrompt(agentParam);
+      if (catclawMd) agentPromptExtra = `\n\n# Agent 行為規則\n${catclawMd}`;
     }
 
-    // 參數優先序：call params > persona config > 預設值
-    const providerId = modelParam ?? personaConfig?.model ?? (params["provider"] ? String(params["provider"]) : undefined);
+    // 參數優先序：call params > agent config > 預設值
+    const providerId = modelParam ?? agentConfig?.model ?? (params["provider"] ? String(params["provider"]) : undefined);
     const runtime    = String(params["runtime"] ?? "default");
-    const maxTurns   = typeof params["maxTurns"] === "number" ? params["maxTurns"] : (personaConfig?.maxTurns ?? 10);
-    const timeoutMs  = typeof params["timeoutMs"] === "number" ? params["timeoutMs"] : (personaConfig?.timeoutMs ?? 120_000);
+    const maxTurns   = typeof params["maxTurns"] === "number" ? params["maxTurns"] : (agentConfig?.maxTurns ?? 10);
+    const timeoutMs  = typeof params["timeoutMs"] === "number" ? params["timeoutMs"] : (agentConfig?.timeoutMs ?? 120_000);
     const isAsync          = params["async"] === true;
-    const keepSession      = persona ? true : params["keepSession"] === true;  // persona 強制 keepSession
+    const keepSession      = agentParam ? true : params["keepSession"] === true;  // agent 身份強制 keepSession
     const mode             = (params["mode"] as "run" | "session") ?? "run";
     const allowNestedSpawn = params["allowNestedSpawn"] === true;
     const isolation        = params["isolation"] === "worktree" ? "worktree" as const : undefined;
@@ -428,7 +428,7 @@ export const tool: Tool = {
     const record = registry.create({
       parentSessionKey: ctx.sessionId,
       task,
-      label: label ?? personaConfig?.label,
+      label: label ?? agentConfig?.label,
       mode,
       runtime,
       async: isAsync,
@@ -436,7 +436,7 @@ export const tool: Tool = {
       discordChannelId: ctx.channelId,
       accountId: ctx.accountId,
       parentId: ctx.parentRunId,
-      personaId: persona,
+      agentId: agentParam,
     });
 
     // SUB-5：mode:session → 建立 Discord thread 並綁定
@@ -468,15 +468,15 @@ export const tool: Tool = {
       }
     }
 
-    // Persona / 參數 workspaceDir（worktree 優先）
+    // Agent / 參數 workspaceDir（worktree 優先）
     if (!effectiveWorkspaceDir) {
-      effectiveWorkspaceDir = workspaceDirParam ?? personaConfig?.workspaceDir;
+      effectiveWorkspaceDir = workspaceDirParam ?? agentConfig?.workspaceDir;
     }
 
-    // Persona system prompt 注入
-    const personaSystemPrompt = personaConfig?.systemPrompt
-      ? personaConfig.systemPrompt + personaPromptExtra
-      : personaPromptExtra || undefined;
+    // Agent system prompt 注入
+    const agentSystemPrompt = agentConfig?.systemPrompt
+      ? agentConfig.systemPrompt + agentPromptExtra
+      : agentPromptExtra || undefined;
 
     const runChildFn = async () => {
       try {
@@ -496,7 +496,7 @@ export const tool: Tool = {
             allowNestedSpawn,
             parentRunId: record.runId,
             parentTraceId: ctx.traceId,
-            personaSystemPrompt,
+            agentSystemPrompt,
           }),
           new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error("__TIMEOUT__")), timeoutMs + 1000);

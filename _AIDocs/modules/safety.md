@@ -56,8 +56,8 @@ interface GuardResult {
 interface PermissionContext {
   accountId?: string;
   role?: string;
-  personaId?: string;        // Persona agent ID（非 admin 限寫 agents/{personaId}/）
-  isAdmin?: boolean;         // 管理者 agent（不受 persona 路徑限制）
+  agentId?: string;          // Agent ID（非 admin 限寫 agents/{agentId}/）
+  isAdmin?: boolean;         // 管理者 agent（不受路徑限制）
 }
 ```
 
@@ -67,7 +67,7 @@ interface PermissionContext {
 |----------|---------|
 | `run_command` | checkBash（黑名單/白名單）→ checkBashProtectedPaths |
 | `read_file` | checkFilesystem(path, "read") |
-| `write_file` / `edit_file` | checkFilesystem(path, "write") → checkPersonaWritePath（非 admin persona 限定 agents/{self}/） |
+| `write_file` / `edit_file` | checkFilesystem(path, "write") → checkAgentWritePath（非 admin agent 限定 agents/{self}/） |
 | `glob` / `grep` | checkFilesystem(path, "read")（有 path 時） |
 | 其他 | 不攔截 |
 

@@ -492,8 +492,8 @@ export interface HomeClaudeCodeConfig {
   path?: string;
 }
 
-/** Per-Agent Persona 設定（存放在 agents/{id}/config.json） */
-export interface AgentPersonaConfig {
+/** Per-Agent 設定（存放在 agents/{id}/config.json，agent 和 subagent 共用） */
+export interface AgentConfig {
   label?: string;
   systemPrompt?: string;
   model?: string;
