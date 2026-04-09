@@ -1499,7 +1499,7 @@ const CFG_SCHEMA = [
     {k:'cliBridge.logDir',t:'text',l:'Log Directory',d:'JSONL 日誌目錄（預設 ~/.catclaw/data/cli-bridge）'},
     {k:'cliBridge.keepAliveIntervalMs',t:'num',l:'Keep-Alive (ms)',d:'Keep-alive ping 間隔（預設 60000）'},
     {k:'cliBridge.turnTimeoutMs',t:'num',l:'Turn Timeout (ms)',d:'Turn idle 超時（預設 300000 = 5 分鐘），連續無事件才觸發'},
-    {k:'cliBridge.turnTimeoutAction',t:'select',l:'Timeout Action',opts:['interrupt','warn','restart'],d:'超時行為：interrupt=SIGINT 中斷（預設）, warn=僅通知不中斷, restart=重啟 process'},
+    {k:'cliBridge.turnTimeoutAction',t:'select',l:'Timeout Action',opts:['ask','interrupt','warn','restart'],d:'超時行為：ask=Discord 按鈕讓你選（預設）, interrupt=自動 SIGINT, warn=僅通知, restart=重啟'},
     {k:'cliBridge.showThinking',t:'bool',l:'Show Thinking',d:'Discord 中以 spoiler 格式顯示 thinking（預設 false）'},
     {k:'cliBridge.editIntervalMs',t:'num',l:'Edit Interval (ms)',d:'Discord 訊息編輯最小間隔，rate limit 保護（預設 800）'},
   ], dynamic:true, dynamicPath:'cliBridge.channels', entryFields:[

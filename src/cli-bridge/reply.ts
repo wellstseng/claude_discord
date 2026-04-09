@@ -248,6 +248,18 @@ export async function handleCliBridgeReply(
         continue;
       }
 
+      // ── idle_timeout_ask — 讓使用者選擇超時行為 ──
+      if (evt.type === "status" && evt.subtype === "idle_timeout_ask") {
+        await handleTimeoutAsk(bridge, handle.turnId, originalMessage, channel as SendableChannels);
+        continue;
+      }
+
+      // ── idle_timeout_warn — 僅通知 ──
+      if (evt.type === "status" && evt.subtype === "idle_timeout_warn") {
+        await send(`⏰ idle 超時警告（持續等待中）`);
+        continue;
+      }
+
       // ── result ──
       if (evt.type === "result") {
         // 送出殘留的 thinking
@@ -365,5 +377,66 @@ async function handleControlRequest(
       components: [],
     }).catch(() => {});
     log.info(`[cli-bridge-reply] control_request ${evt.requestId} → timeout (denied)`);
+  }
+}
+
+// ── idle timeout 互動處理 ──────────────────────────────────────────────────
+
+async function handleTimeoutAsk(
+  bridge: CliBridge,
+  turnId: string,
+  originalMessage: Message,
+  channel: SendableChannels,
+): Promise<void> {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`cb-timeout-wait-${turnId}`)
+      .setLabel("繼續等")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`cb-timeout-interrupt-${turnId}`)
+      .setLabel("中斷")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`cb-timeout-restart-${turnId}`)
+      .setLabel("重啟")
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  const msg = await channel.send({
+    content: `⏰ **Idle 超時** — CLI 已一段時間沒有回應，要怎麼處理？`,
+    components: [row],
+  });
+
+  try {
+    const interaction = await msg.awaitMessageComponent({
+      componentType: ComponentType.Button,
+      filter: (i: ButtonInteraction) => i.user.id === originalMessage.author.id,
+      time: 120_000,
+    });
+
+    const id = interaction.customId;
+    let action: "wait" | "interrupt" | "restart";
+    let label: string;
+    if (id.includes("-wait-")) { action = "wait"; label = "繼續等待"; }
+    else if (id.includes("-restart-")) { action = "restart"; label = "重啟"; }
+    else { action = "interrupt"; label = "中斷"; }
+
+    bridge.executeTimeoutAction(turnId, action);
+
+    await interaction.update({
+      content: `⏰ **Idle 超時** → ${label}`,
+      components: [],
+    });
+
+    log.info(`[cli-bridge-reply] timeout ask turn=${turnId.slice(0, 8)} → ${action}`);
+  } catch {
+    // 120s 無回應 → 自動中斷
+    bridge.executeTimeoutAction(turnId, "interrupt");
+    await msg.edit({
+      content: `⏰ **Idle 超時** → 無回應，自動中斷`,
+      components: [],
+    }).catch(() => {});
+    log.info(`[cli-bridge-reply] timeout ask turn=${turnId.slice(0, 8)} → auto interrupt (no response)`);
   }
 }

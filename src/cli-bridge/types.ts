@@ -79,8 +79,8 @@ export interface CliBridgeConfig {
   restartBackoffMs?: number[];
   /** Turn idle 超時毫秒（預設 300000 = 5 分鐘） */
   turnTimeoutMs?: number;
-  /** 超時行為："interrupt" = SIGINT 中斷（預設）| "warn" = 僅通知不中斷 | "restart" = 重啟 process */
-  turnTimeoutAction?: "interrupt" | "warn" | "restart";
+  /** 超時行為："ask" = Discord 按鈕讓使用者選（預設）| "interrupt" = 自動 SIGINT | "warn" = 僅通知 | "restart" = 重啟 process */
+  turnTimeoutAction?: "ask" | "interrupt" | "warn" | "restart";
   /** 顯示 thinking（預設 false） */
   showThinking?: boolean;
   /** Discord edit 最小間隔毫秒（rate limit 保護，預設 800） */

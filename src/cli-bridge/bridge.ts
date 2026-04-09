@@ -172,6 +172,30 @@ export class CliBridge {
     }
   }
 
+  // ── timeout 行為執行（reply handler 呼叫）─────────────────────────────────
+
+  executeTimeoutAction(turnId: string, action: "wait" | "interrupt" | "restart"): void {
+    if (action === "wait") {
+      // 繼續等 — 重新啟動 idle timeout
+      this.resetTurnTimeout(turnId);
+      log.info(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} timeout → 使用者選擇繼續等待`);
+      return;
+    }
+
+    // interrupt / restart — 結束 turn
+    const listener = this.turnListeners.get(turnId);
+    if (listener && !listener.done) {
+      listener.done = true;
+      listener.resolve({ type: "error", message: `使用者選擇${action === "interrupt" ? "中斷" : "重啟"}` });
+    }
+
+    if (action === "restart") {
+      void this.restart();
+    } else {
+      void this.interrupt();
+    }
+  }
+
   // ── 中斷 ──────────────────────────────────────────────────────────────────
 
   async interrupt(): Promise<void> {
@@ -372,23 +396,29 @@ export class CliBridge {
     if (existing) clearTimeout(existing);
 
     const timeoutMs = this.bridgeConfig.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
-    const action = this.bridgeConfig.turnTimeoutAction ?? "interrupt";
+    const action = this.bridgeConfig.turnTimeoutAction ?? "ask";
     const timer = setTimeout(() => {
       log.warn(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} idle timeout (${timeoutMs}ms 無事件) action=${action}`);
       this.turnTimeouts.delete(turnId);
 
-      if (action === "warn") {
-        // 僅通知，不中斷 — turn 繼續等待
+      if (action === "warn" || action === "ask") {
+        // 送 status event 給 reply handler（ask 模式由 reply handler 顯示按鈕）
         const listener = this.turnListeners.get(turnId);
         if (listener && !listener.done) {
-          listener.queue.push({ type: "status", subtype: "idle_timeout_warn", raw: { timeoutMs } });
+          const evt: CliBridgeEvent = {
+            type: "status",
+            subtype: action === "ask" ? "idle_timeout_ask" : "idle_timeout_warn",
+            raw: { timeoutMs },
+          };
           if (listener.resolve) {
-            listener.resolve({ type: "status", subtype: "idle_timeout_warn", raw: { timeoutMs } });
+            listener.resolve(evt);
             listener.resolve = () => {};
+          } else {
+            listener.queue.push(evt);
           }
         }
-        // 重新啟動 timeout，下次再 warn
-        this.resetTurnTimeout(turnId);
+        // 不結束 turn — 等使用者決定（ask）或繼續等待（warn 重新計時）
+        if (action === "warn") this.resetTurnTimeout(turnId);
         return;
       }
 
