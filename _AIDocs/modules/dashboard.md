@@ -1,6 +1,6 @@
 # modules/dashboard — Web Dashboard + REST API
 
-> 檔案：`src/core/dashboard.ts` (~4400 行)
+> 檔案：`src/core/dashboard.ts` (~4830 行)
 > 更新日期：2026-04-09
 
 ## 職責
@@ -34,6 +34,7 @@ Bearer token 認證（可選）：
 | Config | catclaw.json 線上編輯 |
 | Memory | Atom Browser（排序/篩選/刪除）+ Recall Tester + Stats Panel |
 | Pipeline | 管線設定總覽 + Embedding/Extract Model 切換 + Ollama 模型管理 + Vector Resync |
+| CLI Bridge | 持久 CLI Bridge 控制台（狀態、即時日誌、turn 歷程、Console 輸入、控制按鈕） |
 | Logs | PM2 日誌 tail + SSE 即時串流 |
 
 ## REST API 端點
@@ -146,6 +147,20 @@ Bearer token 認證（可選）：
 | `/api/memory/pipeline` | GET | 記憶管線設定（embedding/extraction/reranker + vector stats） |
 | `/api/memory/pipeline` | PUT | 更新管線設定（embedding/extraction），寫入 catclaw.json |
 | `/api/memory/resync` | POST | 觸發全層 vector resync |
+
+### CLI Bridge
+
+| 端點 | 方法 | 說明 |
+|------|------|------|
+| `/api/cli-bridge/list` | GET | 列出所有 bridge（label, channelId, status, sessionId） |
+| `/api/cli-bridge/:label/status` | GET | 單一 bridge 狀態 |
+| `/api/cli-bridge/:label/turns` | GET | Turn 歷程 `?limit=50` |
+| `/api/cli-bridge/:label/logs` | GET | 近期 stdout 事件 `?limit=100` |
+| `/api/cli-bridge/:label/send` | POST | Dashboard 直接送訊息 `{ text }` → 回傳 turnId |
+| `/api/cli-bridge/:label/interrupt` | POST | 中斷當前 turn（SIGINT） |
+| `/api/cli-bridge/:label/restart` | POST | 重啟 bridge process |
+| `/api/cli-bridge/:label/resend/:turnId` | POST | 重送失敗的 turn（用原始 userInput） |
+| `/api/cli-bridge/:label/stream` | GET | SSE 即時串流（init 送最近 50 筆，後續即時推送） |
 
 ### Logs
 

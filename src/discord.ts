@@ -511,6 +511,18 @@ async function handleMessage(
       }
     }
 
+    // ── CLI Bridge 路由：持久 Claude CLI process ──────────────────────────
+    {
+      const { getCliBridge } = await import("./cli-bridge/index.js");
+      const cliBridge = getCliBridge(firstMessage.channelId);
+      if (cliBridge) {
+        const { handleCliBridgeReply } = await import("./cli-bridge/reply.js");
+        log.info(`[discord] CLI Bridge 路由：${cliBridge.label} channel=${firstMessage.channelId}`);
+        void handleCliBridgeReply(cliBridge, combinedText, firstMessage, config);
+        return;
+      }
+    }
+
     // ── 路由：新平台路徑 vs 舊 Claude CLI 路徑 ────────────────────────────
     if (isPlatformReady()) {
       const { accountId, isGuest } = resolveDiscordIdentity(

@@ -664,6 +664,11 @@ export interface BridgeConfig {
    * 參考 Claude Code 的 PreToolUse / PostToolUse hooks 設計。
    */
   hooks?: import("../hooks/types.js").HookDefinition[];
+  /**
+   * CLI Bridge：持久 Claude CLI process，透過 stdin stream-json 通訊。
+   * 每個 channel 對應一個獨立的 CLI process。
+   */
+  cliBridge?: import("../cli-bridge/types.js").CliBridgeConfig;
 }
 
 // ── 環境變數展開 ──────────────────────────────────────────────────────────────

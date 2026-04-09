@@ -25,6 +25,7 @@ import { loadBuiltinSkills, loadPromptSkills, loadExternalSkills, loadExternalPr
 import { initPlatform } from "./core/platform.js";
 import type { BridgeConfig as CoreBridgeConfig } from "./core/config.js";
 import { parseAgentArg, loadAgentBootConfig } from "./core/agent-loader.js";
+import { startAllBridges, shutdownAllBridges } from "./cli-bridge/index.js";
 
 // 在其他模組開始 log 前設定層級
 setLogLevel(config.logLevel);
@@ -110,6 +111,13 @@ bot.once("clientReady", (c) => {
   // Bot 上線後啟動排程服務（需要 bot 來發送訊息）
   startCron(bot);
 
+  // ── CLI Bridge 啟動（持久 Claude CLI process）──────────────────────────────
+  if (config.cliBridge?.enabled) {
+    void startAllBridges(config.cliBridge).then(() => {
+      log.info(`[bridge] CLI Bridge 啟動完成`);
+    });
+  }
+
   // ── 重啟通知 ──
   const signalPath = resolve(process.cwd(), "signal", "RESTART");
 
@@ -166,8 +174,10 @@ bot.once("clientReady", (c) => {
 function shutdown(signal: string): void {
   log.info(`\n[bridge] 收到 ${signal}，關閉中...`);
   stopCron();
-  bot.destroy();
-  process.exit(0);
+  void shutdownAllBridges().finally(() => {
+    bot.destroy();
+    process.exit(0);
+  });
 }
 
 process.on("SIGINT", () => shutdown("SIGINT"));
