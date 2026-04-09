@@ -517,6 +517,7 @@ label.cfg-toggle { min-width: 36px; }
   <div class="card">
     <h2>Message Lifecycle Traces（全域）
       <button class="btn btn-sm" style="float:right" onclick="loadTraces()">↻</button>
+      <input id="trace-agent-filter" placeholder="Agent ID" style="float:right;margin-right:8px;background:var(--bg3);color:var(--fg);border:1px solid var(--border);padding:2px 6px;border-radius:4px;width:100px;font-size:0.78rem" oninput="loadTraces()">
       <select id="trace-limit" style="float:right;margin-right:8px;background:var(--bg3);color:var(--fg);border:1px solid var(--border);padding:2px 6px;border-radius:4px" onchange="loadTraces()">
         <option value="20">20</option>
         <option value="50" selected>50</option>
@@ -1163,8 +1164,9 @@ async function loadSubagents() {
       const dur = s.endedAt ? ((s.endedAt - s.createdAt)/1000).toFixed(1)+'s' : s.status === 'running' ? ((Date.now()-s.createdAt)/1000).toFixed(0)+'s...' : '-';
       const task = (s.task || '-').slice(0, 40);
       const killBtn = s.status === 'running' ? \`<button class="btn btn-sm btn-red" onclick="killSubagent('\${s.runId}')">✕</button>\` : '';
+      const agent = s.agentId ? \`<span class="badge" style="background:#7c3aed;color:#fff;font-size:0.65rem">\${s.agentId}</span>\` : '';
       return \`<tr>
-        <td title="\${s.runId}">\${(s.label||s.runId).slice(-12)}</td>
+        <td title="\${s.runId}">\${(s.label||s.runId).slice(-12)} \${agent}</td>
         <td><span class="badge \${badge}">\${s.status}</span></td>
         <td style="font-size:0.72rem" title="\${s.task}">\${task}</td>
         <td>\${s.turns||0}</td>
@@ -1994,7 +1996,8 @@ function _traceRowHtml(t) {
   const liveStyle = isLive ? 'background:rgba(255,200,0,0.08);' : '';
   let html = '<tr data-trace-id="' + t.traceId + '" style="border-bottom:1px solid var(--border);cursor:pointer;' + liveStyle + '" onclick="showTraceDetail(\\'' + t.traceId + '\\')">';
   html += '<td style="padding:4px;color:var(--fg2)">' + ts + '</td>';
-  html += '<td style="padding:4px">…' + ch + '</td>';
+  const agentBadge = t.agentId ? ' <span style="background:#7c3aed;color:#fff;font-size:0.6rem;padding:0 3px;border-radius:3px">' + t.agentId + '</span>' : '';
+  html += '<td style="padding:4px">…' + ch + agentBadge + '</td>';
   html += '<td style="padding:4px;text-align:right">' + dur + '</td>';
   html += '<td style="padding:4px;text-align:right">' + (t.effectiveInputTokens ?? t.totalInputTokens ?? 0).toLocaleString() + '</td>';
   html += '<td style="padding:4px;text-align:right">' + (t.totalOutputTokens ?? 0).toLocaleString() + '</td>';
@@ -2043,9 +2046,12 @@ async function loadTraces() {
     const histTraces = histRes.traces || [];
     // 合併：live 在前（按時間倒序），去重
     const seenIds = new Set();
-    const merged = [];
+    let merged = [];
     for (const t of liveTraces) { seenIds.add(t.traceId); merged.push(t); }
     for (const t of histTraces) { if (!seenIds.has(t.traceId)) merged.push(t); }
+    // Agent ID 篩選
+    const agentFilter = (document.getElementById('trace-agent-filter')?.value ?? '').trim();
+    if (agentFilter) merged = merged.filter(t => t.agentId && t.agentId.includes(agentFilter));
 
     if (merged.length === 0) { el.innerHTML = '<div style="color:var(--fg2)">無 trace 記錄</div>'; return; }
 
@@ -3112,6 +3118,7 @@ export class DashboardServer {
               runId: r["runId"], label: r["label"], status: r["status"],
               turns: r["turns"], createdAt: r["createdAt"], endedAt: r["endedAt"],
               task: r["task"], parentSessionKey: r["parentSessionKey"],
+              agentId: r["agentId"],
             }));
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ subagents }));

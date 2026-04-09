@@ -115,6 +115,8 @@ export interface MessageTraceEntry {
   // Classification
   category?: TraceCategory;
   parentTraceId?: string;
+  /** Agent ID（子 agent spawn 時帶入，供 Dashboard 篩選） */
+  agentId?: string;
   turnIndex?: number;
 
   // Phase 1: Inbound
@@ -302,6 +304,7 @@ export class MessageTrace {
   }
 
   setParentTraceId(id: string): void { this.entry.parentTraceId = id; }
+  setAgentId(id: string): void { this.entry.agentId = id; }
   setTurnIndex(index: number): void { this.entry.turnIndex = index; }
   setPhase(phase: MessageTraceEntry["phase"]): void { this.entry.phase = phase; }
   setContextBreakdown(breakdown: MessageTraceEntry["contextBreakdown"]): void { this.entry.contextBreakdown = breakdown; }

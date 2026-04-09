@@ -255,6 +255,7 @@ async function runChildAgentLoop(opts: ChildRunOpts): Promise<{ text: string; tu
   const childTraceId = randomUUID();
   const childTrace = MessageTrace.create(childTraceId, opts.childSessionKey, opts.accountId, "subagent");
   if (opts.parentTraceId) childTrace.setParentTraceId(opts.parentTraceId);
+  if (opts.agentId) childTrace.setAgentId(opts.agentId);
   childTrace.recordInbound({ text: opts.task, attachments: 0 });
 
   const childDepth = (opts.parentSpawnDepth ?? 0) + 1;

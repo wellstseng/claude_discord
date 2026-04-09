@@ -1,12 +1,12 @@
 # Message Lifecycle Trace — 訊息全鏈路追蹤
 
 > 原始碼：`src/core/message-trace.ts`
-> 更新日期：2026-04-08
+> 更新日期：2026-04-09
 
 ## 概述
 
 追蹤每條 Discord 訊息從接收到回覆的完整處理過程。7 個階段的結構化記錄，支援 dashboard 視覺化查詢。
-支援 subagent 父子追蹤（parentTraceId）、費用估算、context snapshot 模組模式。
+支援 subagent 父子追蹤（parentTraceId）、agent 身份標記（agentId）、費用估算、context snapshot 模組模式。
 
 ## 架構
 
@@ -98,6 +98,7 @@ interface MessageTraceEntry {
   // 分類
   category?: TraceCategory;
   parentTraceId?: string;   // subagent 父 trace
+  agentId?: string;         // Agent ID（子 agent spawn 時帶入，供 Dashboard 篩選）
   turnIndex?: number;
 
   // 7 階段

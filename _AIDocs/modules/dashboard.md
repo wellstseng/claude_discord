@@ -1,7 +1,7 @@
 # modules/dashboard — Web Dashboard + REST API
 
 > 檔案：`src/core/dashboard.ts` (~4400 行)
-> 更新日期：2026-04-08
+> 更新日期：2026-04-09
 
 ## 職責
 
@@ -27,8 +27,8 @@ Bearer token 認證（可選）：
 |------|------|
 | 概覽 | 狀態總覽、provider 狀態、uptime |
 | Sessions | Session 列表 + 操作（Clear/Compact/Delete/Purge） |
-| Traces | Message Lifecycle Trace 列表 + 詳情 |
-| Subagents | 子 agent 列表 + Kill |
+| Traces | Message Lifecycle Trace 列表 + 詳情（支援 agentId 篩選） |
+| Subagents | 子 agent 列表 + Kill（含 agentId badge） |
 | Tasks | 任務管理面板 |
 | Cron | 排程 job 管理 |
 | Config | catclaw.json 線上編輯 |
