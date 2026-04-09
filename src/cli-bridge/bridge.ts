@@ -149,6 +149,22 @@ export class CliBridge {
     };
   }
 
+  // ── control_request 回覆 ──────────────────────────────────────────────────
+
+  sendControlResponse(requestId: string, allowed: boolean): void {
+    if (!this.process?.alive) return;
+    try {
+      this.process.send({
+        type: "control_response",
+        permission_request_id: requestId,
+        allowed,
+      });
+      log.info(`[cli-bridge:${this.label}] control_response ${requestId} allowed=${allowed}`);
+    } catch (err) {
+      log.warn(`[cli-bridge:${this.label}] control_response 寫入失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // ── 中斷 ──────────────────────────────────────────────────────────────────
 
   async interrupt(): Promise<void> {

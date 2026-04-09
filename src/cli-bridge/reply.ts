@@ -10,16 +10,27 @@
  * - Discord 送達失敗 → 重試 3 次（指數退避 1s, 2s, 4s）
  * - 送達狀態回寫 StdoutLogger
  * - tool_call / thinking 可選顯示
+ * - control_request → Discord 按鈕（Approve/Deny）
+ * - 附件支援（Discord attachment → 文字描述附加到 stdin）
+ * - rate limit 保護（可設定 edit interval）
  */
 
-import { type Message, type SendableChannels } from "discord.js";
+import {
+  type Message,
+  type SendableChannels,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  type ButtonInteraction,
+  ComponentType,
+} from "discord.js";
 import { log } from "../logger.js";
 import type { CliBridge } from "./bridge.js";
 import type { CliBridgeEvent } from "./types.js";
 import type { BridgeConfig } from "../core/config.js";
+import type { CliBridgeConfig } from "./types.js";
 
 const TEXT_LIMIT = 2000;
-const EDIT_INTERVAL_MS = 800;
 const RETRY_DELAYS = [1000, 2000, 4000];
 
 // ── 工具函式 ────────────────────────────────────────────────────────────────
@@ -51,6 +62,16 @@ async function retrySend(
   return false;
 }
 
+/** 從 Discord Message 提取附件描述（供 stdin 附加） */
+export function extractAttachmentText(msg: Message): string {
+  if (!msg.attachments.size) return "";
+  const parts: string[] = [];
+  for (const [, att] of msg.attachments) {
+    parts.push(`[附件: ${att.name} (${att.contentType ?? "unknown"}, ${Math.round((att.size ?? 0) / 1024)}KB) URL: ${att.url}]`);
+  }
+  return "\n" + parts.join("\n");
+}
+
 // ── 主要 API ────────────────────────────────────────────────────────────────
 
 /**
@@ -61,18 +82,26 @@ export async function handleCliBridgeReply(
   text: string,
   originalMessage: Message,
   bridgeConfig: BridgeConfig,
+  cliBridgeConfig?: CliBridgeConfig,
 ): Promise<void> {
   const handle = bridge.send(text, "discord");
   const turnId = handle.turnId;
   const stdoutLogger = bridge.getStdoutLogger();
   const showToolCalls = bridgeConfig.showToolCalls;
+  const showThinking = cliBridgeConfig?.showThinking ?? false;
+  const editIntervalMs = cliBridgeConfig?.editIntervalMs ?? 800;
 
   let buffer = "";
+  let thinkingBuffer = "";
   const state = { editMsg: null as Message | null };
   let editTimer: ReturnType<typeof setTimeout> | null = null;
   let editBusy = false;
   let isFirst = true;
   let toolHintSent = false;
+
+  // Rate limit 計數器
+  let editCount = 0;
+  let lastEditTime = 0;
 
   // Typing indicator
   const channel = originalMessage.channel;
@@ -86,10 +115,17 @@ export async function handleCliBridgeReply(
 
   async function doEdit(): Promise<void> {
     if (!state.editMsg || !buffer.trim() || editBusy) return;
+
+    // Rate limit 保護
+    const now = Date.now();
+    if (now - lastEditTime < editIntervalMs) return;
+
     const content = closeFenceIfOpen(buffer);
     const safe = content.length > TEXT_LIMIT ? content.slice(0, TEXT_LIMIT - 3) + "…" : content;
     try {
       editBusy = true;
+      lastEditTime = now;
+      editCount++;
       await state.editMsg.edit(safe);
     } catch { /* rate-limited or deleted */ }
     finally { editBusy = false; }
@@ -100,7 +136,7 @@ export async function handleCliBridgeReply(
     editTimer = setTimeout(() => {
       editTimer = null;
       void doEdit();
-    }, EDIT_INTERVAL_MS);
+    }, editIntervalMs);
   }
 
   function cancelEditTimer(): void {
@@ -168,12 +204,24 @@ export async function handleCliBridgeReply(
 
       // ── thinking_delta ──
       if (evt.type === "thinking_delta") {
-        // 靜默（thinking 不顯示在 Discord，但 log 有記錄）
+        if (showThinking) {
+          thinkingBuffer += evt.text;
+          // thinking 不做 streaming edit，只在結束時顯示
+        }
         continue;
       }
 
       // ── tool_call ──
       if (evt.type === "tool_call") {
+        // 如果有累積的 thinking，先送出
+        if (showThinking && thinkingBuffer.trim()) {
+          const thinkText = thinkingBuffer.length > TEXT_LIMIT - 20
+            ? thinkingBuffer.slice(0, TEXT_LIMIT - 20) + "…"
+            : thinkingBuffer;
+          await send(`||${thinkText}||`);
+          thinkingBuffer = "";
+        }
+
         if (showToolCalls !== "none" && !toolHintSent) {
           void originalMessage.reactions.cache.get("🤔")?.remove().catch(() => {});
           void originalMessage.react("🔧").catch(() => {});
@@ -194,8 +242,23 @@ export async function handleCliBridgeReply(
         continue;
       }
 
+      // ── control_request ──
+      if (evt.type === "control_request") {
+        await handleControlRequest(evt, bridge, originalMessage, channel as SendableChannels);
+        continue;
+      }
+
       // ── result ──
       if (evt.type === "result") {
+        // 送出殘留的 thinking
+        if (showThinking && thinkingBuffer.trim()) {
+          const thinkText = thinkingBuffer.length > TEXT_LIMIT - 20
+            ? thinkingBuffer.slice(0, TEXT_LIMIT - 20) + "…"
+            : thinkingBuffer;
+          await send(`||${thinkText}||`);
+          thinkingBuffer = "";
+        }
+
         // 最後 flush
         cancelEditTimer();
         if (buffer.trim() && state.editMsg) {
@@ -247,6 +310,60 @@ export async function handleCliBridgeReply(
       discordDelivery === "failed" ? "Discord 送達失敗" : undefined,
     );
 
-    log.info(`[cli-bridge-reply] turn=${turnId.slice(0, 8)} delivery=${discordDelivery}`);
+    log.info(`[cli-bridge-reply] turn=${turnId.slice(0, 8)} delivery=${discordDelivery} edits=${editCount}`);
+  }
+}
+
+// ── control_request 處理 ────────────────────────────────────────────────────
+
+async function handleControlRequest(
+  evt: CliBridgeEvent & { type: "control_request" },
+  bridge: CliBridge,
+  originalMessage: Message,
+  channel: SendableChannels,
+): Promise<void> {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`cb-approve-${evt.requestId}`)
+      .setLabel("Approve")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`cb-deny-${evt.requestId}`)
+      .setLabel("Deny")
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  const promptMsg = await channel.send({
+    content: `🔐 **權限請求**\n工具：\`${evt.tool}\`\n${evt.description}`,
+    components: [row],
+  });
+
+  // 等待按鈕互動（60 秒超時）
+  try {
+    const interaction = await promptMsg.awaitMessageComponent({
+      componentType: ComponentType.Button,
+      filter: (i: ButtonInteraction) => i.user.id === originalMessage.author.id,
+      time: 60_000,
+    });
+
+    const allowed = interaction.customId.startsWith("cb-approve-");
+
+    // 回寫 stdin
+    bridge.sendControlResponse(evt.requestId, allowed);
+
+    await interaction.update({
+      content: `🔐 **權限請求** → ${allowed ? "✅ 已允許" : "❌ 已拒絕"}\n工具：\`${evt.tool}\`\n${evt.description}`,
+      components: [],
+    });
+
+    log.info(`[cli-bridge-reply] control_request ${evt.requestId} → ${allowed ? "approved" : "denied"}`);
+  } catch {
+    // 超時 → 自動拒絕
+    bridge.sendControlResponse(evt.requestId, false);
+    await promptMsg.edit({
+      content: `🔐 **權限請求** → ⏰ 超時（自動拒絕）\n工具：\`${evt.tool}\`\n${evt.description}`,
+      components: [],
+    }).catch(() => {});
+    log.info(`[cli-bridge-reply] control_request ${evt.requestId} → timeout (denied)`);
   }
 }

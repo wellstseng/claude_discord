@@ -77,6 +77,10 @@ export interface CliBridgeConfig {
   keepAliveIntervalMs?: number;
   /** 重啟退避間隔毫秒清單（預設 [1000, 2000, 4000, 8000, 16000, 30000]） */
   restartBackoffMs?: number[];
+  /** 顯示 thinking（預設 false） */
+  showThinking?: boolean;
+  /** Discord edit 最小間隔毫秒（rate limit 保護，預設 800） */
+  editIntervalMs?: number;
 }
 
 /** CliProcess 建構參數 */

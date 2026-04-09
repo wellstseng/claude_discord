@@ -516,9 +516,12 @@ async function handleMessage(
       const { getCliBridge } = await import("./cli-bridge/index.js");
       const cliBridge = getCliBridge(firstMessage.channelId);
       if (cliBridge) {
-        const { handleCliBridgeReply } = await import("./cli-bridge/reply.js");
-        log.info(`[discord] CLI Bridge 路由：${cliBridge.label} channel=${firstMessage.channelId}`);
-        void handleCliBridgeReply(cliBridge, combinedText, firstMessage, config);
+        const { handleCliBridgeReply, extractAttachmentText } = await import("./cli-bridge/reply.js");
+        // 附件支援：附加附件描述到訊息文字
+        const attachmentText = extractAttachmentText(firstMessage);
+        const fullText = combinedText + attachmentText;
+        log.info(`[discord] CLI Bridge 路由：${cliBridge.label} channel=${firstMessage.channelId}${attachmentText ? " +attachments" : ""}`);
+        void handleCliBridgeReply(cliBridge, fullText, firstMessage, config, config.cliBridge ?? undefined);
         return;
       }
     }

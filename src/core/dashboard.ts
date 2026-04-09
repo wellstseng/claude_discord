@@ -749,6 +749,8 @@ label.cfg-toggle { min-width: 36px; }
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="cbInterrupt()">⏸ 中斷</button>
           <button class="btn btn-sm btn-red" onclick="cbRestart()">⟳ 重啟</button>
+          <button class="btn btn-sm" onclick="cbExport()">📥 匯出</button>
+          <button class="btn btn-sm" onclick="cbLoadStatus()">↻ 刷新</button>
         </div>
       </div>
       <div class="card">
@@ -835,6 +837,7 @@ function fmtCache(r, w) {
 
 let _traceAutoRefresh = null;
 let _sessAutoRefresh = null;
+let _cbAutoRefresh = null;
 function switchTab(id, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
@@ -846,6 +849,7 @@ function switchTab(id, el) {
   // 自動刷新：進入對應 tab 啟動，離開停止
   if (_traceAutoRefresh) { clearInterval(_traceAutoRefresh); _traceAutoRefresh = null; }
   if (_sessAutoRefresh) { clearInterval(_sessAutoRefresh); _sessAutoRefresh = null; }
+  if (_cbAutoRefresh) { clearInterval(_cbAutoRefresh); _cbAutoRefresh = null; }
   if (id === 'sessions') { loadSessions(); loadInboundHistory(); _sessAutoRefresh = setInterval(loadSessions, 10000); }
   if (id === 'chat') { refreshChatSessions(); }
   if (id === 'logs') connectLogStream();
@@ -858,7 +862,7 @@ function switchTab(id, el) {
   if (id === 'config') loadCfg();
   if (id === 'memory') loadMemory();
   if (id === 'pipeline') loadPipeline();
-  if (id === 'clibridge') loadCliBridges();
+  if (id === 'clibridge') { loadCliBridges(); _cbAutoRefresh = setInterval(() => { loadCliBridges(); if (_cbSelectedLabel) cbLoadStatus(); }, 10000); }
   if (id !== 'clibridge') cbDisconnectStream();
 }
 
@@ -3112,6 +3116,12 @@ async function cbResend(turnId) {
   } catch (err) { alert('錯誤: ' + err.message); }
 }
 
+function cbExport() {
+  if (!_cbSelectedLabel) return;
+  const url = '/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/export' + (_authToken ? '?token=' + encodeURIComponent(_authToken) : '');
+  window.open(url, '_blank');
+}
+
 // ── 初始化 ───────────────────────────────────────────────────────────────────
 loadOverview();
 loadStatus();
@@ -4796,6 +4806,44 @@ export class DashboardServer {
             res.end(JSON.stringify({ success: true, newTurnId: handle.turnId, originalTurnId: turnId }));
           } catch (err) {
             res.writeHead(500); res.end(JSON.stringify({ success: false, error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/cli-bridge/:label/export — 匯出 turn 歷程為 Markdown
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/export/) && method === "GET") {
+        const label = decodeURIComponent(url.split("/")[3]!);
+        void (async () => {
+          try {
+            const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+            const bridge = getCliBridgeByLabel(label);
+            if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+            const turns = bridge.getTurnHistory(200);
+            let md = `# CLI Bridge: ${label} — Turn 歷程\n\n`;
+            md += `匯出時間：${new Date().toISOString()}\n\n`;
+            for (const t of turns) {
+              md += `---\n\n`;
+              md += `## Turn ${t.turnId.slice(0, 8)} (${t.source})\n\n`;
+              md += `**時間**：${t.startedAt}${t.completedAt ? ` → ${t.completedAt}` : ""}\n`;
+              md += `**送達**：${t.discordDelivery}${t.failedReason ? ` (${t.failedReason})` : ""}\n\n`;
+              md += `### User\n\n${t.userInput}\n\n`;
+              if (t.toolCalls.length) {
+                md += `### Tools (${t.toolCalls.length})\n\n`;
+                for (const tc of t.toolCalls) {
+                  md += `- \`${tc.name}\`${tc.durationMs ? ` (${Math.round(tc.durationMs / 1000)}s)` : ""}\n`;
+                }
+                md += `\n`;
+              }
+              md += `### Assistant\n\n${t.assistantReply || "(empty)"}\n\n`;
+            }
+            res.writeHead(200, {
+              "Content-Type": "text/markdown; charset=utf-8",
+              "Content-Disposition": `attachment; filename="cli-bridge-${label}-export.md"`,
+            });
+            res.end(md);
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
           }
         })();
         return;
