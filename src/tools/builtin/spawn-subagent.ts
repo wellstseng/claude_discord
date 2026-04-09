@@ -360,11 +360,12 @@ export const tool: Tool = {
       const catclawMd = loadAgentPrompt(agentParam);
       if (catclawMd) agentPromptExtra = `\n\n# Agent 行為規則\n${catclawMd}`;
 
-      // Agent Skills 載入
-      const { loadAgentSkills, buildSkillsPrompt } = await import("../../core/agent-skill-loader.js");
+      // Agent Skills 載入 + 自建提示
+      const { loadAgentSkills, buildSkillsPrompt, buildSkillCreationHint } = await import("../../core/agent-skill-loader.js");
       const skills = loadAgentSkills(agentParam, agentConfig?.skills);
       const skillsPrompt = buildSkillsPrompt(skills);
       if (skillsPrompt) agentPromptExtra += skillsPrompt;
+      agentPromptExtra += buildSkillCreationHint(agentParam);
     }
 
     // 參數優先序：call params > agent config > 預設值
@@ -482,11 +483,12 @@ export const tool: Tool = {
       effectiveWorkspaceDir = workspaceDirParam ?? agentConfig?.workspaceDir;
     }
 
-    // Agent memory 目錄自動建立（首次 spawn 時確保存在）
+    // Agent memory + skills 目錄自動建立（首次 spawn 時確保存在）
     if (agentParam) {
       const { homedir } = await import("node:os");
-      const agentMemDir = join(homedir(), ".catclaw", "agents", agentParam, "memory");
-      mkdirSync(agentMemDir, { recursive: true });
+      const agentBase = join(homedir(), ".catclaw", "agents", agentParam);
+      mkdirSync(join(agentBase, "memory"), { recursive: true });
+      mkdirSync(join(agentBase, "skills"), { recursive: true });
     }
 
     // Agent system prompt 注入

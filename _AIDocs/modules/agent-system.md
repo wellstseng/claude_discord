@@ -111,6 +111,7 @@ interface AgentSkill {
 |------|------|
 | `loadAgentSkills(agentId, filter?)` | 掃描 skills/ 目錄，filter 來自 config.json skills 欄位 |
 | `buildSkillsPrompt(skills)` | 組裝為 `# Agent Skills` prompt 區塊 |
+| `buildSkillCreationHint(agentId)` | 產生 skill 自建提示（告知 agent 如何用 write_file 建立新 skill） |
 
 ### Skill 檔案格式
 
@@ -124,6 +125,16 @@ userInvocable: true
 # 股票技術分析 Skill
 ...
 ```
+
+### AI 自建 Skill（Sprint 5）
+
+Agent spawn 時自動注入 `buildSkillCreationHint`，告知 agent：
+- skill 檔案位置：`~/.catclaw/agents/{agentId}/skills/{name}.md`
+- 格式範例（frontmatter + body）
+- 用 write_file 建立，下次 spawn 自動載入
+
+Safety guard 已允許 non-admin agent 寫入 `agents/{self}/` 整個目錄（含 skills/）。
+spawn 時自動建立 `skills/` 目錄（與 `memory/` 同時）。
 
 ### 載入策略
 

@@ -115,3 +115,11 @@ export function buildSkillsPrompt(skills: AgentSkill[]): string {
 
   return `\n\n# Agent Skills\n\n以下是你的專屬 skills，遇到相關情境時請依照指示執行。\n\n${sections.join("\n\n---\n\n")}`;
 }
+
+/**
+ * 產生 skill 自建提示（注入 system prompt，告知 agent 如何建立新 skill）。
+ */
+export function buildSkillCreationHint(agentId: string): string {
+  const skillsDir = join(resolveAgentDataDir(agentId), "skills");
+  return `\n\n# Skill 自建能力\n\n你可以用 write_file 在 \`${skillsDir}/\` 建立新的 skill 檔案（.md），下次被召喚時會自動載入。\n\n格式範例：\n\`\`\`markdown\n---\nname: my-skill\ndescription: 簡短說明\nuserInvocable: true\n---\n\n# Skill 標題\n\n具體指示內容...\n\`\`\``;
+}
