@@ -144,20 +144,8 @@ export class CliBridge {
 
     log.info(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} source=${source} sent`);
 
-    // Turn timeout — 超時自動送 error + SIGINT
-    const timeoutMs = this.bridgeConfig.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
-    const timer = setTimeout(() => {
-      log.warn(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} timeout (${timeoutMs}ms)`);
-      this.turnTimeouts.delete(turnId);
-      const listener = this.turnListeners.get(turnId);
-      if (listener && !listener.done) {
-        listener.done = true;
-        listener.resolve({ type: "error", message: `turn 超時（${Math.round(timeoutMs / 1000)}s）` });
-      }
-      // 超時後嘗試 interrupt
-      void this.interrupt();
-    }, timeoutMs);
-    this.turnTimeouts.set(turnId, timer);
+    // Idle timeout — 連續無事件才觸發，每收到事件重置
+    this.resetTurnTimeout(turnId);
 
     // 回傳 TurnHandle
     const events = this.createTurnGenerator(turnId);
@@ -310,8 +298,13 @@ export class CliBridge {
       log.info(`[cli-bridge:${this.label}] session_id=${evt.sessionId}`);
     }
 
-    // 累積 turn 資料
+    // 收到事件 → 重置 idle timeout
     const turnId = this.activeTurnId;
+    if (turnId && this.turnTimeouts.has(turnId)) {
+      this.resetTurnTimeout(turnId);
+    }
+
+    // 累積 turn 資料
     if (turnId) {
       const pending = this.pendingTurns.get(turnId);
       if (pending) {
@@ -370,6 +363,26 @@ export class CliBridge {
 
     this.activeTurnId = null;
     this._status = this.process?.alive ? "idle" : "dead";
+  }
+
+  // ── 內部：idle timeout ────────────────────────────────────────────────────
+
+  private resetTurnTimeout(turnId: string): void {
+    const existing = this.turnTimeouts.get(turnId);
+    if (existing) clearTimeout(existing);
+
+    const timeoutMs = this.bridgeConfig.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      log.warn(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} idle timeout (${timeoutMs}ms 無事件)`);
+      this.turnTimeouts.delete(turnId);
+      const listener = this.turnListeners.get(turnId);
+      if (listener && !listener.done) {
+        listener.done = true;
+        listener.resolve({ type: "error", message: `turn idle 超時（連續 ${Math.round(timeoutMs / 1000)}s 無事件）` });
+      }
+      void this.interrupt();
+    }, timeoutMs);
+    this.turnTimeouts.set(turnId, timer);
   }
 
   // ── 內部：process crash 處理 ──────────────────────────────────────────────
