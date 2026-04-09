@@ -38,3 +38,14 @@
 ## stdout 事件解析
 
 沿用 `acp.ts` 的 diff 邏輯（累積文字比對取 delta），但改為 EventEmitter 模式。支援事件：`session_init` / `text_delta` / `thinking_delta` / `tool_call` / `tool_result` / `result` / `control_request` / `status`。
+
+## 擴充方向（D 清單）
+
+| 功能 | 說明 | 優先級 |
+|------|------|--------|
+| control_request 處理 | CLI 要求權限確認 → 轉為 Discord 按鈕（Approve/Deny）→ 回寫 stdin control_response | 高 |
+| thinking 顯示開關 | `showThinking: boolean` 設定 → thinking_delta 以 spoiler/collapse 顯示在 Discord | 中 |
+| 多 channel 測試 | 同時綁定 2+ channel，驗證各 process 獨立運作 | 中 |
+| 附件支援 | Discord 附件 → 下載 → 以文字/路徑形式附加到 stdin message | 中 |
+| 對話歷程匯出 | Dashboard 一鍵匯出指定 bridge 的 turns.jsonl → 可讀 Markdown | 低 |
+| rate limit 保護 | Discord edit 頻率上限（目前 800ms interval 應夠，但高密度 tool_call 場景可能需調整） | 低 |
