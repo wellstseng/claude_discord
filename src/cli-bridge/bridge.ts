@@ -372,15 +372,38 @@ export class CliBridge {
     if (existing) clearTimeout(existing);
 
     const timeoutMs = this.bridgeConfig.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+    const action = this.bridgeConfig.turnTimeoutAction ?? "interrupt";
     const timer = setTimeout(() => {
-      log.warn(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} idle timeout (${timeoutMs}ms 無事件)`);
+      log.warn(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} idle timeout (${timeoutMs}ms 無事件) action=${action}`);
       this.turnTimeouts.delete(turnId);
+
+      if (action === "warn") {
+        // 僅通知，不中斷 — turn 繼續等待
+        const listener = this.turnListeners.get(turnId);
+        if (listener && !listener.done) {
+          listener.queue.push({ type: "status", subtype: "idle_timeout_warn", raw: { timeoutMs } });
+          if (listener.resolve) {
+            listener.resolve({ type: "status", subtype: "idle_timeout_warn", raw: { timeoutMs } });
+            listener.resolve = () => {};
+          }
+        }
+        // 重新啟動 timeout，下次再 warn
+        this.resetTurnTimeout(turnId);
+        return;
+      }
+
+      // interrupt / restart — 結束 turn
       const listener = this.turnListeners.get(turnId);
       if (listener && !listener.done) {
         listener.done = true;
         listener.resolve({ type: "error", message: `turn idle 超時（連續 ${Math.round(timeoutMs / 1000)}s 無事件）` });
       }
-      void this.interrupt();
+
+      if (action === "restart") {
+        void this.restart();
+      } else {
+        void this.interrupt();
+      }
     }, timeoutMs);
     this.turnTimeouts.set(turnId, timer);
   }
