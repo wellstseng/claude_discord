@@ -428,6 +428,7 @@ label.cfg-toggle { min-width: 36px; }
   <div class="tab" onclick="switchTab('config',this)">Config</div>
   <div class="tab" onclick="switchTab('memory',this)">Memory</div>
   <div class="tab" onclick="switchTab('pipeline',this)">Pipeline</div>
+  <div class="tab" onclick="switchTab('clibridge',this)">CLI Bridge</div>
   <div class="tab" onclick="switchTab('chat',this)" style="color:var(--accent);font-weight:600">💬 Chat</div>
 </div>
 
@@ -734,6 +735,42 @@ label.cfg-toggle { min-width: 36px; }
   </div>
 </div>
 
+<!-- CLI Bridge -->
+<div id="pane-clibridge" class="pane">
+  <div class="card" style="margin-bottom:12px">
+    <h2>CLI Bridge 總覽 <button class="btn btn-sm" onclick="loadCliBridges()" style="float:right">↻</button></h2>
+    <div id="cb-list" style="font-size:0.82rem;color:var(--fg2)">載入中...</div>
+  </div>
+  <div id="cb-detail" style="display:none">
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div class="card">
+        <h2 id="cb-detail-title">Bridge</h2>
+        <div id="cb-detail-info" style="font-size:0.82rem"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="cbInterrupt()">⏸ 中斷</button>
+          <button class="btn btn-sm btn-red" onclick="cbRestart()">⟳ 重啟</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Console</h2>
+        <div style="display:flex;gap:8px">
+          <input id="cb-console-input" type="text" placeholder="送出訊息..." style="flex:1;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.85rem" onkeydown="if(event.key==='Enter')cbSendConsole()">
+          <button class="btn btn-green btn-sm" onclick="cbSendConsole()">送出</button>
+        </div>
+        <div id="cb-console-msg" style="font-size:0.78rem;margin-top:6px;color:var(--fg3)"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <h2>即時日誌 <span id="cb-stream-status" style="font-size:0.72rem;color:var(--fg3)"></span></h2>
+      <div id="cb-log-stream" style="max-height:300px;overflow-y:auto;font-size:0.78rem;font-family:monospace;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px;white-space:pre-wrap;word-break:break-all"></div>
+    </div>
+    <div class="card">
+      <h2>Turn 歷程 <button class="btn btn-sm" onclick="cbLoadTurns()" style="float:right">↻</button></h2>
+      <div id="cb-turns" style="font-size:0.82rem"></div>
+    </div>
+  </div>
+</div>
+
 <div id="pane-chat" class="pane">
   <div style="display:flex;flex-direction:column;height:calc(100vh - 140px)">
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
@@ -821,6 +858,8 @@ function switchTab(id, el) {
   if (id === 'config') loadCfg();
   if (id === 'memory') loadMemory();
   if (id === 'pipeline') loadPipeline();
+  if (id === 'clibridge') loadCliBridges();
+  if (id !== 'clibridge') cbDisconnectStream();
 }
 
 function refreshAll() { loadOverview(); loadStatus(); }
@@ -2926,6 +2965,153 @@ async function clearChatSession() {
   }
 }
 
+// ── CLI Bridge ──────────────────────────────────────────────────────────────
+let _cbSelectedLabel = null;
+let _cbEventSource = null;
+
+async function loadCliBridges() {
+  try {
+    const d = await authFetch('/api/cli-bridge/list').then(r => r.json());
+    const bridges = d.bridges || [];
+    if (!bridges.length) {
+      document.getElementById('cb-list').innerHTML = '<span style="color:var(--fg3)">沒有 CLI Bridge（需在 catclaw.json 設定 cliBridge）</span>';
+      document.getElementById('cb-detail').style.display = 'none';
+      return;
+    }
+    const statusIcon = s => s === 'idle' ? '🟢' : s === 'busy' ? '🟡' : s === 'restarting' ? '🔄' : '🔴';
+    document.getElementById('cb-list').innerHTML = '<table class="tbl"><thead><tr><th>Label</th><th>狀態</th><th>Session</th><th>Channel</th><th></th></tr></thead><tbody>' +
+      bridges.map(b => \`<tr><td>\${b.label}</td><td>\${statusIcon(b.status)} \${b.status}</td><td style="font-size:0.72rem;color:var(--fg3)">\${b.sessionId ? b.sessionId.slice(0,8) : '-'}</td><td style="font-size:0.72rem;color:var(--fg3)">\${b.channelId}</td><td><button class="btn btn-sm" onclick="cbSelect('\${b.label}')">開啟</button></td></tr>\`).join('') +
+      '</tbody></table>';
+  } catch (err) {
+    document.getElementById('cb-list').innerHTML = '<span style="color:#f66">載入失敗: ' + err.message + '</span>';
+  }
+}
+
+async function cbSelect(label) {
+  _cbSelectedLabel = label;
+  document.getElementById('cb-detail').style.display = 'block';
+  document.getElementById('cb-detail-title').textContent = label;
+  await cbLoadStatus();
+  await cbLoadTurns();
+  cbConnectStream();
+}
+
+async function cbLoadStatus() {
+  if (!_cbSelectedLabel) return;
+  try {
+    const d = await authFetch('/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/status').then(r => r.json());
+    const statusIcon = s => s === 'idle' ? '🟢' : s === 'busy' ? '🟡' : s === 'restarting' ? '🔄' : '🔴';
+    document.getElementById('cb-detail-info').innerHTML =
+      \`狀態：\${statusIcon(d.status)} \${d.status}<br>Session：\${d.sessionId || '-'}<br>Channel：\${d.channelId}\`;
+  } catch {}
+}
+
+async function cbLoadTurns() {
+  if (!_cbSelectedLabel) return;
+  try {
+    const d = await authFetch('/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/turns?limit=30').then(r => r.json());
+    const turns = d.turns || [];
+    if (!turns.length) { document.getElementById('cb-turns').innerHTML = '<span style="color:var(--fg3)">尚無 turn</span>'; return; }
+    const deliveryIcon = s => s === 'success' ? '✅' : s === 'failed' ? '❌' : s === 'skipped' ? '⏭' : '⏳';
+    document.getElementById('cb-turns').innerHTML = '<table class="tbl"><thead><tr><th>時間</th><th>來源</th><th>輸入</th><th>回覆</th><th>工具</th><th>送達</th><th></th></tr></thead><tbody>' +
+      turns.slice().reverse().map(t => {
+        const time = t.startedAt ? new Date(t.startedAt).toLocaleTimeString() : '-';
+        const input = (t.userInput || '').slice(0, 40) + (t.userInput?.length > 40 ? '…' : '');
+        const reply = (t.assistantReply || '').slice(0, 40) + (t.assistantReply?.length > 40 ? '…' : '');
+        const resendBtn = t.discordDelivery === 'failed' ? \`<button class="btn btn-sm" onclick="cbResend('\${t.turnId}')">重送</button>\` : '';
+        return \`<tr><td>\${time}</td><td>\${t.source}</td><td title="\${(t.userInput||'').replace(/"/g,'&quot;')}">\${input}</td><td title="\${(t.assistantReply||'').replace(/"/g,'&quot;')}">\${reply}</td><td>\${t.toolCalls?.length || 0}</td><td>\${deliveryIcon(t.discordDelivery)}</td><td>\${resendBtn}</td></tr>\`;
+      }).join('') +
+      '</tbody></table>';
+  } catch (err) {
+    document.getElementById('cb-turns').innerHTML = '<span style="color:#f66">' + err.message + '</span>';
+  }
+}
+
+function cbConnectStream() {
+  cbDisconnectStream();
+  if (!_cbSelectedLabel) return;
+  const url = '/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/stream' + (_authToken ? '?token=' + encodeURIComponent(_authToken) : '');
+  _cbEventSource = new EventSource(url);
+  document.getElementById('cb-stream-status').textContent = '連線中…';
+  const logEl = document.getElementById('cb-log-stream');
+  logEl.textContent = '';
+
+  _cbEventSource.onopen = () => { document.getElementById('cb-stream-status').textContent = '🟢 已連線'; };
+  _cbEventSource.onerror = () => { document.getElementById('cb-stream-status').textContent = '🔴 斷線'; };
+  _cbEventSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'init' && Array.isArray(data.events)) {
+        data.events.forEach(ev => appendCbLog(logEl, ev));
+      } else {
+        appendCbLog(logEl, data);
+      }
+    } catch {}
+  };
+}
+
+function appendCbLog(el, entry) {
+  const evt = entry.event || entry;
+  const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : '';
+  let line = ts + ' ';
+  if (evt.type === 'text_delta') line += evt.text;
+  else if (evt.type === 'tool_call') line += '🔧 ' + (evt.title || '');
+  else if (evt.type === 'tool_result') line += '✅ ' + (evt.title || '');
+  else if (evt.type === 'result') line += '--- turn complete ---';
+  else if (evt.type === 'error') line += '❌ ' + (evt.message || '');
+  else if (evt.type === 'session_init') line += '🔗 session=' + (evt.sessionId || '').slice(0,8);
+  else if (evt.type === 'thinking_delta') return; // 不顯示
+  else line += JSON.stringify(evt).slice(0, 120);
+  el.textContent += line + '\\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+function cbDisconnectStream() {
+  if (_cbEventSource) { _cbEventSource.close(); _cbEventSource = null; }
+  document.getElementById('cb-stream-status').textContent = '';
+}
+
+async function cbSendConsole() {
+  if (!_cbSelectedLabel) return;
+  const input = document.getElementById('cb-console-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const msgEl = document.getElementById('cb-console-msg');
+  try {
+    const d = await authFetch('/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text })
+    }).then(r => r.json());
+    if (d.success) { msgEl.textContent = '已送出 turn=' + d.turnId.slice(0,8); input.value = ''; }
+    else msgEl.textContent = '失敗: ' + (d.error || '');
+  } catch (err) { msgEl.textContent = '錯誤: ' + err.message; }
+}
+
+async function cbInterrupt() {
+  if (!_cbSelectedLabel) return;
+  try {
+    await authFetch('/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/interrupt', { method: 'POST' });
+    await cbLoadStatus();
+  } catch {}
+}
+
+async function cbRestart() {
+  if (!_cbSelectedLabel) return;
+  if (!confirm('確定重啟 ' + _cbSelectedLabel + '？')) return;
+  try {
+    await authFetch('/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/restart', { method: 'POST' });
+    setTimeout(() => { cbLoadStatus(); loadCliBridges(); }, 2000);
+  } catch {}
+}
+
+async function cbResend(turnId) {
+  if (!_cbSelectedLabel) return;
+  try {
+    const d = await authFetch('/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/resend/' + encodeURIComponent(turnId), { method: 'POST' }).then(r => r.json());
+    if (d.success) alert('已重送，新 turn=' + d.newTurnId.slice(0,8));
+    else alert('重送失敗: ' + (d.error || ''));
+  } catch (err) { alert('錯誤: ' + err.message); }
+}
+
 // ── 初始化 ───────────────────────────────────────────────────────────────────
 loadOverview();
 loadStatus();
@@ -4418,6 +4604,198 @@ export class DashboardServer {
             res.end(JSON.stringify({ ok: true, report }));
           } catch (err) {
             res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // ── CLI Bridge API ──────────────────────────────────────────────────
+
+      // GET /api/cli-bridge/list
+      if (url === "/api/cli-bridge/list" && method === "GET") {
+        void (async () => {
+          try {
+            const { getAllBridges } = await import("../cli-bridge/index.js");
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ bridges: getAllBridges() }));
+          } catch (err) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ bridges: [], error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/cli-bridge/:label/stream (SSE)
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/stream/) && method === "GET") {
+        const label = decodeURIComponent(url.split("/")[3]!);
+        void (async () => {
+          try {
+            const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+            const bridge = getCliBridgeByLabel(label);
+            if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+
+            res.writeHead(200, {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+              "X-Accel-Buffering": "no",
+            });
+
+            // 送出最近 50 筆作為初始資料
+            const recent = bridge.getRecentLogs(50);
+            res.write(`data: ${JSON.stringify({ type: "init", events: recent })}\n\n`);
+
+            const unsub = bridge.getStdoutLogger().onEvent((entry) => {
+              try { res.write(`data: ${JSON.stringify(entry)}\n\n`); } catch { /* 靜默 */ }
+            });
+
+            req.on("close", () => { unsub(); });
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/cli-bridge/:label/status
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/status$/) && method === "GET") {
+        const label = decodeURIComponent(url.split("/")[3]!);
+        void (async () => {
+          try {
+            const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+            const bridge = getCliBridgeByLabel(label);
+            if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              label: bridge.label,
+              channelId: bridge.channelId,
+              status: bridge.status,
+              sessionId: bridge.currentSessionId,
+            }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/cli-bridge/:label/turns?limit=50
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/turns/) && method === "GET") {
+        const label = decodeURIComponent(url.split("/")[3]!);
+        const limitMatch = url.match(/[?&]limit=(\d+)/);
+        const limit = limitMatch ? parseInt(limitMatch[1]!, 10) : 50;
+        void (async () => {
+          try {
+            const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+            const bridge = getCliBridgeByLabel(label);
+            if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ turns: bridge.getTurnHistory(limit) }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // GET /api/cli-bridge/:label/logs?limit=100
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/logs/) && method === "GET") {
+        const label = decodeURIComponent(url.split("/")[3]!);
+        const limitMatch = url.match(/[?&]limit=(\d+)/);
+        const limit = limitMatch ? parseInt(limitMatch[1]!, 10) : 100;
+        void (async () => {
+          try {
+            const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+            const bridge = getCliBridgeByLabel(label);
+            if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ logs: bridge.getRecentLogs(limit) }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // POST /api/cli-bridge/:label/send  body: { text }
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/send$/) && method === "POST") {
+        const label = decodeURIComponent(url.split("/")[3]!);
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          void (async () => {
+            try {
+              const { text } = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { text: string };
+              if (!text?.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: "text is required" })); return; }
+              const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+              const bridge = getCliBridgeByLabel(label);
+              if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+              const handle = bridge.send(text, "dashboard");
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ success: true, turnId: handle.turnId }));
+            } catch (err) {
+              res.writeHead(400); res.end(JSON.stringify({ success: false, error: String(err) }));
+            }
+          })();
+        });
+        return;
+      }
+
+      // POST /api/cli-bridge/:label/interrupt
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/interrupt$/) && method === "POST") {
+        const label = decodeURIComponent(url.split("/")[3]!);
+        void (async () => {
+          try {
+            const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+            const bridge = getCliBridgeByLabel(label);
+            if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+            await bridge.interrupt();
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: true }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ success: false, error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // POST /api/cli-bridge/:label/restart
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/restart$/) && method === "POST") {
+        const label = decodeURIComponent(url.split("/")[3]!);
+        void (async () => {
+          try {
+            const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+            const bridge = getCliBridgeByLabel(label);
+            if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+            await bridge.restart();
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: true }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ success: false, error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // POST /api/cli-bridge/:label/resend/:turnId
+      if (url.match(/^\/api\/cli-bridge\/[^/]+\/resend\/[^/]+$/) && method === "POST") {
+        const parts = url.split("/");
+        const label = decodeURIComponent(parts[3]!);
+        const turnId = decodeURIComponent(parts[5]!);
+        void (async () => {
+          try {
+            const { getCliBridgeByLabel } = await import("../cli-bridge/index.js");
+            const bridge = getCliBridgeByLabel(label);
+            if (!bridge) { res.writeHead(404); res.end(JSON.stringify({ error: "bridge not found" })); return; }
+            const turn = bridge.getStdoutLogger().getTurn(turnId);
+            if (!turn) { res.writeHead(404); res.end(JSON.stringify({ error: "turn not found" })); return; }
+            // 用原始 userInput 重新送出
+            const handle = bridge.send(turn.userInput, "dashboard");
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: true, newTurnId: handle.turnId, originalTurnId: turnId }));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ success: false, error: String(err) }));
           }
         })();
         return;
