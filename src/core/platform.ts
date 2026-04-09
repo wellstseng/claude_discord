@@ -269,11 +269,13 @@ export async function initPlatform(
   // ── 10. Workflow Engine ─────────────────────────────────────────────────────
   const workflowDataDir = join(wsDir, "data", "workflow");
   const memoryDir = join(catclawDir, "memory");
+  const agentsDir = join(catclawDir, "agents");
   initWorkflow(
     config.workflow,
     workflowDataDir,
     memoryDir,
     process.cwd(),
+    agentsDir,
   );
 
   // ── 10b. Failure Recall Cache（非同步，不阻塞啟動）────────────────────────

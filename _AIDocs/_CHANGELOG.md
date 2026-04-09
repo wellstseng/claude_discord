@@ -3,6 +3,7 @@
 > 知識庫變更紀錄（最新在上，超過 8 筆觸發滾動淘汰）
 
 | 日期 | 變更 | 影響文件 |
+| 2026-04-09 | **fix: memory write_file 自動向量同步** — ①新增 memory-vector-sync.ts 監聽 file:modified，前綴比對 4 層 memory 路徑自動 upsert LanceDB②bootstrap.ts 新增初始化步驟③platform.ts 傳入 agentsDir | src/workflow/memory-vector-sync.ts(new), src/workflow/bootstrap.ts, src/core/platform.ts, _AIDocs/modules/workflow.md |
 | 2026-04-09 | **feat: AI 自建 Skill — Sprint 5** — ①agent-skill-loader.ts 新增 buildSkillCreationHint() 產生 skill 自建提示②spawn-subagent.ts 注入 hint + 自動建立 skills/ 目錄③safety guard 確認 agents/{self}/ 白名單涵蓋 skills/ | src/core/agent-skill-loader.ts, src/tools/builtin/spawn-subagent.ts, _AIDocs/modules/agent-system.md |
 | 2026-04-09 | **feat: Agent Persona Skills — Sprint 4** — ①新增 agent-skill-loader.ts（掃描 agents/{id}/skills/*.md + frontmatter 解析 + buildSkillsPrompt 組裝）②spawn-subagent.ts 載入 agent config 後呼叫 loadAgentSkills + buildSkillsPrompt 注入 agentPromptExtra③config.json skills 欄位支援選擇性載入 | src/core/agent-skill-loader.ts(new), src/tools/builtin/spawn-subagent.ts, _AIDocs/modules/agent-system.md |
 | 2026-04-09 | **feat: Agent Recall 整合 Sprint 3** — ①spawn-subagent.ts 有 agentParam 時自動 mkdirSync agent memory 目錄②AgentLoopOpts 新增 agentId，3 處 ToolContext 構造注入 agentId③ChildRunOpts 新增 agentId 並傳遞到 agentLoop④memory-recall.ts 將 ctx.agentId 注入 engine.recall RecallContext | src/tools/builtin/spawn-subagent.ts, src/core/agent-loop.ts, src/tools/builtin/memory-recall.ts, _AIDocs/modules/agent-loop.md |

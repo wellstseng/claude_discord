@@ -17,6 +17,7 @@ import { initFailureDetector } from "./failure-detector.js";
 import { initAidocsManager } from "./aidocs-manager.js";
 import { initMemoryExtractor } from "./memory-extractor.js";
 import { scheduleConsolidate } from "./consolidate-scheduler.js";
+import { initMemoryVectorSync } from "./memory-vector-sync.js";
 
 export interface WorkflowConfig {
   enabled?: boolean;
@@ -40,6 +41,7 @@ export function initWorkflow(
   dataDir: string,
   memoryDir: string,
   projectRoot?: string,
+  agentsDir?: string,
 ): void {
   if (config?.enabled === false) {
     log.info("[workflow] 已停用（config.workflow.enabled=false）");
@@ -83,6 +85,11 @@ export function initWorkflow(
 
     // ── 9. Consolidate Scheduler
     scheduleConsolidate();
+
+    // ── 10. Memory Vector Sync（file:modified → 自動向量 upsert）
+    if (agentsDir) {
+      initMemoryVectorSync(eventBus, memoryDir, agentsDir);
+    }
 
     log.info("[workflow] 工作流引擎初始化完成");
   } catch (err) {

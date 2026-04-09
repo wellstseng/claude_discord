@@ -20,6 +20,7 @@
 | `failure-detector.ts` | 失敗偵測 → 記錄 failures/ | `tool:error` |
 | `aidocs-manager.ts` | _AIDocs 自動維護 | `file:modified` |
 | `memory-extractor.ts` | 自動記憶萃取 | `turn:after` |
+| `memory-vector-sync.ts` | 記憶檔案自動向量同步 | `file:modified` |
 | `consolidate-scheduler.ts` | 定期整合排程 | timer |
 | `fix-escalation.ts` | 精確修正升級 | 手動觸發 |
 | `types.ts` | 共用型別 | — |
@@ -27,7 +28,7 @@
 ## 初始化
 
 ```typescript
-initWorkflow(config, dataDir, memoryDir, projectRoot): void
+initWorkflow(config, dataDir, memoryDir, projectRoot, agentsDir?): void
 ```
 
 由 `platform.ts` 步驟 10 呼叫。`config.workflow.enabled = false` 可完全停用。
@@ -128,6 +129,26 @@ setProjectRoots(roots: string[]): void
 getPendingAidocsFiles(): string[]
 clearPendingAidocs(): void
 getAidocsSyncHint(): string
+```
+
+### memory-vector-sync
+
+監聽 `file:modified`，前綴比對判定路徑是否為 memory atom。
+是則自動 upsert LanceDB（fire-and-forget）。
+
+解決問題：Agent 用 `write_file` 直接寫 `.md` 時跳過 `writeAtom()` 的向量同步。
+
+支援 4 層路徑 → namespace 對照：
+
+- `{memRoot}/` → `global`
+- `{memRoot}/projects/{id}/` → `project/{id}`
+- `{memRoot}/accounts/{id}/` → `account/{id}`
+- `{agentsRoot}/{id}/memory/` → `agent/{id}`
+
+排除：`_vectordb/_staging/_reference/_session_notes/episodic/failures` + `MEMORY.md`
+
+```typescript
+initMemoryVectorSync(eventBus: EventBus, memRoot: string, agentsRoot: string): void
 ```
 
 ### memory-extractor
