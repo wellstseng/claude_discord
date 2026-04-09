@@ -38,6 +38,7 @@ export const tool: Tool = {
       const result = await engine.recall(query, {
         accountId: ctx.accountId,
         projectId: ctx.projectId,
+        agentId: ctx.agentId,
       }, overrides);
 
       const fragments = result.fragments.map(f => ({

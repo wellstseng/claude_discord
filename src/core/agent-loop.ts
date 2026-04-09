@@ -287,6 +287,8 @@ export interface AgentLoopOpts {
    * 注入到 ToolContext.parentRunId，讓子 agent 呼叫 spawn_subagent 時能建立 parentId 關聯。
    */
   parentRunId?: string;
+  /** Agent ID（spawn_subagent 帶 agent 身份時注入，傳遞到 ToolContext + recall） */
+  agentId?: string;
   /**
    * 圖片附件（來自 Discord 訊息）。
    * 直接作為 image content blocks 加入第一條 user 訊息，讓 LLM 可直接「看」圖。
@@ -1184,7 +1186,7 @@ export async function* agentLoop(
 
         const batchResults = await Promise.all(spawnCalls.map(async (call): Promise<SpawnBatchResult> => {
           const params = call.params as Record<string, unknown>;
-          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth, parentRunId: opts.parentRunId, traceId: trace?.traceId };
+          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth, parentRunId: opts.parentRunId, traceId: trace?.traceId, agentId: opts.agentId };
           const events: SpawnEvent[] = [];
           const hookResult = await runBeforeToolCall(
             { id: call.id, name: call.name, params },
@@ -1256,7 +1258,7 @@ export async function* agentLoop(
         };
         const batchResults = await Promise.all(concurrentCalls.map(async (call): Promise<BatchResult> => {
           const params = call.params as Record<string, unknown>;
-          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth, parentRunId: opts.parentRunId, traceId: trace?.traceId };
+          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth, parentRunId: opts.parentRunId, traceId: trace?.traceId, agentId: opts.agentId };
           const events: AgentLoopEvent[] = [];
 
           const hookResult = await runBeforeToolCall(
@@ -1323,6 +1325,7 @@ export async function* agentLoop(
           spawnDepth,
           parentRunId: opts.parentRunId,
           traceId: trace?.traceId,
+          agentId: opts.agentId,
         };
 
         // before_tool_call

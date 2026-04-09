@@ -115,6 +115,8 @@ interface ChildRunOpts {
   parentTraceId?: string;
   /** Agent 專屬 system prompt（覆蓋 agentType 預設 prompt） */
   agentSystemPrompt?: string;
+  /** Agent ID（傳遞到 agentLoop → ToolContext） */
+  agentId?: string;
 }
 
 // ── ACP Runtime（SUB-6）──────────────────────────────────────────────────────
@@ -273,6 +275,7 @@ async function runChildAgentLoop(opts: ChildRunOpts): Promise<{ text: string; tu
     _sessionKeyOverride: opts.childSessionKey,
     parentRunId: opts.parentRunId,
     trace: childTrace,
+    agentId: opts.agentId,
   }, {
     sessionManager,
     permissionGate,
@@ -473,6 +476,13 @@ export const tool: Tool = {
       effectiveWorkspaceDir = workspaceDirParam ?? agentConfig?.workspaceDir;
     }
 
+    // Agent memory 目錄自動建立（首次 spawn 時確保存在）
+    if (agentParam) {
+      const { homedir } = await import("node:os");
+      const agentMemDir = join(homedir(), ".catclaw", "agents", agentParam, "memory");
+      mkdirSync(agentMemDir, { recursive: true });
+    }
+
     // Agent system prompt 注入
     const agentSystemPrompt = agentConfig?.systemPrompt
       ? agentConfig.systemPrompt + agentPromptExtra
@@ -497,6 +507,7 @@ export const tool: Tool = {
             parentRunId: record.runId,
             parentTraceId: ctx.traceId,
             agentSystemPrompt,
+            agentId: agentParam,
           }),
           new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error("__TIMEOUT__")), timeoutMs + 1000);
