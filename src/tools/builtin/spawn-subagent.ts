@@ -359,6 +359,12 @@ export const tool: Tool = {
       agentConfig = loadAgentConfig(agentParam);
       const catclawMd = loadAgentPrompt(agentParam);
       if (catclawMd) agentPromptExtra = `\n\n# Agent 行為規則\n${catclawMd}`;
+
+      // Agent Skills 載入
+      const { loadAgentSkills, buildSkillsPrompt } = await import("../../core/agent-skill-loader.js");
+      const skills = loadAgentSkills(agentParam, agentConfig?.skills);
+      const skillsPrompt = buildSkillsPrompt(skills);
+      if (skillsPrompt) agentPromptExtra += skillsPrompt;
     }
 
     // 參數優先序：call params > agent config > 預設值
