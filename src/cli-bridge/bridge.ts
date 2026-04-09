@@ -29,6 +29,7 @@ import type {
 const DEFAULT_KEEP_ALIVE_MS = 60_000;
 const DEFAULT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 const INTERRUPT_TIMEOUT_MS = 5000;
+const DEFAULT_TURN_TIMEOUT_MS = 300_000; // 5 分鐘
 
 // ── CliBridge ───────────────────────────────────────────────────────────────
 
@@ -47,6 +48,9 @@ export class CliBridge {
     queue: CliBridgeEvent[];
     done: boolean;
   }>();
+
+  // Turn timeout
+  private turnTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   // 累積中的 turn 資訊（recordTurn 用）
   private pendingTurns = new Map<string, {
@@ -139,6 +143,21 @@ export class CliBridge {
     }
 
     log.info(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} source=${source} sent`);
+
+    // Turn timeout — 超時自動送 error + SIGINT
+    const timeoutMs = this.bridgeConfig.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      log.warn(`[cli-bridge:${this.label}] turn=${turnId.slice(0, 8)} timeout (${timeoutMs}ms)`);
+      this.turnTimeouts.delete(turnId);
+      const listener = this.turnListeners.get(turnId);
+      if (listener && !listener.done) {
+        listener.done = true;
+        listener.resolve({ type: "error", message: `turn 超時（${Math.round(timeoutMs / 1000)}s）` });
+      }
+      // 超時後嘗試 interrupt
+      void this.interrupt();
+    }, timeoutMs);
+    this.turnTimeouts.set(turnId, timer);
 
     // 回傳 TurnHandle
     const events = this.createTurnGenerator(turnId);
@@ -337,6 +356,10 @@ export class CliBridge {
     const turnId = this.activeTurnId;
     if (!turnId) return;
 
+    // 清除 timeout
+    const timer = this.turnTimeouts.get(turnId);
+    if (timer) { clearTimeout(timer); this.turnTimeouts.delete(turnId); }
+
     const pending = this.pendingTurns.get(turnId);
     if (pending) {
       pending.record.completedAt = new Date().toISOString();
@@ -464,6 +487,10 @@ export class CliBridge {
   }
 
   private failAllPendingTurns(reason: string): void {
+    // 清除所有 turn timeout
+    for (const [, timer] of this.turnTimeouts) clearTimeout(timer);
+    this.turnTimeouts.clear();
+
     for (const [turnId, listener] of this.turnListeners) {
       if (!listener.done) {
         listener.done = true;

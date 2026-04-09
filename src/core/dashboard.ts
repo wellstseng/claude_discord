@@ -1498,6 +1498,7 @@ const CFG_SCHEMA = [
     {k:'cliBridge.workingDir',t:'text',l:'Working Directory',d:'CLI process 工作目錄'},
     {k:'cliBridge.logDir',t:'text',l:'Log Directory',d:'JSONL 日誌目錄（預設 ~/.catclaw/data/cli-bridge）'},
     {k:'cliBridge.keepAliveIntervalMs',t:'num',l:'Keep-Alive (ms)',d:'Keep-alive ping 間隔（預設 60000）'},
+    {k:'cliBridge.turnTimeoutMs',t:'num',l:'Turn Timeout (ms)',d:'單次 turn 超時（預設 300000 = 5 分鐘），超時自動中斷'},
     {k:'cliBridge.showThinking',t:'bool',l:'Show Thinking',d:'Discord 中以 spoiler 格式顯示 thinking（預設 false）'},
     {k:'cliBridge.editIntervalMs',t:'num',l:'Edit Interval (ms)',d:'Discord 訊息編輯最小間隔，rate limit 保護（預設 800）'},
   ], dynamic:true, dynamicPath:'cliBridge.channels', entryFields:[
