@@ -21,7 +21,6 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import type { AcpEvent } from "./acp.js";
 import type { BridgeConfig } from "./core/config.js";
-import { getSessionIdForChannel } from "./session.js";
 import { recordAssistantTurn } from "./history.js";
 import { log } from "./logger.js";
 
@@ -428,7 +427,7 @@ export function createReplyHandler(
           guildId: originalMessage.guild?.id ?? null,
           botId: botUser?.id ?? "unknown",
           botName: botUser?.displayName ?? "catclaw",
-          sessionId: getSessionIdForChannel(originalMessage.channelId),
+          sessionId: null,
           text: totalText,
           thinking: totalThinking,
           toolCalls: toolCallNames,
@@ -461,7 +460,7 @@ export function createReplyHandler(
           guildId: originalMessage.guild?.id ?? null,
           botId: botUser?.id ?? "unknown",
           botName: botUser?.displayName ?? "catclaw",
-          sessionId: getSessionIdForChannel(originalMessage.channelId),
+          sessionId: null,
           text: `[ERROR] ${event.message}`,
           thinking: totalThinking,
           toolCalls: toolCallNames,

@@ -11,7 +11,7 @@
  *    c. allowBot / allowFrom 過濾
  *    d. strip mention prefix
  *    e. debounce（同一人 500ms 內多則訊息合併）
- *    f. 觸發 session.enqueue → reply.createReplyHandler
+ *    f. 觸發 agentLoop → handleAgentLoopReply
  */
 
 import {
@@ -27,8 +27,6 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { BridgeConfig } from "./core/config.js";
 import { config, getChannelAccess } from "./core/config.js";
-import { enqueue } from "./session.js";
-import { createReplyHandler } from "./reply.js";
 import { matchSkill } from "./skills/registry.js";
 import { recordUserMessage } from "./history.js";
 import { log } from "./logger.js";

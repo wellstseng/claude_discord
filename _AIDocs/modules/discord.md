@@ -4,7 +4,7 @@
 
 ## 職責
 
-建立 Discord Client，處理 `messageCreate` 事件：bot 自身過濾 → 訊息去重 → `getChannelAccess()` 查詢 per-channel 設定 → allowBot/allowFrom 過濾 → requireMention 判斷 → 附件下載 → debounce 合併 → 觸發 session + reply。
+建立 Discord Client，處理 `messageCreate` 事件：bot 自身過濾 → 訊息去重 → `getChannelAccess()` 查詢 per-channel 設定 → allowBot/allowFrom 過濾 → requireMention 判斷 → 附件下載 → debounce 合併 → 觸發 agentLoop + reply-handler。
 
 ## Client 設定
 
@@ -23,7 +23,7 @@ const client = new Client({
 
 ## 訊息過濾完整 8 步流程
 
-以下 ①–⑧ 為過濾/守衛步驟，全部通過才進入 debounce → enqueue。
+以下 ①–⑧ 為過濾/守衛步驟，全部通過才進入 debounce → agentLoop。
 
 ```
 messageCreate

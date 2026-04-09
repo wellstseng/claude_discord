@@ -18,7 +18,6 @@ import { config, watchConfig, resolveCatclawDir, resolveWorkspaceDirSafe } from 
 import { setLogLevel } from "./logger.js";
 import { log } from "./logger.js";
 import { createBot } from "./discord.js";
-import { loadSessions, scanAndCleanActiveTurns } from "./session.js";
 import { startCron, stopCron } from "./cron.js";
 import { setupSlashCommands, registerSlashCommands } from "./slash.js";
 import { initHistory } from "./history.js";
@@ -67,8 +66,7 @@ if (agentId) log.info(`[bridge] Agent 模式：${agentId}`);
 const workspaceDir = resolveWorkspaceDirSafe();
 await initPlatform(platformConfig, catclawDir, distDir, workspaceDir);
 
-// 從磁碟載入上次的 session 快取（重啟後延續對話上下文）
-loadSessions();
+// 舊版 loadSessions() 已移除 — 新版 SessionManager 在 initPlatform() 內完成初始化
 
 // 初始化訊息歷史 DB
 initHistory();
@@ -112,11 +110,8 @@ bot.once("clientReady", (c) => {
   // Bot 上線後啟動排程服務（需要 bot 來發送訊息）
   startCron(bot);
 
-  // ── 重啟通知 + Crash recovery ──
-  // 有意重啟（signal/RESTART）的 channelId 要排除在 crash recovery 之外，
-  // 因為觸發重啟的那個 turn 本身就是「有意結束」，不是中斷。
+  // ── 重啟通知 ──
   const signalPath = resolve(process.cwd(), "signal", "RESTART");
-  const intentionalChannelIds = new Set<string>();
 
   if (existsSync(signalPath)) {
     try {
@@ -135,7 +130,6 @@ bot.once("clientReady", (c) => {
       }
 
       if (channelId) {
-        intentionalChannelIds.add(channelId);
         // NOTE: cache 在 ready 時可能尚未填充，用 fetch 確保取得頻道
         bot.channels.fetch(channelId).then(async (ch) => {
           if (ch?.isTextBased() && "send" in ch) {
@@ -165,29 +159,7 @@ bot.once("clientReady", (c) => {
     } catch { /* 靜默 */ }
   }
 
-  // ── Crash recovery：掃描被中斷的 turn，排除有意重啟的頻道 ──
-  const interruptedTurns = scanAndCleanActiveTurns(10 * 60_000); // 10 分鐘內的才接續
-  for (const { channelId: chId, record } of interruptedTurns) {
-    // 有意重啟觸發的 turn 不視為中斷
-    if (intentionalChannelIds.has(chId)) {
-      log.info(`[bridge] 跳過有意重啟的 active-turn channel=${chId}`);
-      continue;
-    }
-
-    bot.channels.fetch(chId).then(async (ch) => {
-      if (ch?.isTextBased() && "send" in ch) {
-        const promptPreview = record.prompt.length > 100
-          ? record.prompt.slice(0, 100) + "…"
-          : record.prompt;
-        await ch.send(
-          `[CatClaw] 上一輪對話被意外中斷。\n中斷的指令：「${promptPreview}」\n要繼續嗎？`
-        );
-        log.info(`[bridge] crash recovery 確認訊息已送出 channel=${chId}`);
-      }
-    }).catch((err: unknown) => {
-      log.warn(`[bridge] crash recovery 確認訊息失敗 channel=${chId}: ${err}`);
-    });
-  }
+  // V1 crash recovery（scanAndCleanActiveTurns）已移除 — V2 走 agentLoop，不寫 active-turns
 });
 
 // 優雅關閉：收到 SIGINT / SIGTERM 時先 destroy bot 再退出

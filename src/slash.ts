@@ -23,7 +23,7 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "./core/config.js";
 import { log } from "./logger.js";
-import { clearSession, clearAllSessions, getSessionCount } from "./session.js";
+import { getSessionManager } from "./core/session.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -114,17 +114,22 @@ async function handleRestart(interaction: ChatInputCommandInteraction): Promise<
 
 async function handleResetSession(interaction: ChatInputCommandInteraction): Promise<void> {
   const channelId = interaction.options.getString("channel_id") ?? null;
+  const sm = getSessionManager();
 
   if (channelId) {
-    const removed = clearSession(channelId);
-    if (removed) {
-      await interaction.reply(`✅ 已清除 channel \`${channelId}\` 的 session`);
+    // 搜尋 sessionKey 包含此 channelId 的 session
+    const session = sm.list().find(s => s.channelId === channelId);
+    if (session) {
+      sm.delete(session.sessionKey);
+      await interaction.reply(`✅ 已刪除 channel \`${channelId}\` 的 session（${session.sessionKey}）`);
     } else {
       await interaction.reply(`ℹ️ 找不到 channel \`${channelId}\` 的 session`);
     }
     log.info(`[slash] /reset-session channel=${channelId} by=${interaction.user.tag}`);
   } else {
-    const count = clearAllSessions();
+    const sessions = sm.list();
+    const count = sessions.length;
+    for (const s of sessions) sm.delete(s.sessionKey);
     await interaction.reply(`✅ 已清除全部 ${count} 個 session`);
     log.info(`[slash] /reset-session all (${count} sessions) by=${interaction.user.tag}`);
   }
@@ -138,7 +143,7 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
       ? `${Math.floor(uptimeSec / 60)}m ${uptimeSec % 60}s`
       : `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`;
 
-  const sessionCount = getSessionCount();
+  const sessionCount = getSessionManager().list().length;
   const tag = interaction.client.user?.tag ?? "unknown";
 
   await interaction.reply(
