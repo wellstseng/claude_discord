@@ -110,10 +110,15 @@ if (existsSync(signalPath)) {
 
 ```
 SIGINT / SIGTERM
-  → stopCron()        ← 停止排程服務（clearTimeout）
-  → client.destroy()  ← 斷開 Discord Gateway
+  → _shuttingDown guard（防止重複觸發）
+  → stopCron()                  ← 停止排程服務
+  → await shutdownAllBridges()  ← 關閉所有 CLI bridge process（最多 10s）
+  → bot.destroy()               ← 斷開 Discord Gateway
   → process.exit(0)
 ```
+
+> PM2 `kill_timeout: 15000`（ecosystem.config.cjs）確保有足夠時間完成 async shutdown。
+> 預設 PM2 kill_timeout 僅 1600ms，不足以等待 CLI process 關閉。
 
 ## 全域錯誤捕捉
 

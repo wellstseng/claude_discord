@@ -167,14 +167,27 @@ bot.once("clientReady", (c) => {
   // V1 crash recovery（scanAndCleanActiveTurns）已移除 — V2 走 agentLoop，不寫 active-turns
 });
 
-// 優雅關閉：收到 SIGINT / SIGTERM 時先 destroy bot 再退出
-function shutdown(signal: string): void {
-  log.info(`\n[bridge] 收到 ${signal}，關閉中...`);
+// 優雅關閉：收到 SIGINT / SIGTERM 時先關閉所有 CLI bridge 再退出
+let _shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (_shuttingDown) return; // 避免重複觸發
+  _shuttingDown = true;
+  log.info(`[bridge] 收到 ${signal}，關閉中...`);
+  const dbg = (msg: string) => { try { writeFileSync("/tmp/catclaw-graceful.log", `${new Date().toISOString()} ${msg}\n`, { flag: "a" }); } catch {} };
+  dbg(`${signal} received`);
   stopCron();
-  void shutdownAllBridges().finally(() => {
-    bot.destroy();
-    process.exit(0);
-  });
+  try {
+    dbg("shutdownAllBridges start");
+    await shutdownAllBridges();
+    dbg("shutdownAllBridges done");
+    log.info("[bridge] 所有 CLI bridge 已關閉");
+  } catch (err) {
+    dbg(`shutdownAllBridges error: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[bridge] shutdownAllBridges 失敗：${err instanceof Error ? err.message : String(err)}`);
+  }
+  bot.destroy();
+  dbg("exit");
+  process.exit(0);
 }
 
 process.on("SIGINT", () => shutdown("SIGINT"));

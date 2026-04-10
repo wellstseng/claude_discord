@@ -50,6 +50,9 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
   private lastThinkingLength = 0;
   private lastToolCount = 0;
 
+  /** 最近一次 stderr 輸出（供 bridge 偵測啟動失敗原因） */
+  lastStderr = "";
+
   constructor(private config: CliProcessConfig) {
     super();
   }
@@ -97,11 +100,12 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
       this.handleStdoutChunk(chunk);
     });
 
-    // ── stderr 監聯（log only）──
+    // ── stderr 監聽 ──
     this.proc.stderr!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       if (text.trim()) {
         log.debug(`[cli-bridge:${label}] stderr: ${text.slice(0, 200)}`);
+        this.lastStderr = text;
       }
     });
 

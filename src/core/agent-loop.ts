@@ -25,7 +25,7 @@ import type { SafetyGuard } from "../safety/guard.js";
 import { eventBus as _eventBusInstance } from "./event-bus.js";
 type EventBus = typeof _eventBusInstance;
 import type { ToolContext } from "../tools/types.js";
-import { getContextEngine, repairToolPairing } from "./context-engine.js";
+import { getContextEngine, repairToolPairing, estimateTokens } from "./context-engine.js";
 import { getToolLogStore, ToolLogStore } from "./tool-log-store.js";
 import { getSessionSnapshotStore } from "./session-snapshot.js";
 import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
@@ -376,6 +376,8 @@ export type AgentLoopEvent =
   | { type: "tool_result";  name: string; id: string; result: unknown; error?: string }
   | { type: "tool_blocked"; name: string; reason: string }
   | { type: "done";         text: string; turnCount: number }
+  | { type: "context_warning"; level: "high" | "critical"; utilization: number; estimatedTokens: number; contextWindow: number; source: "session" | "model" }
+  | { type: "ce_applied";   strategies: string[]; tokensBefore: number; tokensAfter: number }
   | { type: "error";        message: string };
 
 // ── TurnTracker ───────────────────────────────────────────────────────────────
@@ -674,8 +676,15 @@ export async function* agentLoop(
       compactionPreference: opts.modePreset?.compaction,
     });
     // S2: 有 strategy 觸發 → 把壓縮後的 messages 寫回 session（含備份原始）
-    if (contextEngine.lastBuildBreakdown.strategiesApplied.length > 0) {
+    const ceBd = contextEngine.lastBuildBreakdown;
+    if (ceBd.strategiesApplied.length > 0) {
       sessionManager.replaceMessages(sessionKey, processedHistory);
+      yield {
+        type: "ce_applied",
+        strategies: ceBd.strategiesApplied,
+        tokensBefore: ceBd.tokensBeforeCE ?? ceBd.estimatedTokens,
+        tokensAfter: ceBd.tokensAfterCE ?? ceBd.estimatedTokens,
+      };
     }
   } else {
     processedHistory = rawHistory;
@@ -1614,6 +1623,43 @@ export async function* agentLoop(
     const hookReg = getHookRegistry();
     if (hookReg && hookReg.count("SessionEnd") > 0) {
       await hookReg.runSessionEnd({ event: "SessionEnd", sessionKey, accountId, channelId, turnCount: session.turnCount });
+    }
+  }
+
+  // ── Context Usage Warning ──────────────────────────────────────────────────
+  // 每個 session 在 high / critical 各最多提醒一次
+  {
+    const postHistory = sessionManager.getHistory(sessionKey);
+    const postTokens = estimateTokens(postHistory);
+
+    // Session CE context window（budgetGuard 設定）
+    const ceWindow = contextEngine?.getContextWindowTokens() ?? 100_000;
+    const ceUtil = postTokens / ceWindow;
+    const sessionWarned = session as unknown as { _contextWarned?: { high?: boolean; critical?: boolean } };
+    sessionWarned._contextWarned ??= {};
+
+    if (ceUtil >= 0.9 && !sessionWarned._contextWarned.critical) {
+      sessionWarned._contextWarned.critical = true;
+      yield { type: "context_warning", level: "critical", utilization: ceUtil, estimatedTokens: postTokens, contextWindow: ceWindow, source: "session" };
+    } else if (ceUtil >= 0.7 && !sessionWarned._contextWarned.high) {
+      sessionWarned._contextWarned.high = true;
+      yield { type: "context_warning", level: "high", utilization: ceUtil, estimatedTokens: postTokens, contextWindow: ceWindow, source: "session" };
+    }
+
+    // LLM Model context window
+    const modelWindow = provider.maxContextTokens;
+    if (modelWindow > 0) {
+      const modelUtil = totalInputTokens / modelWindow;
+      const modelWarned = session as unknown as { _modelContextWarned?: { high?: boolean; critical?: boolean } };
+      modelWarned._modelContextWarned ??= {};
+
+      if (modelUtil >= 0.9 && !modelWarned._modelContextWarned.critical) {
+        modelWarned._modelContextWarned.critical = true;
+        yield { type: "context_warning", level: "critical", utilization: modelUtil, estimatedTokens: totalInputTokens, contextWindow: modelWindow, source: "model" };
+      } else if (modelUtil >= 0.7 && !modelWarned._modelContextWarned.high) {
+        modelWarned._modelContextWarned.high = true;
+        yield { type: "context_warning", level: "high", utilization: modelUtil, estimatedTokens: totalInputTokens, contextWindow: modelWindow, source: "model" };
+      }
     }
   }
 

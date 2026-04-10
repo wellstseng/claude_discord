@@ -65,6 +65,22 @@ const commands = [
   new SlashCommandBuilder()
     .setName("context")
     .setDescription("查看當前頻道的 context window 使用量與壓縮距離"),
+
+  new SlashCommandBuilder()
+    .setName("session")
+    .setDescription("查看或切換 CLI Bridge 的 session")
+    .addStringOption((opt) =>
+      opt
+        .setName("action")
+        .setDescription("動作：status（預設）/ new / set")
+        .setRequired(false)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("id")
+        .setDescription("指定 session ID（搭配 set 使用）")
+        .setRequired(false)
+    ),
 ];
 
 // ── 部署 Slash Commands 到 Discord ──────────────────────────────────────────
@@ -201,8 +217,10 @@ async function handleCd(interaction: ChatInputCommandInteraction): Promise<void>
     await bridge.setWorkingDir(absPath);
 
     // 2. 持久化到 cli-bridges.json
+    // bridge.label 是 channel 層 label（如 "judy-cli"），需用 bridgeConfig.label 匹配頂層
+    const configLabel = bridge.getBridgeConfig().label;
     const allConfigs = loadAllCliBridgeConfigs();
-    const cfg = allConfigs.find(c => c.label === bridge.label);
+    const cfg = allConfigs.find(c => c.label === configLabel);
     if (cfg) {
       cfg.workingDir = absPath;
       saveCliBridgeConfigs(allConfigs);
@@ -282,6 +300,82 @@ async function handleContext(interaction: ChatInputCommandInteraction): Promise<
   );
 }
 
+async function handleSession(interaction: ChatInputCommandInteraction): Promise<void> {
+  const channelId = interaction.channelId;
+  const bridge = getCliBridge(channelId);
+  if (!bridge) {
+    await interaction.reply({ content: "❌ 此頻道沒有綁定 CLI Bridge", ephemeral: true });
+    return;
+  }
+
+  const action = interaction.options.getString("action") ?? "status";
+  const configLabel = bridge.getBridgeConfig().label;
+  const allConfigs = loadAllCliBridgeConfigs();
+  const cfg = allConfigs.find(c => c.label === configLabel);
+  const chCfg = cfg?.channels[channelId];
+
+  switch (action) {
+    case "status": {
+      const currentId = bridge.currentSessionId ?? "(未知)";
+      const persistedId = chCfg?.sessionId ?? "(未設定)";
+      await interaction.reply(
+        `**Session 狀態**\n` +
+        `• Bridge：${bridge.label}\n` +
+        `• 當前 Session ID：\`${currentId}\`\n` +
+        `• JSON 持久化 ID：\`${persistedId}\`\n` +
+        `• 行為：${chCfg?.sessionId ? "固定（重啟 resume 此 session）" : "自動（每次重啟新建）"}`
+      );
+      break;
+    }
+
+    case "new": {
+      await interaction.deferReply();
+      // 清除持久化 sessionId → 下次啟動新建
+      if (chCfg) {
+        delete chCfg.sessionId;
+        if (cfg) saveCliBridgeConfigs(allConfigs);
+      }
+      // 清除 runtime sessionId + 重啟 bridge process（不帶 --session-id）
+      bridge.clearSessionId();
+      await bridge.setWorkingDir(bridge.workingDir); // 觸發重啟
+      await interaction.editReply(
+        `✅ **新 Session**\n` +
+        `• Bridge：${bridge.label}\n` +
+        `• 舊 Session ID 已清除\n` +
+        `• Process 已重啟，等待新 session 建立\n` +
+        `• 下次對話後會自動持久化新的 Session ID`
+      );
+      break;
+    }
+
+    case "set": {
+      const targetId = interaction.options.getString("id");
+      if (!targetId) {
+        await interaction.reply({ content: "❌ 請提供 session ID：`/session action:set id:xxxx`", ephemeral: true });
+        return;
+      }
+      await interaction.deferReply();
+      // 持久化指定 sessionId
+      if (chCfg && cfg) {
+        chCfg.sessionId = targetId;
+        saveCliBridgeConfigs(allConfigs);
+      }
+      // 重啟 bridge process（帶新 --session-id）
+      await bridge.setWorkingDir(bridge.workingDir); // 觸發重啟
+      await interaction.editReply(
+        `✅ **Session 已切換**\n` +
+        `• Bridge：${bridge.label}\n` +
+        `• 新 Session ID：\`${targetId}\`\n` +
+        `• Process 已重啟並 resume 指定 session`
+      );
+      break;
+    }
+
+    default:
+      await interaction.reply({ content: "❌ 未知動作。可用：`status`（預設）/ `new` / `set`", ephemeral: true });
+  }
+}
+
 // ── 主要入口：綁定 interactionCreate 事件 ───────────────────────────────────
 
 /**
@@ -322,6 +416,9 @@ export function setupSlashCommands(client: Client): void {
           break;
         case "context":
           await handleContext(interaction);
+          break;
+        case "session":
+          await handleSession(interaction);
           break;
         default:
           await interaction.reply({ content: "未知指令", ephemeral: true });

@@ -98,7 +98,7 @@ interface ChannelConfig {
   boundProject?: string;     // 綁定專案（該頻道只用此專案）
   provider?: string;         // 頻道層級 provider 覆寫
   blockGroupMentions?: boolean; // 封鎖 @here / @everyone 群組廣播觸發
-  interruptOnNewMessage?: boolean; // 新訊息自動中斷正在執行的 turn（插隊模式，預設 false）
+  interruptOnNewMessage?: boolean; // 新訊息自動中斷正在執行的 turn（插隊模式，預設 true）
   autoThread?: boolean;      // 自動為每條使用者訊息建立 Discord Thread（預設 false）
 }
 

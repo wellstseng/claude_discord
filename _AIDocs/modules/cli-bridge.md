@@ -25,6 +25,10 @@
 - **指數退避自動重啟** — 1s, 2s, 4s, 8s, 16s, 30s
 - **SIGINT 中斷** — 5s 超時 → 重啟 process
 - **與 Agent Loop 完全獨立** — 不共享 Provider / Session / Memory
+- **Session ID 保活** — `persistSessionId()` 寫入 `cli-bridges.json`，重啟後自動恢復對話
+- **"already in use" 防護** — `handleCrash()` 偵測 session lock 衝突，殺孤兒 process + 指數退避重試（2s→5s→10s），失敗後 `clearSessionId()` 降級為新 session
+- **Hot-reload sessionId 排除** — `configSnapshotJson()` 比對設定時排除 sessionId，避免 `persistSessionId()` 觸發不必要的 bridge 重建
+- **process.lastStderr** — `CliProcess` 記錄最後 stderr 輸出，供 bridge crash 偵測使用
 
 ## 整合點
 

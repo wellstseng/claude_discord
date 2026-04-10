@@ -172,9 +172,8 @@ export async function startAllBridges(discordClient: Client): Promise<void> {
         }
 
         await bridge.start();
-        // 記錄 config snapshot（hot-reload 比對用）
-        const chJson = JSON.stringify({ ...config, channels: { [bridge.channelId]: config.channels[bridge.channelId] } });
-        _lastConfigJson.set(bridge.channelId, chJson);
+        // 記錄 config snapshot（hot-reload 比對用，排除 sessionId）
+        _lastConfigJson.set(bridge.channelId, configSnapshotJson(config, bridge.channelId));
         log.info(`[cli-bridge] ${bridge.label} 啟動成功`);
       } catch (err) {
         log.error(`[cli-bridge] ${bridge.label} 啟動失敗：${err instanceof Error ? err.message : String(err)}`);
@@ -369,8 +368,16 @@ function watchConfigFile(): void {
   log.info(`[cli-bridge] 已啟動 ${CONFIG_FILENAME} 監聽（hot-reload）`);
 }
 
-/** 快速比較：config 是否有變化（JSON 序列化比對） */
+/** 快速比較：config 是否有變化（JSON 序列化比對，排除 sessionId） */
 const _lastConfigJson = new Map<string, string>();
+
+/** 產生比較用 JSON（排除 sessionId，避免 persist 觸發不必要的 hot-reload） */
+function configSnapshotJson(config: CliBridgeConfig, channelId: string): string {
+  const chCfg = { ...config.channels[channelId] };
+  delete (chCfg as Record<string, unknown>)["sessionId"];
+  const top = { ...config, channels: { [channelId]: chCfg } };
+  return JSON.stringify(top);
+}
 
 async function hotReload(): Promise<void> {
   if (!_discordClient) return;
@@ -383,7 +390,7 @@ async function hotReload(): Promise<void> {
     for (const channelId of Object.keys(config.channels)) {
       newChannelMap.set(channelId, {
         config,
-        json: JSON.stringify({ ...config, channels: { [channelId]: config.channels[channelId] } }),
+        json: configSnapshotJson(config, channelId),
       });
     }
   }
@@ -432,9 +439,8 @@ async function hotReload(): Promise<void> {
         }
 
         await bridge.start();
-        // 記錄 config snapshot
-        const chJson = JSON.stringify({ ...config, channels: { [bridge.channelId]: config.channels[bridge.channelId] } });
-        _lastConfigJson.set(bridge.channelId, chJson);
+        // 記錄 config snapshot（排除 sessionId）
+        _lastConfigJson.set(bridge.channelId, configSnapshotJson(config, bridge.channelId));
         log.info(`[cli-bridge] hot-reload: ${bridge.label} 啟動成功 sender=${sender.mode}`);
       } catch (err) {
         log.error(`[cli-bridge] hot-reload: ${bridge.label} 啟動失敗：${err instanceof Error ? err.message : String(err)}`);

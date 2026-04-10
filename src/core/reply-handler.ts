@@ -396,6 +396,28 @@ export async function handleAgentLoopReply(
           }
         }
 
+      } else if (event.type === "ce_applied") {
+        const stratNames: Record<string, string> = {
+          "compaction": "LLM 摘要壓縮",
+          "budget-guard": "Budget Guard 修剪",
+          "sliding-window": "Sliding Window 截斷",
+          "overflow-hard-stop": "硬上限截斷",
+        };
+        const names = event.strategies.map(s => stratNames[s] ?? s).join(" + ");
+        const saved = event.tokensBefore - event.tokensAfter;
+        const ceMsg = `📦 **Context 壓縮**：${names}（${event.tokensBefore.toLocaleString()} → ${event.tokensAfter.toLocaleString()} tokens，節省 ${saved.toLocaleString()}）`;
+        try { await send(ceMsg); isFirst = false; } catch { /* 靜默 */ }
+
+      } else if (event.type === "context_warning") {
+        const icon = event.level === "critical" ? "🔴" : "🟡";
+        const pct = (event.utilization * 100).toFixed(1);
+        const src = event.source === "model" ? "LLM Model" : "Session";
+        const hint = event.level === "critical"
+          ? "建議開新對話或執行 /reset-session"
+          : "接近上限，請留意";
+        const warnMsg = `${icon} **Context 用量警告**（${src}）：${pct}%（${event.estimatedTokens.toLocaleString()} / ${event.contextWindow.toLocaleString()} tokens）— ${hint}`;
+        try { await send(warnMsg); isFirst = false; } catch { /* 靜默 */ }
+
       } else if (event.type === "error") {
         stopTyping();
         const errorMsg = `⚠️ ${event.message}`.slice(0, TEXT_LIMIT);

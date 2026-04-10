@@ -25,6 +25,7 @@ module.exports = {
     watch: ["signal"],
     watch_delay: 1000,
     autorestart: true,
+    kill_timeout: 15000,
     merge_logs: true,
     env: (() => {
       const configDir = expandHome(process.env.CATCLAW_CONFIG_DIR);

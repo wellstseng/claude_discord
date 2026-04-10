@@ -10,7 +10,10 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { log } from "../logger.js";
+import { resolveCatclawDir } from "../core/config.js";
 import { CliProcess } from "./process.js";
 import { StdoutLogger } from "./stdout-log.js";
 import type {
@@ -42,6 +45,10 @@ export class CliBridge {
   private restartAttempt = 0;
   private _status: BridgeStatus = "dead";
   private sessionId: string | null = null;
+  /** "already in use" 連續重試次數 */
+  private _alreadyInUseCount = 0;
+  /** 最近一次 spawn 時間（偵測快速死亡） */
+  private _lastSpawnTime = 0;
 
   // Turn 追蹤
   private activeTurnId: string | null = null;
@@ -281,6 +288,50 @@ export class CliBridge {
     return this.bridgeConfig.workingDir;
   }
 
+  /** 清除 runtime + 持久化 sessionId（僅 /session new 使用） */
+  clearSessionId(): void {
+    this.sessionId = null;
+    (this.channelConfig as { sessionId?: string | null }).sessionId = null;
+    // 同步清除 json
+    try {
+      const configPath = join(resolveCatclawDir(), "cli-bridges.json");
+      const raw = readFileSync(configPath, "utf-8");
+      const configs = JSON.parse(raw) as CliBridgeConfig[];
+      if (Array.isArray(configs)) {
+        const cfg = configs.find(c => c.label === this.bridgeConfig.label);
+        const chCfg = cfg?.channels[this.channelId];
+        if (chCfg && chCfg.sessionId) {
+          delete chCfg.sessionId;
+          writeFileSync(configPath, JSON.stringify(configs, null, 2), "utf-8");
+        }
+      }
+    } catch { /* 靜默 */ }
+    log.info(`[cli-bridge:${this.label}] sessionId 已清除（runtime + json）`);
+  }
+
+  /** 將 sessionId 持久化到 cli-bridges.json 的 channel config */
+  private persistSessionId(sid: string): void {
+    try {
+      const configPath = join(resolveCatclawDir(), "cli-bridges.json");
+      const raw = readFileSync(configPath, "utf-8");
+      const configs = JSON.parse(raw) as CliBridgeConfig[];
+      if (!Array.isArray(configs)) return;
+
+      const cfg = configs.find(c => c.label === this.bridgeConfig.label);
+      if (!cfg) return;
+
+      const chCfg = cfg.channels[this.channelId];
+      if (!chCfg) return;
+
+      if (chCfg.sessionId === sid) return; // 已是同一個，不寫
+      chCfg.sessionId = sid;
+      writeFileSync(configPath, JSON.stringify(configs, null, 2), "utf-8");
+      log.info(`[cli-bridge:${this.label}] sessionId 已持久化：${sid}`);
+    } catch (err) {
+      log.warn(`[cli-bridge:${this.label}] sessionId 持久化失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   async shutdown(): Promise<void> {
     log.info(`[cli-bridge:${this.label}] shutdown`);
     this.stopKeepAlive();
@@ -347,6 +398,7 @@ export class CliBridge {
     };
 
     this.process = new CliProcess(procConfig);
+    this._lastSpawnTime = Date.now();
 
     // 綁定事件
     this.process.on("event", (evt) => this.handleEvent(evt));
@@ -370,10 +422,18 @@ export class CliBridge {
     // 記錄到 logger
     this.stdoutLogger.append(evt);
 
-    // session_init → 記住 session ID
+    // session_init → 記住 session ID + 持久化
     if (evt.type === "session_init") {
       this.sessionId = evt.sessionId;
       log.info(`[cli-bridge:${this.label}] session_id=${evt.sessionId}`);
+      this.persistSessionId(evt.sessionId);
+    }
+
+    // result 事件也帶 session_id（Claude CLI -p 模式不發 session_init）
+    if (evt.type === "result" && evt.session_id && evt.session_id !== this.sessionId) {
+      this.sessionId = evt.session_id;
+      log.info(`[cli-bridge:${this.label}] session_id=${evt.session_id} (from result)`);
+      this.persistSessionId(evt.session_id);
     }
 
     // 收到事件 → 重置 idle timeout
@@ -499,6 +559,7 @@ export class CliBridge {
 
   private handleClose(code: number | null): void {
     if (this._status === "dead" || this._status === "restarting") return;
+    if (this._crashHandling) return; // handleCrash 正在管理重試，不重複觸發
 
     const hasPending = this.turnListeners.size > 0;
     if (code === 0 && !hasPending) {
@@ -511,8 +572,66 @@ export class CliBridge {
     void this.handleCrash();
   }
 
+  private _crashHandling = false;
   private async handleCrash(): Promise<void> {
+    if (this._crashHandling) return; // 防止多條 crash 鏈並行
+    this._crashHandling = true;
     this.stopKeepAlive();
+
+    // Session ID 衝突偵測（含快速死亡偵測：spawn 後 5s 內死 + stderr = "already in use"）
+    const lastStderr = this.process?.lastStderr ?? "";
+    const sid = this.sessionId || this.channelConfig.sessionId;
+    const isAlreadyInUse = lastStderr.includes("already in use") && !!sid;
+    // 快速死亡：spawn 後不到 5 秒就死了（500ms spawn check 通過但 stderr 延遲到達）
+    const isQuickDeath = (Date.now() - this._lastSpawnTime) < 5000;
+
+    if (isAlreadyInUse || (isQuickDeath && sid && this._alreadyInUseCount > 0)) {
+      this._status = "restarting";
+      this._alreadyInUseCount++;
+
+      // 殺本地孤兒
+      try {
+        const { execSync } = await import("node:child_process");
+        const pids = execSync(`pgrep -f "session-id ${sid}"`, { encoding: "utf-8" }).trim().split("\n").filter(Boolean);
+        for (const pid of pids) {
+          try { process.kill(Number(pid), "SIGTERM"); } catch { /* 已死 */ }
+        }
+        if (pids.length > 0) log.info(`[cli-bridge:${this.label}] 已殺 ${pids.length} 個孤兒 process`);
+      } catch { /* pgrep 找不到 */ }
+
+      // 遞增延遲重試迴圈（在 handleCrash 內完成，不依賴 re-entry）
+      const retryDelays = [2000, 5000, 10000];
+      while (this._alreadyInUseCount <= retryDelays.length) {
+        const delay = retryDelays[this._alreadyInUseCount - 1]!;
+        log.warn(`[cli-bridge:${this.label}] session "${sid}" 被佔用，等待 ${delay / 1000}s 後重試 (${this._alreadyInUseCount}/${retryDelays.length})`);
+        await new Promise(r => setTimeout(r, delay));
+        try {
+          await this.spawnProcess();
+          // spawn 成功，但需確認 process 存活超過 2 秒才算真成功
+          await new Promise(r => setTimeout(r, 2000));
+          if (this.process?.alive) {
+            this._status = "idle";
+            this.restartAttempt = 0;
+            this._alreadyInUseCount = 0;
+            this._crashHandling = false;
+            this.startKeepAlive();
+            log.info(`[cli-bridge:${this.label}] session resume 成功（已驗證存活）`);
+            return;
+          }
+          // process 已死 → 繼續下一輪
+          log.warn(`[cli-bridge:${this.label}] session resume 後 process 快速死亡，繼續重試`);
+          this._alreadyInUseCount++;
+        } catch {
+          this._alreadyInUseCount++;
+        }
+      }
+
+      // 重試次數用盡 → 放棄此 session
+      log.warn(`[cli-bridge:${this.label}] session "${sid}" 重試 ${retryDelays.length} 次仍被佔用，放棄舊 session`);
+      this.clearSessionId();
+      this._alreadyInUseCount = 0;
+      // fallthrough 到正常重啟流程（不帶 session ID）
+    }
 
     const backoffMs = this.bridgeConfig.restartBackoffMs ?? DEFAULT_BACKOFF_MS;
     const delay = backoffMs[Math.min(this.restartAttempt, backoffMs.length - 1)]!;
@@ -527,15 +646,19 @@ export class CliBridge {
       await this.spawnProcess();
       this._status = "idle";
       this.restartAttempt = 0;
+      this._alreadyInUseCount = 0;
+      this._crashHandling = false;
       this.startKeepAlive();
       log.info(`[cli-bridge:${this.label}] 重啟成功`);
     } catch (err) {
       log.error(`[cli-bridge:${this.label}] 重啟失敗: ${err instanceof Error ? err.message : String(err)}`);
       // 繼續嘗試
       if (this.restartAttempt < backoffMs.length + 3) {
+        this._crashHandling = false; // 允許下一輪 handleCrash 進入
         void this.handleCrash();
       } else {
         this._status = "dead";
+        this._crashHandling = false;
         log.error(`[cli-bridge:${this.label}] 重啟次數超限，放棄`);
       }
     }

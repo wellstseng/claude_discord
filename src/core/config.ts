@@ -1348,18 +1348,18 @@ export function getChannelAccess(
       allowBot: false,
       allowFrom: [],
       blockGroupMentions: false,
-      interruptOnNewMessage: false,
+      interruptOnNewMessage: true,
       autoThread: false,
     };
   }
 
   if (Object.keys(config.discord.guilds).length === 0) {
-    return { allowed: true, requireMention: true, allowBot: false, allowFrom: [], blockGroupMentions: true, interruptOnNewMessage: false, autoThread: false };
+    return { allowed: true, requireMention: true, allowBot: false, allowFrom: [], blockGroupMentions: true, interruptOnNewMessage: true, autoThread: false };
   }
 
   const guild = config.discord.guilds[guildId];
   if (!guild) {
-    return { allowed: false, requireMention: true, allowBot: false, allowFrom: [], blockGroupMentions: true, interruptOnNewMessage: false, autoThread: false };
+    return { allowed: false, requireMention: true, allowBot: false, allowFrom: [], blockGroupMentions: true, interruptOnNewMessage: true, autoThread: false };
   }
 
   const guildDefaults: Required<Omit<ChannelConfig, "boundProject" | "provider">> = {
@@ -1368,7 +1368,7 @@ export function getChannelAccess(
     allowBot: guild.allowBot ?? false,
     allowFrom: guild.allowFrom ?? [],
     blockGroupMentions: guild.blockGroupMentions ?? true,
-    interruptOnNewMessage: false,
+    interruptOnNewMessage: true,
     autoThread: false,
   };
 
