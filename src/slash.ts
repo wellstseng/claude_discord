@@ -24,6 +24,10 @@ import { fileURLToPath } from "node:url";
 import { config } from "./core/config.js";
 import { log } from "./logger.js";
 import { getSessionManager } from "./core/session.js";
+import { getContextEngine, estimateTokens } from "./core/context-engine.js";
+import { getRateLimiter } from "./core/rate-limiter.js";
+import { getAccountRegistry } from "./core/platform.js";
+import { getCliBridge, loadAllCliBridgeConfigs, saveCliBridgeConfigs } from "./cli-bridge/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +51,20 @@ const commands = [
   new SlashCommandBuilder()
     .setName("status")
     .setDescription("查看 bot 狀態（uptime、session 數量）"),
+
+  new SlashCommandBuilder()
+    .setName("cd")
+    .setDescription("切換 CLI Bridge 的工作目錄")
+    .addStringOption((opt) =>
+      opt
+        .setName("path")
+        .setDescription("目標目錄的絕對路徑")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("context")
+    .setDescription("查看當前頻道的 context window 使用量與壓縮距離"),
 ];
 
 // ── 部署 Slash Commands 到 Discord ──────────────────────────────────────────
@@ -56,7 +74,7 @@ const commands = [
  * 使用 guild-specific 部署（即時生效），不用 global（需等 1 小時）
  */
 export async function registerSlashCommands(client: Client): Promise<void> {
-  const token = config.discord.token;
+  const token = client.token ?? config.discord.token;
   const appId = client.user?.id;
   if (!appId) {
     log.warn("[slash] 無法取得 application ID，跳過 slash command 註冊");
@@ -154,6 +172,116 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
   );
 }
 
+async function handleCd(interaction: ChatInputCommandInteraction): Promise<void> {
+  const targetPath = interaction.options.getString("path", true);
+  const channelId = interaction.channelId;
+
+  // 找到此頻道的 bridge
+  const bridge = getCliBridge(channelId);
+  if (!bridge) {
+    await interaction.reply({ content: "❌ 此頻道沒有綁定 CLI Bridge", ephemeral: true });
+    return;
+  }
+
+  // ~ 展開 + 絕對化
+  const expanded = targetPath.startsWith("~/")
+    ? join(process.env.HOME ?? "/", targetPath.slice(2))
+    : targetPath;
+  const absPath = resolve(expanded);
+  if (!existsSync(absPath)) {
+    await interaction.reply({ content: `❌ 目錄不存在：\`${absPath}\``, ephemeral: true });
+    return;
+  }
+
+  const oldDir = bridge.workingDir;
+  await interaction.deferReply();
+
+  try {
+    // 1. 更新 runtime
+    await bridge.setWorkingDir(absPath);
+
+    // 2. 持久化到 cli-bridges.json
+    const allConfigs = loadAllCliBridgeConfigs();
+    const cfg = allConfigs.find(c => c.label === bridge.label);
+    if (cfg) {
+      cfg.workingDir = absPath;
+      saveCliBridgeConfigs(allConfigs);
+    }
+
+    await interaction.editReply(
+      `✅ **工作目錄已切換**\n` +
+      `• Bridge：${bridge.label}\n` +
+      `• 舊目錄：\`${oldDir}\`\n` +
+      `• 新目錄：\`${absPath}\`\n` +
+      `• 狀態：${bridge.status}（process 已重啟）`
+    );
+    log.info(`[slash] /cd ${absPath} by=${interaction.user.tag} bridge=${bridge.label}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await interaction.editReply(`❌ 切換失敗：${msg}`);
+    log.error(`[slash] /cd 失敗：${msg}`);
+  }
+}
+
+async function handleContext(interaction: ChatInputCommandInteraction): Promise<void> {
+  const channelId = interaction.channelId;
+  const sm = getSessionManager();
+  const session = sm.list().find(s => s.channelId === channelId);
+
+  if (!session) {
+    await interaction.reply({ content: "ℹ️ 此頻道尚無 session", ephemeral: true });
+    return;
+  }
+
+  const messages = session.messages;
+  const tokens = estimateTokens(messages);
+
+  const ce = getContextEngine();
+  const contextWindow = ce?.getContextWindowTokens() ?? 100_000;
+  const utilization = tokens / contextWindow;
+
+  // CE thresholds
+  const compactionTrigger = (ce?.getStrategy("compaction") as any)?.cfg?.triggerTokens ?? 4000;
+  const bgCfg = (ce?.getStrategy("budget-guard") as any)?.cfg;
+  const bgTrigger = Math.floor((bgCfg?.contextWindowTokens ?? contextWindow) * (bgCfg?.maxUtilization ?? 0.8));
+  const ohCfg = (ce?.getStrategy("overflow-hard-stop") as any)?.cfg;
+  const ohTrigger = Math.floor((ohCfg?.contextWindowTokens ?? contextWindow) * (ohCfg?.hardLimitUtilization ?? 0.95));
+
+  // Rate limit
+  let rlLine = "";
+  try {
+    const limiter = getRateLimiter();
+    const accountReg = getAccountRegistry();
+    const accountId = accountReg.resolveIdentity("discord", interaction.user.id);
+    const account = accountId ? accountReg.get(accountId) : null;
+    const role = account?.role ?? "member";
+    const rl = limiter.check(interaction.user.id, role);
+    rlLine = `• Rate Limit（${role}）：${rl.remaining === -1 ? "無限制" : `剩餘 ${rl.remaining} 次/分`}`;
+    if (!rl.allowed) rlLine += `（${Math.ceil(rl.retryAfterMs / 1000)}s 後重置）`;
+  } catch {
+    rlLine = "• Rate Limit：不可用";
+  }
+
+  const bar = (current: number, total: number) => {
+    const pct = Math.min(current / total, 1);
+    const filled = Math.round(pct * 10);
+    return "█".repeat(filled) + "░".repeat(10 - filled);
+  };
+
+  await interaction.reply(
+    `**Context Window 狀態**\n` +
+    `• Session：\`${session.sessionKey}\`\n` +
+    `• Turns：${session.turnCount}（${messages.length} messages）\n` +
+    `• Token 估算：**${tokens.toLocaleString()}** / ${contextWindow.toLocaleString()}（${(utilization * 100).toFixed(1)}%）\n` +
+    `• ${bar(tokens, contextWindow)}\n\n` +
+    `**CE Thresholds**\n` +
+    `• Compaction（${compactionTrigger.toLocaleString()}）：${tokens > compactionTrigger ? "⚠️ EXCEEDED" : `✅ 距離 ${(compactionTrigger - tokens).toLocaleString()}`}\n` +
+    `• BudgetGuard（${bgTrigger.toLocaleString()}）：${tokens > bgTrigger ? "⚠️ EXCEEDED" : `✅ 距離 ${(bgTrigger - tokens).toLocaleString()}`}\n` +
+    `• OverflowHardStop（${ohTrigger.toLocaleString()}）：${tokens > ohTrigger ? "🔴 EXCEEDED" : `✅ 距離 ${(ohTrigger - tokens).toLocaleString()}`}\n\n` +
+    rlLine
+  );
+}
+
 // ── 主要入口：綁定 interactionCreate 事件 ───────────────────────────────────
 
 /**
@@ -188,6 +316,12 @@ export function setupSlashCommands(client: Client): void {
           break;
         case "status":
           await handleStatus(interaction);
+          break;
+        case "cd":
+          await handleCd(interaction);
+          break;
+        case "context":
+          await handleContext(interaction);
           break;
         default:
           await interaction.reply({ content: "未知指令", ephemeral: true });

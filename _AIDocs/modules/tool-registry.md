@@ -1,7 +1,7 @@
 # modules/tool-registry — Tool 註冊 + Builtin Tools
 
 > 檔案：`src/tools/registry.ts` + `src/tools/builtin/`
-> 更新日期：2026-04-05
+> 更新日期：2026-04-10
 
 ## 職責
 
@@ -50,7 +50,7 @@ interface ToolContext {
 }
 ```
 
-## 17 Builtin Tools
+## 18 Builtin Tools
 
 ### 檔案操作（elevated）
 
@@ -102,6 +102,7 @@ interface ToolContext {
 | Tool | 說明 |
 |------|------|
 | `clear_session` | 清空 session 歷史 |
+| `session_context` | 查詢當前 session 的 context window 用量、CE threshold 距離、rate limit 狀態 |
 
 ### 任務（standard，deferred）
 
