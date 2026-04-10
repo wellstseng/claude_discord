@@ -43,6 +43,7 @@ import {
   getPlatformRateLimiter,
 } from "./core/platform.js";
 import { getInboundHistoryStore, type InboundEntry } from "./discord/inbound-history.js";
+import { checkBotMessage, resetOnHumanMessage } from "./discord/bot-circuit-breaker.js";
 import { resolveProvider, getChannelAccess as getCoreChannelAccess } from "./core/config.js";
 import { getProviderRegistry } from "./providers/registry.js";
 import { agentLoop } from "./core/agent-loop.js";
@@ -331,7 +332,14 @@ async function handleMessage(
       log.debug(`[discord] 忽略：bot 訊息（allowBot=false）`);
       return;
     }
-    // allowBot=true 但有 allowFrom 限制 → 也要通過白名單
+    // Bot-to-Bot circuit breaker
+    if (!checkBotMessage(message.channelId, config.botCircuitBreaker)) {
+      log.info(`[discord] bot-circuit-breaker 攔截：channel=${message.channelId} author=${message.author.tag}`);
+      return;
+    }
+  } else {
+    // 人類訊息 → 重置 circuit breaker
+    resetOnHumanMessage(message.channelId);
   }
 
   // allowFrom 白名單過濾：有設定（非空陣列）→ 只處理名單內的 user/bot
@@ -346,43 +354,68 @@ async function handleMessage(
     return;
   }
 
-  // 觸發模式判斷
+  // ── Mention 路由規則 ─────────────────────────────────────────────────────
+  // 訊息有 mention 某 bot → 只有被 mention 的 bot 處理，其餘記 inbound
+  // 訊息沒 mention 任何 bot → requireMention=false 的 bot 處理，requireMention=true 記 inbound
+
+  const botUser = message.client.user;
+  const mainBotId = botUser?.id;
+
+  // 收集訊息中 mention 到的已註冊 bot ID
+  const { getCliBridgeBotUserIds, getCliBridge: getCB } = await import("./cli-bridge/index.js");
+  const cliBridgeBotIds = getCliBridgeBotUserIds();
+  const allRegisteredBotIds = new Set(cliBridgeBotIds);
+  if (mainBotId) allRegisteredBotIds.add(mainBotId);
+
+  const mentionedBotIds = new Set<string>();
+  for (const botId of allRegisteredBotIds) {
+    if (message.mentions.has(botId)) mentionedBotIds.add(botId);
+  }
+
+  const hasMentionedAnyBot = mentionedBotIds.size > 0;
+  const mainBotMentioned = mainBotId ? mentionedBotIds.has(mainBotId) : false;
+
+  // Inbound history helper
+  const _recordInbound = () => {
+    const inboundStore = getInboundHistoryStore();
+    const inboundEnabled = config.inboundHistory?.inject?.enabled ?? false;
+    if (inboundStore && inboundEnabled && message.content.trim()) {
+      const entry: InboundEntry = {
+        ts: new Date().toISOString(),
+        platform: "discord",
+        channelId: message.channelId,
+        authorId: message.author.id,
+        authorName: message.author.displayName,
+        content: message.content.trim(),
+        wasProcessed: false,
+      };
+      const scopes = ["main"];
+      const cliBridge = getCB(message.channelId);
+      if (cliBridge) scopes.push(cliBridge.label);
+      inboundStore.appendToScopes(message.channelId, entry, scopes);
+    }
+  };
+
+  // 主 bot 觸發判斷
   let text: string;
 
-  if (access.requireMention) {
-    // 需要 @mention bot
-    const botUser = message.client.user;
-    if (!botUser) {
-      log.debug("[discord] 忽略：botUser 為 null");
+  if (hasMentionedAnyBot) {
+    // 訊息 mention 了某 bot → 只有被 mention 的 bot 處理
+    if (!mainBotMentioned) {
+      // 主 bot 沒被 mention → 記 inbound，不處理
+      _recordInbound();
+      log.debug("[discord] 忽略：訊息 mention 了其他 bot，主 bot 未被 mention");
       return;
     }
-    if (!message.mentions.has(botUser)) {
-      // Inbound History：記錄未被 mention 的訊息，供下次觸發時注入（僅 inject.enabled=true 時才記）
-      const inboundStore = getInboundHistoryStore();
-      const inboundEnabled = config.inboundHistory?.inject?.enabled ?? false;
-      if (inboundStore && inboundEnabled && message.content.trim()) {
-        const entry: InboundEntry = {
-          ts: new Date().toISOString(),
-          platform: "discord",
-          channelId: message.channelId,
-          authorId: message.author.id,
-          authorName: message.author.displayName,
-          content: message.content.trim(),
-          wasProcessed: false,
-        };
-        inboundStore.append(message.channelId, entry);
-        log.debug(`[discord] inbound-history append channel=${message.channelId}`);
-      }
-      log.debug("[discord] 忽略：未 mention bot");
-      return;
-    }
-
-    // 移除 mention prefix（<@botId> 或 <@!botId>），保留後續文字
-    text = message.content
-      .replace(/<@!?\d+>/g, "")
-      .trim();
+    // 主 bot 被 mention → 處理（移除 mention prefix）
+    text = message.content.replace(/<@!?\d+>/g, "").trim();
+  } else if (access.requireMention) {
+    // 沒 mention 任何 bot + 主 bot 需要 mention → 記 inbound，不處理
+    _recordInbound();
+    log.debug("[discord] 忽略：未 mention bot");
+    return;
   } else {
-    // 不需 mention：直接使用完整訊息
+    // 沒 mention 任何 bot + 主 bot 不需 mention → 處理
     text = message.content.trim();
   }
 
@@ -516,13 +549,35 @@ async function handleMessage(
       const { getCliBridge } = await import("./cli-bridge/index.js");
       const cliBridge = getCliBridge(firstMessage.channelId);
       if (cliBridge) {
-        const { handleCliBridgeReply, extractAttachmentText } = await import("./cli-bridge/reply.js");
-        // 附件支援：附加附件描述到訊息文字
-        const attachmentText = extractAttachmentText(firstMessage);
-        const fullText = combinedText + attachmentText;
-        log.info(`[discord] CLI Bridge 路由：${cliBridge.label} channel=${firstMessage.channelId}${attachmentText ? " +attachments" : ""}`);
-        void handleCliBridgeReply(cliBridge, fullText, firstMessage, config, config.cliBridge ?? undefined);
-        return;
+        try {
+          const sender = cliBridge.getSender();
+          if (sender.mode === "independent-bot") {
+            // 獨立 bot 模式 → 主 bot 不代為路由（獨立 bot 自己監聽）
+            log.debug(`[discord] CLI Bridge ${cliBridge.label} 是 independent-bot，主 bot 跳過路由`);
+            // fall through to agent loop
+          } else {
+            // main-bot fallback 模式 → 主 bot 代為路由
+            const chCfg = cliBridge.getChannelConfig();
+            const needsMention = chCfg.requireMention;
+            const botUserId = sender.getBotUserId();
+            const isMentioned = botUserId ? firstMessage.mentions.has(botUserId) : true;
+
+            if (!needsMention || isMentioned) {
+              const { handleCliBridgeReply, extractAttachmentText } = await import("./cli-bridge/reply.js");
+              const { consumeBridgeInboundHistory } = await import("./cli-bridge/index.js");
+              const attachmentText = extractAttachmentText(firstMessage);
+              let fullText = combinedText + attachmentText;
+              // 消費 inbound history（bridge scope）
+              const inboundCtx = await consumeBridgeInboundHistory(cliBridge);
+              if (inboundCtx) fullText = inboundCtx + "\n\n---\n" + fullText;
+              log.info(`[discord] CLI Bridge 路由：${cliBridge.label} channel=${firstMessage.channelId}${attachmentText ? " +attachments" : ""}${inboundCtx ? " +inbound" : ""}`);
+              void handleCliBridgeReply(cliBridge, fullText, firstMessage, config, cliBridge.getBridgeConfig());
+              return;
+            }
+          }
+        } catch {
+          // sender 未初始化 → 跳過 CLI Bridge 路由
+        }
       }
     }
 

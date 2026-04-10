@@ -112,11 +112,8 @@ bot.once("clientReady", (c) => {
   startCron(bot);
 
   // ── CLI Bridge 啟動（持久 Claude CLI process）──────────────────────────────
-  if (config.cliBridge?.enabled) {
-    void startAllBridges(config.cliBridge).then(() => {
-      log.info(`[bridge] CLI Bridge 啟動完成`);
-    });
-  }
+  // ── CLI Bridge 啟動（讀取 ~/.catclaw/cli-bridges.json）──
+  void startAllBridges(bot);
 
   // ── 重啟通知 ──
   const signalPath = resolve(process.cwd(), "signal", "RESTART");

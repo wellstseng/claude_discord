@@ -428,6 +428,7 @@ label.cfg-toggle { min-width: 36px; }
   <div class="tab" onclick="switchTab('config',this)">Config</div>
   <div class="tab" onclick="switchTab('memory',this)">Memory</div>
   <div class="tab" onclick="switchTab('pipeline',this)">Pipeline</div>
+  <div class="tab" onclick="switchTab('inbound',this)">Inbound</div>
   <div class="tab" onclick="switchTab('clibridge',this)">CLI Bridge</div>
   <div class="tab" onclick="switchTab('chat',this)" style="color:var(--accent);font-weight:600">💬 Chat</div>
 </div>
@@ -459,7 +460,11 @@ label.cfg-toggle { min-width: 36px; }
     <h2>Sessions（最近 50）<span style="float:right;display:inline-flex;gap:6px"><button class="btn btn-sm" onclick="purgeExpiredSessions()">🧹 Purge Expired</button><button class="btn btn-sm" onclick="loadSessions()">↻</button></span></h2>
     <div id="sessions-list"></div>
   </div>
-  <div class="card" style="margin-top:12px">
+</div>
+
+<!-- Inbound History -->
+<div id="pane-inbound" class="pane">
+  <div class="card">
     <h2>Inbound History（未消費）<span style="float:right;display:inline-flex;gap:6px"><button class="btn btn-sm btn-red" onclick="clearAllInbound()">🗑 全部清除</button><button class="btn btn-sm" onclick="loadInboundHistory()">↻</button></span></h2>
     <div id="inbound-list" style="font-size:0.8rem;color:var(--fg2)">按 ↻ 載入</div>
   </div>
@@ -738,6 +743,15 @@ label.cfg-toggle { min-width: 36px; }
 <!-- CLI Bridge -->
 <div id="pane-clibridge" class="pane">
   <div class="card" style="margin-bottom:12px">
+    <h2>設定 <span style="font-size:0.72rem;color:var(--fg3)">cli-bridges.json</span>
+      <button class="btn btn-sm" onclick="cbLoadConfig()" style="float:right;margin-left:6px">↻ 重載</button>
+      <button class="btn btn-sm btn-green" onclick="cbSaveConfig()" style="float:right;margin-left:6px">💾 儲存</button>
+      <button class="btn btn-sm" onclick="cbAddBridge()" style="float:right">+ 新增 Bridge</button>
+    </h2>
+    <div id="cb-config-forms"></div>
+    <div id="cb-config-msg" style="font-size:0.78rem;margin-top:6px;color:var(--fg3)"></div>
+  </div>
+  <div class="card" style="margin-bottom:12px">
     <h2>CLI Bridge 總覽 <button class="btn btn-sm" onclick="loadCliBridges()" style="float:right">↻</button></h2>
     <div id="cb-list" style="font-size:0.82rem;color:var(--fg2)">載入中...</div>
   </div>
@@ -850,7 +864,8 @@ function switchTab(id, el) {
   if (_traceAutoRefresh) { clearInterval(_traceAutoRefresh); _traceAutoRefresh = null; }
   if (_sessAutoRefresh) { clearInterval(_sessAutoRefresh); _sessAutoRefresh = null; }
   if (_cbAutoRefresh) { clearInterval(_cbAutoRefresh); _cbAutoRefresh = null; }
-  if (id === 'sessions') { loadSessions(); loadInboundHistory(); _sessAutoRefresh = setInterval(loadSessions, 10000); }
+  if (id === 'sessions') { loadSessions(); _sessAutoRefresh = setInterval(loadSessions, 10000); }
+  if (id === 'inbound') { loadInboundHistory(); }
   if (id === 'chat') { refreshChatSessions(); }
   if (id === 'logs') connectLogStream();
   if (id !== 'logs') disconnectLogStream();
@@ -862,7 +877,7 @@ function switchTab(id, el) {
   if (id === 'config') loadCfg();
   if (id === 'memory') loadMemory();
   if (id === 'pipeline') loadPipeline();
-  if (id === 'clibridge') { loadCliBridges(); _cbAutoRefresh = setInterval(() => { loadCliBridges(); if (_cbSelectedLabel) cbLoadStatus(); }, 10000); }
+  if (id === 'clibridge') { cbLoadConfig(); loadCliBridges(); _cbAutoRefresh = setInterval(() => { loadCliBridges(); if (_cbSelectedLabel) cbLoadStatus(); }, 10000); }
   if (id !== 'clibridge') cbDisconnectStream();
 }
 
@@ -1492,20 +1507,11 @@ const CFG_SCHEMA = [
     {k:'dashboard.port',t:'num',l:'Port',d:'Dashboard HTTP 服務埠號，預設 8088'},
     {k:'dashboard.token',t:'pw',l:'Auth Token',d:'存取認證 token，設定後需帶 ?token=xxx 才能進入'},
   ]},
-  { key:'cliBridge', label:'CLI Bridge', fields:[
-    {k:'cliBridge.enabled',t:'bool',l:'啟用',d:'CLI Bridge 總開關：持久 Claude CLI process 經由 Discord 通訊'},
-    {k:'cliBridge.claudeBin',t:'text',l:'Claude Binary',d:'Claude CLI 執行檔路徑（預設 "claude"）'},
-    {k:'cliBridge.workingDir',t:'text',l:'Working Directory',d:'CLI process 工作目錄'},
-    {k:'cliBridge.logDir',t:'text',l:'Log Directory',d:'JSONL 日誌目錄（預設 ~/.catclaw/data/cli-bridge）'},
-    {k:'cliBridge.keepAliveIntervalMs',t:'num',l:'Keep-Alive (ms)',d:'Keep-alive ping 間隔（預設 60000）'},
-    {k:'cliBridge.turnTimeoutMs',t:'num',l:'Turn Timeout (ms)',d:'Turn idle 超時（預設 300000 = 5 分鐘），連續無事件才觸發'},
-    {k:'cliBridge.turnTimeoutAction',t:'select',l:'Timeout Action',opts:['ask','interrupt','warn','restart'],d:'超時行為：ask=Discord 按鈕讓你選（預設）, interrupt=自動 SIGINT, warn=僅通知, restart=重啟'},
-    {k:'cliBridge.showThinking',t:'bool',l:'Show Thinking',d:'Discord 中以 spoiler 格式顯示 thinking（預設 false）'},
-    {k:'cliBridge.editIntervalMs',t:'num',l:'Edit Interval (ms)',d:'Discord 訊息編輯最小間隔，rate limit 保護（預設 800）'},
-  ], dynamic:true, dynamicPath:'cliBridge.channels', entryFields:[
-    {k:'label',t:'text',l:'Label',d:'識別標籤（用於日誌和 Dashboard 顯示）'},
-    {k:'sessionId',t:'text',l:'Session ID',d:'指定 CLI session ID（留空 = 每次啟動新 session）'},
-    {k:'dangerouslySkipPermissions',t:'bool',l:'Skip Permissions',d:'跳過 CLI 權限確認（危險但方便遠端操作）'},
+  // CLI Bridge 設定已移至獨立檔案 cli-bridges.json，透過 CLI Bridge tab 管理
+  { key:'botCircuitBreaker', label:'Bot Circuit Breaker', fields:[
+    {k:'botCircuitBreaker.enabled',t:'bool',l:'啟用',d:'Bot-to-Bot 對話防呆（同頻道 bot 互相回覆過度活躍時暫停）'},
+    {k:'botCircuitBreaker.maxRounds',t:'num',l:'最大輪數',d:'連續 bot 互動來回幾輪後觸發暫停（預設 10）'},
+    {k:'botCircuitBreaker.maxDurationMs',t:'num',l:'最大持續時間 (ms)',d:'連續 bot 互動持續多久後觸發暫停（預設 180000 = 3 分鐘）'},
   ]},
   { key:'toolBudget', label:'Tool Budget', fields:[
     {k:'toolBudget.resultTokenCap',t:'num',l:'Result Token Cap',d:'單次 tool 回傳結果的 token 上限，超過會被截斷'},
@@ -2984,6 +2990,204 @@ async function clearChatSession() {
   }
 }
 
+// ── CLI Bridge Config Editor ─────────────────────────────────────────────
+
+const _cbDefaults = {
+  enabled: true,
+  label: '',
+  claudeBin: 'claude',
+  workingDir: '',
+  logDir: '~/.catclaw/data/cli-bridge',
+  botToken: '',
+  keepAliveIntervalMs: 60000,
+  turnTimeoutMs: 300000,
+  turnTimeoutAction: 'ask',
+  showThinking: false,
+  editIntervalMs: 800,
+  channels: {},
+};
+const _cbChannelDefaults = {
+  label: '',
+  sessionId: '',
+  dangerouslySkipPermissions: true,
+  requireMention: false,
+};
+
+let _cbConfigData = [];
+
+function _cbField(id, label, type, value, opts) {
+  const sid = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  let inp = '';
+  if (type === 'bool') {
+    inp = \`<input type="checkbox" id="\${sid}" \${value ? 'checked' : ''} style="margin-left:8px">\`;
+  } else if (type === 'select') {
+    inp = \`<select id="\${sid}" style="flex:1;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem">\` +
+      (opts || []).map(o => \`<option value="\${o}" \${value === o ? 'selected' : ''}>\${o}</option>\`).join('') + '</select>';
+  } else if (type === 'num') {
+    inp = \`<input type="number" id="\${sid}" value="\${value ?? ''}" style="flex:1;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem">\`;
+  } else if (type === 'password') {
+    inp = \`<input type="password" id="\${sid}" value="\${value || ''}" placeholder="(未設定)" style="flex:1;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem">\`;
+  } else {
+    inp = \`<input type="text" id="\${sid}" value="\${value || ''}" style="flex:1;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem">\`;
+  }
+  return \`<div style="display:flex;align-items:center;gap:8px;margin:4px 0;flex-wrap:wrap"><label style="min-width:120px;max-width:180px;font-size:0.78rem;color:var(--fg2)">\${label}</label>\${inp}</div>\`;
+}
+
+function _cbRenderBridge(idx, cfg) {
+  const p = 'cb_cfg_' + idx + '_';
+  let html = \`<details style="border:1px solid var(--border);border-radius:6px;margin-bottom:10px;background:var(--bg2)" data-cb-idx="\${idx}">\`;
+  html += \`<summary style="padding:10px;cursor:pointer;list-style:none;font-weight:bold;font-size:0.88rem">\${cfg.label || '(unnamed)'} \${cfg.enabled ? '🟢' : '⚪'}</summary>\`;
+  html += '<div style="padding:0 10px 10px 10px">';
+  html += '<div style="text-align:right;margin-bottom:6px"><button class="btn btn-sm btn-red" onclick="cbRemoveBridge(' + idx + ')">✕ 移除此 Bridge</button></div>';
+  html += _cbField(p+'enabled', '啟用', 'bool', cfg.enabled);
+  html += _cbField(p+'label', 'Label（全域唯一）', 'text', cfg.label);
+  html += _cbField(p+'claudeBin', 'Claude Binary', 'text', cfg.claudeBin || _cbDefaults.claudeBin);
+  html += _cbField(p+'workingDir', 'Working Directory', 'text', cfg.workingDir);
+  html += _cbField(p+'logDir', 'Log Directory', 'text', cfg.logDir || _cbDefaults.logDir);
+  html += _cbField(p+'botToken', 'Bot Token（獨立 bot）', 'password', cfg.botToken || '');
+  html += _cbField(p+'keepAliveIntervalMs', 'Keep-Alive (ms)，預設 60000。0=不送 ping', 'num', cfg.keepAliveIntervalMs ?? _cbDefaults.keepAliveIntervalMs);
+  html += _cbField(p+'turnTimeoutMs', 'Turn Timeout (ms)', 'num', cfg.turnTimeoutMs ?? _cbDefaults.turnTimeoutMs);
+  html += _cbField(p+'turnTimeoutAction', 'Timeout Action', 'select', cfg.turnTimeoutAction || _cbDefaults.turnTimeoutAction, ['ask','interrupt','warn','restart']);
+  html += _cbField(p+'showThinking', 'Show Thinking', 'bool', cfg.showThinking ?? _cbDefaults.showThinking);
+  html += _cbField(p+'editIntervalMs', 'Edit Interval (ms)', 'num', cfg.editIntervalMs ?? _cbDefaults.editIntervalMs);
+
+  // Channels
+  html += \`<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px"><strong style="font-size:0.82rem">Channels</strong> <button class="btn btn-sm" onclick="cbAddChannel(\${idx})" style="margin-left:8px">+ Channel</button></div>\`;
+  const chs = cfg.channels || {};
+  for (const [chId, chCfg] of Object.entries(chs)) {
+    const cp = p + 'ch_' + chId.replace(/[^a-zA-Z0-9]/g, '_') + '_';
+    html += \`<div style="margin:6px 0 6px 16px;padding:8px;border:1px dashed var(--border);border-radius:4px" data-ch-id="\${chId}">\`;
+    html += \`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:0.78rem;color:var(--fg3)">Channel: \${chId}</span><button class="btn btn-sm btn-red" onclick="cbRemoveChannel(\${idx},'\${chId}')" style="font-size:0.7rem">✕</button></div>\`;
+    html += _cbField(cp+'chId', 'Channel ID', 'text', chId);
+    html += _cbField(cp+'label', 'Label', 'text', chCfg.label || '');
+    html += _cbField(cp+'sessionId', 'Session ID（留空=自動）', 'text', chCfg.sessionId || '');
+    html += _cbField(cp+'dangerouslySkipPermissions', 'Skip Permissions', 'bool', chCfg.dangerouslySkipPermissions ?? true);
+    html += _cbField(cp+'requireMention', 'Require @Mention', 'bool', chCfg.requireMention ?? false);
+    html += '</div>';
+  }
+  html += '</div></details>';
+  return html;
+}
+
+function _cbCollectForm() {
+  const configs = [];
+  const forms = document.querySelectorAll('[data-cb-idx]');
+  forms.forEach(form => {
+    const idx = form.dataset.cbIdx;
+    const p = 'cb_cfg_' + idx + '_';
+    const g = id => { const el = document.getElementById(id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
+    const cfg = {
+      enabled: !!g(p+'enabled'),
+      label: g(p+'label') || '',
+      claudeBin: g(p+'claudeBin') || 'claude',
+      workingDir: g(p+'workingDir') || '',
+      logDir: g(p+'logDir') || '',
+      botToken: g(p+'botToken') || undefined,
+      keepAliveIntervalMs: parseInt(g(p+'keepAliveIntervalMs')) || 0,
+      turnTimeoutMs: parseInt(g(p+'turnTimeoutMs')) || 300000,
+      turnTimeoutAction: g(p+'turnTimeoutAction') || 'ask',
+      showThinking: !!g(p+'showThinking'),
+      editIntervalMs: parseInt(g(p+'editIntervalMs')) || 800,
+      channels: {},
+    };
+    // 不儲存空 botToken
+    if (!cfg.botToken) delete cfg.botToken;
+    // channels
+    const chEls = form.querySelectorAll('[data-ch-id]');
+    chEls.forEach(chEl => {
+      const origChId = chEl.dataset.chId;
+      const cp = p + 'ch_' + origChId.replace(/[^a-zA-Z0-9]/g, '_') + '_';
+      const newChId = g(cp+'chId') || origChId;
+      cfg.channels[newChId] = {
+        label: g(cp+'label') || '',
+        sessionId: g(cp+'sessionId') || undefined,
+        dangerouslySkipPermissions: !!g(cp+'dangerouslySkipPermissions'),
+        requireMention: !!g(cp+'requireMention'),
+      };
+      if (!cfg.channels[newChId].sessionId) delete cfg.channels[newChId].sessionId;
+    });
+    configs.push(cfg);
+  });
+  return configs;
+}
+
+async function cbLoadConfig() {
+  try {
+    _cbConfigData = await authFetch('/api/cli-bridges/config').then(r => r.json());
+    if (!Array.isArray(_cbConfigData)) _cbConfigData = [];
+    _cbRenderAll();
+    _cbMsg('已載入 ' + _cbConfigData.length + ' 個 Bridge', '#6f6');
+  } catch (err) {
+    _cbMsg('載入失敗: ' + err.message, '#f66');
+  }
+}
+
+function _cbRenderAll() {
+  const container = document.getElementById('cb-config-forms');
+  if (!_cbConfigData.length) {
+    container.innerHTML = '<div style="color:var(--fg3);font-size:0.82rem;padding:12px">尚無設定。點「+ 新增 Bridge」開始。</div>';
+    return;
+  }
+  container.innerHTML = _cbConfigData.map((cfg, i) => _cbRenderBridge(i, cfg)).join('');
+}
+
+function _cbMsg(text, color) {
+  const el = document.getElementById('cb-config-msg');
+  if (el) { el.innerHTML = '<span style="color:' + (color || 'var(--fg3)') + '">' + text + '</span>'; setTimeout(() => { el.textContent = ''; }, 3000); }
+}
+
+function cbAddBridge() {
+  _cbConfigData.push({ ..._cbDefaults, label: 'new-bridge-' + (_cbConfigData.length + 1), channels: {} });
+  _cbRenderAll();
+  _cbMsg('已新增 Bridge（記得按儲存）', '#6cf');
+}
+
+function cbRemoveBridge(idx) {
+  if (!confirm('確定移除此 Bridge？')) return;
+  const name = _cbConfigData[idx]?.label || '(unnamed)';
+  _cbConfigData.splice(idx, 1);
+  _cbRenderAll();
+  _cbMsg('已移除 ' + name + '（記得按儲存）', '#fc6');
+}
+
+function cbAddChannel(idx) {
+  const chId = prompt('輸入 Channel ID：');
+  if (!chId) return;
+  if (!_cbConfigData[idx].channels) _cbConfigData[idx].channels = {};
+  _cbConfigData[idx].channels[chId] = { ..._cbChannelDefaults, label: _cbConfigData[idx].label + '-ch' };
+  _cbRenderAll();
+  _cbMsg('已新增 Channel ' + chId + '（記得按儲存）', '#6cf');
+}
+
+function cbRemoveChannel(idx, chId) {
+  if (!confirm('確定移除此 Channel？')) return;
+  delete _cbConfigData[idx].channels[chId];
+  _cbRenderAll();
+  _cbMsg('已移除 Channel ' + chId + '（記得按儲存）', '#fc6');
+}
+
+async function cbSaveConfig() {
+  const msgEl = document.getElementById('cb-config-msg');
+  try {
+    const configs = _cbCollectForm();
+    const res = await authFetch('/api/cli-bridges/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(configs),
+    });
+    const d = await res.json();
+    if (d.success) {
+      _cbConfigData = configs;
+      msgEl.innerHTML = '<span style="color:#6f6">已儲存（hot-reload 自動套用）</span>';
+      setTimeout(() => { loadCliBridges(); msgEl.textContent = ''; }, 3000);
+    } else {
+      msgEl.innerHTML = '<span style="color:#f66">儲存失敗: ' + (d.error || '未知錯誤') + '</span>';
+    }
+  } catch (err) {
+    msgEl.innerHTML = '<span style="color:#f66">' + err.message + '</span>';
+  }
+}
+
 // ── CLI Bridge ──────────────────────────────────────────────────────────────
 let _cbSelectedLabel = null;
 let _cbEventSource = null;
@@ -2993,7 +3197,7 @@ async function loadCliBridges() {
     const d = await authFetch('/api/cli-bridge/list').then(r => r.json());
     const bridges = d.bridges || [];
     if (!bridges.length) {
-      document.getElementById('cb-list').innerHTML = '<span style="color:var(--fg3)">沒有 CLI Bridge（需在 catclaw.json 設定 cliBridge）</span>';
+      document.getElementById('cb-list').innerHTML = '<span style="color:var(--fg3)">沒有 CLI Bridge（需在 ~/.catclaw/cli-bridges.json 設定）</span>';
       document.getElementById('cb-detail').style.display = 'none';
       return;
     }
@@ -3906,7 +4110,7 @@ export class DashboardServer {
             const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { channelId?: string };
             const store = getInboundHistoryStore();
             if (!store) { res.writeHead(500); res.end(JSON.stringify({ error: "InboundHistoryStore not initialized" })); return; }
-            const count = body.channelId ? store.clearChannel(body.channelId) : store.clearAll();
+            const count = body.channelId ? store.clearChannelAllScopes(body.channelId) : store.clearAll();
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ success: true, cleared: count }));
           } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: String(err) })); }
@@ -4631,6 +4835,45 @@ export class DashboardServer {
             res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
           }
         })();
+        return;
+      }
+
+      // ── CLI Bridges Config API（讀寫 cli-bridges.json）──────────────────
+
+      // GET /api/cli-bridges/config
+      if (url === "/api/cli-bridges/config" && method === "GET") {
+        void (async () => {
+          try {
+            const { loadAllCliBridgeConfigs } = await import("../cli-bridge/index.js");
+            const configs = loadAllCliBridgeConfigs();
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(configs, null, 2));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
+      // POST /api/cli-bridges/config
+      if (url === "/api/cli-bridges/config" && method === "POST") {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        req.on("data", (c: Buffer) => { size += c.length; if (size < 131072) chunks.push(c); });
+        req.on("end", () => {
+          void (async () => {
+            try {
+              const body = Buffer.concat(chunks).toString("utf-8");
+              const parsed = JSON.parse(body);
+              if (!Array.isArray(parsed)) throw new Error("格式錯誤：需要陣列");
+              const { saveCliBridgeConfigs } = await import("../cli-bridge/index.js");
+              saveCliBridgeConfigs(parsed);
+              res.writeHead(200); res.end(JSON.stringify({ success: true }));
+            } catch (err) {
+              res.writeHead(400); res.end(JSON.stringify({ error: String(err) }));
+            }
+          })();
+        });
         return;
       }
 

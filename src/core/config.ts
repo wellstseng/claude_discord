@@ -668,7 +668,17 @@ export interface BridgeConfig {
    * CLI Bridge：持久 Claude CLI process，透過 stdin stream-json 通訊。
    * 每個 channel 對應一個獨立的 CLI process。
    */
-  cliBridge?: import("../cli-bridge/types.js").CliBridgeConfig;
+  /** Bot-to-Bot 對話防呆（circuit breaker） */
+  botCircuitBreaker?: BotCircuitBreakerConfig;
+}
+
+export interface BotCircuitBreakerConfig {
+  /** 是否啟用（預設 true） */
+  enabled?: boolean;
+  /** 連續 bot 互動最大來回輪數（預設 10） */
+  maxRounds?: number;
+  /** 連續 bot 互動最大持續時間 ms（預設 180000 = 3 分鐘） */
+  maxDurationMs?: number;
 }
 
 // ── 環境變數展開 ──────────────────────────────────────────────────────────────
@@ -780,6 +790,7 @@ interface RawConfig {
     tier?: "public" | "standard" | "elevated" | "admin" | "owner";
   }>;
   hooks?: import("../hooks/types.js").HookDefinition[];
+  botCircuitBreaker?: { enabled?: boolean; maxRounds?: number; maxDurationMs?: number };
 }
 
 // ── 路徑解析 ──────────────────────────────────────────────────────────────────
@@ -1294,6 +1305,7 @@ function loadConfig(): BridgeConfig {
     promptAssembler: raw.promptAssembler,
     mcpServers: raw.mcpServers,
     hooks: Array.isArray(raw.hooks) ? raw.hooks : undefined,
+    botCircuitBreaker: raw.botCircuitBreaker,
   };
 }
 

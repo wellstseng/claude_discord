@@ -56,15 +56,19 @@ export type CliBridgeEvent =
 export interface CliBridgeChannelConfig {
   /** 識別標籤（用於 log 和 Dashboard） */
   label: string;
-  /** 指定 session ID（null = 每次啟動新 session） */
+  /** 指定 session ID（null = 自動產生 cli:ch:{channelId}） */
   sessionId?: string | null;
   /** 跳過權限確認 */
   dangerouslySkipPermissions?: boolean;
+  /** 需要 @mention 才回覆（預設 false） */
+  requireMention?: boolean;
 }
 
-/** catclaw.json 中的 cliBridge 區塊 */
+/** 單一 CLI Bridge 實例設定 */
 export interface CliBridgeConfig {
   enabled: boolean;
+  /** 識別標籤（全域唯一） */
+  label: string;
   /** Claude CLI binary 路徑（預設 "claude"） */
   claudeBin?: string;
   /** CLI 工作目錄 */
@@ -73,7 +77,9 @@ export interface CliBridgeConfig {
   logDir?: string;
   /** channel ID → channel 設定 */
   channels: Record<string, CliBridgeChannelConfig>;
-  /** Keep-alive 間隔毫秒（預設 60000） */
+  /** 獨立 Discord Bot Token（有 → 獨立 Client，沒有 → 主 bot fallback） */
+  botToken?: string;
+  /** Keep-alive 間隔毫秒（預設 0 = 不送 ping） */
   keepAliveIntervalMs?: number;
   /** 重啟退避間隔毫秒清單（預設 [1000, 2000, 4000, 8000, 16000, 30000]） */
   restartBackoffMs?: number[];
@@ -86,6 +92,9 @@ export interface CliBridgeConfig {
   /** Discord edit 最小間隔毫秒（rate limit 保護，預設 800） */
   editIntervalMs?: number;
 }
+
+/** catclaw.json 中的 cliBridges 區塊（陣列，每個 entry 一個獨立 CLI） */
+export type CliBridgesConfig = CliBridgeConfig[];
 
 /** CliProcess 建構參數 */
 export interface CliProcessConfig {

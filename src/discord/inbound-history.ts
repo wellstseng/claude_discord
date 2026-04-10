@@ -67,12 +67,24 @@ export class InboundHistoryStore {
 
   // ── 寫入 ──────────────────────────────────────────────────────────────────
 
-  append(channelId: string, entry: InboundEntry): void {
+  /**
+   * @param scope 區分不同 bot/agent 的命名空間（預設 "main"）
+   */
+  append(channelId: string, entry: InboundEntry, scope = "main"): void {
     try {
-      const filePath = this._filePath(channelId);
+      const filePath = this._filePath(channelId, scope);
       appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf-8");
     } catch (err) {
       log.warn(`[inbound-history] append 失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * 同時寫入多個 scope（同頻道多 bot 時，一則訊息需記給所有 bot）。
+   */
+  appendToScopes(channelId: string, entry: InboundEntry, scopes: string[]): void {
+    for (const scope of scopes) {
+      this.append(channelId, entry, scope);
     }
   }
 
@@ -87,10 +99,11 @@ export class InboundHistoryStore {
     channelId: string,
     cfg: InboundHistoryCfg = DEFAULT_CFG,
     ceProvider?: LLMProvider,
+    scope = "main",
   ): Promise<{ text: string; entriesCount: number; bucketA: number; bucketB: number } | null> {
     if (!cfg.inject.enabled) return null;
 
-    const entries = this._readAll(channelId);
+    const entries = this._readAll(channelId, scope);
     if (entries.length === 0) return null;
 
     const now = Date.now();
@@ -128,7 +141,7 @@ export class InboundHistoryStore {
     }
 
     // 消費完成：清空 JSONL
-    this._clearFile(channelId);
+    this._clearFile(channelId, scope);
 
     // 組裝 context string
     const parts: string[] = [];
@@ -144,17 +157,22 @@ export class InboundHistoryStore {
 
   // ── 公開查詢（Dashboard 用） ──────────────────────────────────────────────
 
-  /** 列出所有有 pending entries 的 channel */
-  listChannels(): Array<{ channelId: string; count: number; lastTs: string }> {
-    const results: Array<{ channelId: string; count: number; lastTs: string }> = [];
+  /** 列出所有有 pending entries 的 channel（含 scope） */
+  listChannels(): Array<{ channelId: string; scope: string; count: number; lastTs: string }> {
+    const results: Array<{ channelId: string; scope: string; count: number; lastTs: string }> = [];
     try {
       const files = readdirSync(this.storeDir).filter(f => f.endsWith(".jsonl"));
       for (const f of files) {
-        const channelId = f.replace(/^discord_/, "").replace(/\.jsonl$/, "");
+        // 檔名格式：discord_{channelId}_{scope}.jsonl 或舊格式 discord_{channelId}.jsonl
+        const m = f.match(/^discord_(.+?)(?:_([^.]+))?\.jsonl$/);
+        if (!m) continue;
+        const channelId = m[1]!;
+        const scope = m[2] ?? "main";
         const entries = this._readAllByFile(join(this.storeDir, f));
         if (entries.length > 0) {
           results.push({
             channelId,
+            scope,
             count: entries.length,
             lastTs: entries[entries.length - 1]!.ts,
           });
@@ -164,15 +182,30 @@ export class InboundHistoryStore {
     return results.sort((a, b) => b.lastTs.localeCompare(a.lastTs));
   }
 
-  /** 讀取指定 channel 的所有 pending entries */
-  readEntries(channelId: string): InboundEntry[] {
-    return this._readAll(channelId);
+  /** 讀取指定 channel + scope 的所有 pending entries */
+  readEntries(channelId: string, scope = "main"): InboundEntry[] {
+    return this._readAll(channelId, scope);
   }
 
-  /** 清除指定 channel 的 pending entries，回傳清除數量 */
-  clearChannel(channelId: string): number {
-    const count = this._readAll(channelId).length;
-    this._clearFile(channelId);
+  /** 清除指定 channel + scope 的 pending entries，回傳清除數量 */
+  clearChannel(channelId: string, scope = "main"): number {
+    const count = this._readAll(channelId, scope).length;
+    this._clearFile(channelId, scope);
+    return count;
+  }
+
+  /** 清除指定 channel 所有 scope 的 pending entries */
+  clearChannelAllScopes(channelId: string): number {
+    const safeCh = channelId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    let count = 0;
+    try {
+      const files = readdirSync(this.storeDir).filter(f => f.startsWith(`discord_${safeCh}`) && f.endsWith(".jsonl"));
+      for (const f of files) {
+        const entries = this._readAllByFile(join(this.storeDir, f));
+        count += entries.length;
+        if (entries.length > 0) writeFileSync(join(this.storeDir, f), "", "utf-8");
+      }
+    } catch { /* 靜默 */ }
     return count;
   }
 
@@ -194,13 +227,14 @@ export class InboundHistoryStore {
 
   // ── 私有輔助 ──────────────────────────────────────────────────────────────
 
-  private _filePath(channelId: string): string {
-    const safe = channelId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    return join(this.storeDir, `discord_${safe}.jsonl`);
+  private _filePath(channelId: string, scope = "main"): string {
+    const safeCh = channelId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const safeScope = scope.replace(/[^a-zA-Z0-9_-]/g, "_");
+    return join(this.storeDir, `discord_${safeCh}_${safeScope}.jsonl`);
   }
 
-  private _readAll(channelId: string): InboundEntry[] {
-    return this._readAllByFile(this._filePath(channelId));
+  private _readAll(channelId: string, scope = "main"): InboundEntry[] {
+    return this._readAllByFile(this._filePath(channelId, scope));
   }
 
   private _readAllByFile(filePath: string): InboundEntry[] {
@@ -213,9 +247,9 @@ export class InboundHistoryStore {
     } catch { return []; }
   }
 
-  private _clearFile(channelId: string): void {
+  private _clearFile(channelId: string, scope = "main"): void {
     try {
-      writeFileSync(this._filePath(channelId), "", "utf-8");
+      writeFileSync(this._filePath(channelId, scope), "", "utf-8");
     } catch { /* 靜默 */ }
   }
 

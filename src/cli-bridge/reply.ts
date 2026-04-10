@@ -3,7 +3,10 @@
  * @description CLI Bridge → Discord 回覆處理
  *
  * 消費 CliBridge.send() 回傳的 TurnHandle.events，串流回覆到 Discord。
- * 設計參考 core/reply-handler.ts，但更簡單（不需 tool registry / permission 等）。
+ * 透過 BridgeSender 抽象層支援三種發送模式：
+ * - IndependentBotSender（獨立 bot token）
+ * - WebhookSender（webhook 偽裝）
+ * - MainBotSender（主 bot fallback）
  *
  * 特點：
  * - Streaming edit 模式（live-edit Discord message）
@@ -17,7 +20,6 @@
 
 import {
   type Message,
-  type SendableChannels,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -29,6 +31,7 @@ import type { CliBridge } from "./bridge.js";
 import type { CliBridgeEvent } from "./types.js";
 import type { BridgeConfig } from "../core/config.js";
 import type { CliBridgeConfig } from "./types.js";
+import type { BridgeSender } from "./discord-sender.js";
 
 const TEXT_LIMIT = 2000;
 const RETRY_DELAYS = [1000, 2000, 4000];
@@ -84,6 +87,7 @@ export async function handleCliBridgeReply(
   bridgeConfig: BridgeConfig,
   cliBridgeConfig?: CliBridgeConfig,
 ): Promise<void> {
+  const sender = bridge.getSender();
   const handle = bridge.send(text, "discord");
   const turnId = handle.turnId;
   const stdoutLogger = bridge.getStdoutLogger();
@@ -104,12 +108,10 @@ export async function handleCliBridgeReply(
   let lastEditTime = 0;
 
   // Typing indicator
-  const channel = originalMessage.channel;
-  if ("sendTyping" in channel) void (channel as SendableChannels).sendTyping();
-  const typingInterval = setInterval(() => {
-    if ("sendTyping" in channel) void (channel as SendableChannels).sendTyping();
-  }, 8_000);
-  const stopTyping = () => clearInterval(typingInterval);
+  sender.sendTyping();
+  let typingInterval: ReturnType<typeof setInterval> | null = setInterval(() => { sender.sendTyping(); }, 8_000);
+  const stopTyping = () => { if (typingInterval) { clearInterval(typingInterval); typingInterval = null; } };
+  const resumeTyping = () => { stopTyping(); sender.sendTyping(); typingInterval = setInterval(() => { sender.sendTyping(); }, 8_000); };
 
   // ── Streaming edit helpers ──────────────────────────────────────────────
 
@@ -126,7 +128,7 @@ export async function handleCliBridgeReply(
       editBusy = true;
       lastEditTime = now;
       editCount++;
-      await state.editMsg.edit(safe);
+      await sender.edit(state.editMsg, safe);
     } catch { /* rate-limited or deleted */ }
     finally { editBusy = false; }
   }
@@ -146,27 +148,27 @@ export async function handleCliBridgeReply(
   async function initEditMsg(): Promise<void> {
     try {
       if (isFirst) {
-        state.editMsg = await originalMessage.reply("...");
+        state.editMsg = await sender.reply(originalMessage, "...");
         isFirst = false;
       } else {
-        state.editMsg = await (channel as SendableChannels).send("...");
+        state.editMsg = await sender.send("...");
       }
     } catch (err) {
       log.debug(`[cli-bridge-reply] initEditMsg 失敗：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  async function send(content: string): Promise<void> {
+  async function sendText(content: string): Promise<void> {
     if (!content.trim()) return;
     if (isFirst) {
-      await originalMessage.reply(content);
+      await sender.reply(originalMessage, content);
       isFirst = false;
     } else {
-      await (channel as SendableChannels).send(content);
+      await sender.send(content);
     }
   }
 
-  // ── Ack reaction ──
+  // ── Ack reaction（始終用原始訊息的 reaction）──
   void originalMessage.react("⏳").catch(() => {});
 
   // ── 消費事件 ──────────────────────────────────────────────────────────────
@@ -179,6 +181,8 @@ export async function handleCliBridgeReply(
 
       // ── text_delta ──
       if (evt.type === "text_delta") {
+        // 確保 typing indicator 在運作
+        if (!typingInterval) resumeTyping();
         // 移除 ⏳，加 🤔
         if (!state.editMsg) {
           void originalMessage.reactions.cache.get("⏳")?.remove().catch(() => {});
@@ -193,7 +197,7 @@ export async function handleCliBridgeReply(
           cancelEditTimer();
           const content = closeFenceIfOpen(buffer);
           if (state.editMsg) {
-            try { await state.editMsg.edit(content.slice(0, TEXT_LIMIT)); } catch { /* */ }
+            try { await sender.edit(state.editMsg, content.slice(0, TEXT_LIMIT)); } catch { /* */ }
           }
           buffer = "";
           state.editMsg = null;
@@ -206,7 +210,6 @@ export async function handleCliBridgeReply(
       if (evt.type === "thinking_delta") {
         if (showThinking) {
           thinkingBuffer += evt.text;
-          // thinking 不做 streaming edit，只在結束時顯示
         }
         continue;
       }
@@ -218,7 +221,7 @@ export async function handleCliBridgeReply(
           const thinkText = thinkingBuffer.length > TEXT_LIMIT - 20
             ? thinkingBuffer.slice(0, TEXT_LIMIT - 20) + "…"
             : thinkingBuffer;
-          await send(`||${thinkText}||`);
+          await sendText(`||${thinkText}||`);
           thinkingBuffer = "";
         }
 
@@ -228,7 +231,7 @@ export async function handleCliBridgeReply(
           toolHintSent = true;
         }
         if (showToolCalls === "all") {
-          await send(`🔧 \`${evt.title}\``);
+          await sendText(`🔧 \`${evt.title}\``);
         }
         continue;
       }
@@ -237,26 +240,27 @@ export async function handleCliBridgeReply(
       if (evt.type === "tool_result") {
         if (showToolCalls === "all") {
           const durStr = evt.duration_ms ? ` (${Math.round(evt.duration_ms / 1000)}s)` : "";
-          await send(`✅ \`${evt.title}\`${durStr}`);
+          await sendText(`✅ \`${evt.title}\`${durStr}`);
         }
         continue;
       }
 
       // ── control_request ──
       if (evt.type === "control_request") {
-        await handleControlRequest(evt, bridge, originalMessage, channel as SendableChannels);
+        await handleControlRequest(evt, bridge, originalMessage, sender);
         continue;
       }
 
       // ── idle_timeout_ask — 讓使用者選擇超時行為 ──
       if (evt.type === "status" && evt.subtype === "idle_timeout_ask") {
-        await handleTimeoutAsk(bridge, handle.turnId, originalMessage, channel as SendableChannels);
+        stopTyping();
+        await handleTimeoutAsk(bridge, handle.turnId, originalMessage, sender);
         continue;
       }
 
       // ── idle_timeout_warn — 僅通知 ──
       if (evt.type === "status" && evt.subtype === "idle_timeout_warn") {
-        await send(`⏰ idle 超時警告（持續等待中）`);
+        await sendText(`⏰ idle 超時警告（持續等待中）`);
         continue;
       }
 
@@ -267,7 +271,7 @@ export async function handleCliBridgeReply(
           const thinkText = thinkingBuffer.length > TEXT_LIMIT - 20
             ? thinkingBuffer.slice(0, TEXT_LIMIT - 20) + "…"
             : thinkingBuffer;
-          await send(`||${thinkText}||`);
+          await sendText(`||${thinkText}||`);
           thinkingBuffer = "";
         }
 
@@ -276,11 +280,11 @@ export async function handleCliBridgeReply(
         if (buffer.trim() && state.editMsg) {
           const final = closeFenceIfOpen(buffer);
           const msg = state.editMsg;
-          const ok = await retrySend(async () => { await msg.edit(final.slice(0, TEXT_LIMIT)); });
+          const ok = await retrySend(async () => { await sender.edit(msg, final.slice(0, TEXT_LIMIT)); });
           discordDelivery = ok ? "success" : "failed";
           discordMessageId = msg.id;
         } else if (buffer.trim()) {
-          const ok = await retrySend(async () => { await send(buffer); });
+          const ok = await retrySend(async () => { await sendText(buffer); });
           discordDelivery = ok ? "success" : "failed";
         } else {
           discordDelivery = "success";
@@ -298,7 +302,7 @@ export async function handleCliBridgeReply(
       if (evt.type === "error") {
         cancelEditTimer();
         const errText = `❌ ${evt.message}`;
-        const ok = await retrySend(() => send(errText));
+        const ok = await retrySend(() => sendText(errText));
         discordDelivery = ok ? "failed" : "failed";
 
         void originalMessage.reactions.cache.get("⏳")?.remove().catch(() => {});
@@ -332,7 +336,7 @@ async function handleControlRequest(
   evt: CliBridgeEvent & { type: "control_request" },
   bridge: CliBridge,
   originalMessage: Message,
-  channel: SendableChannels,
+  sender: BridgeSender,
 ): Promise<void> {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -345,7 +349,7 @@ async function handleControlRequest(
       .setStyle(ButtonStyle.Danger),
   );
 
-  const promptMsg = await channel.send({
+  const promptMsg = await sender.sendComponents({
     content: `🔐 **權限請求**\n工具：\`${evt.tool}\`\n${evt.description}`,
     components: [row],
   });
@@ -372,7 +376,7 @@ async function handleControlRequest(
   } catch {
     // 超時 → 自動拒絕
     bridge.sendControlResponse(evt.requestId, false);
-    await promptMsg.edit({
+    await sender.editComponents(promptMsg, {
       content: `🔐 **權限請求** → ⏰ 超時（自動拒絕）\n工具：\`${evt.tool}\`\n${evt.description}`,
       components: [],
     }).catch(() => {});
@@ -386,7 +390,7 @@ async function handleTimeoutAsk(
   bridge: CliBridge,
   turnId: string,
   originalMessage: Message,
-  channel: SendableChannels,
+  sender: BridgeSender,
 ): Promise<void> {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -403,7 +407,7 @@ async function handleTimeoutAsk(
       .setStyle(ButtonStyle.Danger),
   );
 
-  const msg = await channel.send({
+  const msg = await sender.sendComponents({
     content: `⏰ **Idle 超時** — CLI 已一段時間沒有回應，要怎麼處理？`,
     components: [row],
   });
@@ -433,7 +437,7 @@ async function handleTimeoutAsk(
   } catch {
     // 120s 無回應 → 自動中斷
     bridge.executeTimeoutAction(turnId, "interrupt");
-    await msg.edit({
+    await sender.editComponents(msg, {
       content: `⏰ **Idle 超時** → 無回應，自動中斷`,
       components: [],
     }).catch(() => {});
