@@ -341,7 +341,7 @@ export class CliBridge {
     const procConfig: CliProcessConfig = {
       claudeBin: this.bridgeConfig.claudeBin ?? "claude",
       workingDir: this.bridgeConfig.workingDir,
-      sessionId: this.channelConfig.sessionId ?? undefined,
+      sessionId: this.sessionId ?? this.channelConfig.sessionId ?? undefined,
       dangerouslySkipPermissions: this.channelConfig.dangerouslySkipPermissions ?? true,
       label: this.label,
     };
