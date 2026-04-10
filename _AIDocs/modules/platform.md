@@ -1,7 +1,7 @@
 # modules/platform — 子系統初始化工廠
 
 > 檔案：`src/core/platform.ts`
-> 更新日期：2026-04-05
+> 更新日期：2026-04-10
 
 ## 職責
 
@@ -32,7 +32,8 @@ initPlatform(config, catclawDir, distDir, workspaceDir)
   ├── 10.  Workflow Engine           — rut/oscillation/sync/wisdom
   ├── 10b. Failure Recall Cache     — 非同步預載 failure recall 快取
   ├── 11.  MCP Servers              — 外部 MCP 連線
-  └── 12.  Hook Registry            — 工具前後 hook
+  ├── 12.  Hook Registry            — 工具前後 hook
+  └── 13.  Tool Summary Injection   — 延遲 2s 注入工具摘要至 prompt-assembler
 ```
 
 ## 子系統 Getter

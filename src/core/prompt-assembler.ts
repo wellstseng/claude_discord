@@ -196,6 +196,26 @@ const discordReplyModule: PromptModule = {
   },
 };
 
+/** 工具摘要（由 platform.ts 初始化後注入） */
+let _toolSummaryText = "";
+
+/** 供 platform.ts 呼叫：注入工具摘要 */
+export function setToolSummary(tools: Array<{ name: string; description: string }>): void {
+  if (tools.length === 0) { _toolSummaryText = ""; return; }
+  const lines = tools.map(t => `- ${t.name}：${t.description.split("\n")[0]}`);
+  _toolSummaryText = [
+    "## 可用工具摘要",
+    "以下是當前 session 已註冊的所有工具（含 MCP 工具）：",
+    ...lines,
+  ].join("\n");
+}
+
+const toolSummaryModule: PromptModule = {
+  name: "tool-summary",
+  priority: 56,
+  build: () => _toolSummaryText,
+};
+
 const memoryRulesModule: PromptModule = {
   name: "memory-rules",
   priority: 60,
@@ -298,6 +318,7 @@ const builtinModules: PromptModule[] = [
   gitRulesModule,
   outputFormatModule,
   discordReplyModule,
+  toolSummaryModule,
   memoryRulesModule,
   failureRecallModule,
 ];

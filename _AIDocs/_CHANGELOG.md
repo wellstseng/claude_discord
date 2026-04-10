@@ -3,6 +3,7 @@
 > 知識庫變更紀錄（最新在上，超過 8 筆觸發滾動淘汰）
 
 | 日期 | 變更 | 影響文件 |
+| 2026-04-10 | **feat: Tool Summary 冷啟動注入** — ①prompt-assembler.ts 新增 `tool-summary` module（priority 56）+ `setToolSummary()` export②platform.ts 步驟 13 延遲 2s 注入 ToolRegistry 全量工具摘要至 system prompt，解決 Agent Loop 冷啟動不知道可用工具的問題 | src/core/prompt-assembler.ts, src/core/platform.ts, _AIDocs/modules/prompt-assembler.md, _AIDocs/modules/platform.md |
 | 2026-04-09 | **refactor: 統一 session 系統** — 刪除舊版 `src/session.ts`（V1 ACP 路徑），所有 session 操作統一到 `src/core/session.ts` SessionManager。slash.ts `/reset-session` 改用 `getSessionManager().delete()`，index.ts 移除 `loadSessions()` + V1 crash recovery，discord.ts/reply.ts 移除死 import | src/session.ts(del), src/slash.ts, src/index.ts, src/discord.ts, src/reply.ts, _AIDocs/modules/session.md |
 | 2026-04-09 | **feat: Dashboard Trace agentId 追蹤** — ①MessageTraceEntry 新增 agentId 欄位 + setAgentId()②spawn-subagent.ts childTrace 帶入 agentId③Dashboard Subagents 表格加 agentId 紫色 badge④Dashboard Traces 新增 agentId 篩選器 + 列表 badge⑤API /api/subagents 回傳 agentId | src/core/message-trace.ts, src/tools/builtin/spawn-subagent.ts, src/core/dashboard.ts, _AIDocs/modules/message-trace.md, _AIDocs/modules/dashboard.md |
 | 2026-04-09 | **fix: memory write_file 自動向量同步** — ①新增 memory-vector-sync.ts 監聽 file:modified，前綴比對 4 層 memory 路徑自動 upsert LanceDB②bootstrap.ts 新增初始化步驟③platform.ts 傳入 agentsDir | src/workflow/memory-vector-sync.ts(new), src/workflow/bootstrap.ts, src/core/platform.ts, _AIDocs/modules/workflow.md |
