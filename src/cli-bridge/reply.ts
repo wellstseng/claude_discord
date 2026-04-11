@@ -88,7 +88,10 @@ export async function handleCliBridgeReply(
   cliBridgeConfig?: CliBridgeConfig,
 ): Promise<void> {
   const sender = bridge.getSender();
-  const handle = bridge.send(text, "discord");
+  const handle = bridge.send(text, "discord", {
+    user: originalMessage.author.displayName || originalMessage.author.username,
+    ts: new Date(originalMessage.createdTimestamp).toISOString(),
+  });
   const turnId = handle.turnId;
   const stdoutLogger = bridge.getStdoutLogger();
   const showToolCalls = bridgeConfig.showToolCalls;

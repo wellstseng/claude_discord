@@ -106,7 +106,7 @@ export class CliBridge {
 
   // ── 送訊息（直送 stdin，不排隊）──────────────────────────────────────────
 
-  send(text: string, source: "discord" | "dashboard"): TurnHandle {
+  send(text: string, source: "discord" | "dashboard", meta?: { user?: string; ts?: string }): TurnHandle {
     const turnId = randomUUID();
 
     if (!this.process?.alive) {
@@ -123,7 +123,7 @@ export class CliBridge {
     };
     this.turnListeners.set(turnId, turnState);
 
-    // 建立 pending turn record
+    // 建立 pending turn record（存原始 text，不污染日誌）
     this.pendingTurns.set(turnId, {
       record: {
         turnId,
@@ -141,11 +141,14 @@ export class CliBridge {
     this.activeTurnId = turnId;
     this._status = "busy";
 
+    // Per-turn meta tag 注入：讓 CLI 每 turn 重新知道部署脈絡，不怕 context 壓縮
+    const wrappedText = this.wrapWithChannelTag(text, source, meta);
+
     // 送 stdin
     try {
       this.process.send({
         type: "user",
-        message: { role: "user", content: text },
+        message: { role: "user", content: wrappedText },
       });
     } catch (err) {
       this.turnListeners.delete(turnId);
@@ -386,6 +389,41 @@ export class CliBridge {
     return this.bridgeConfig;
   }
 
+  // ── 內部：訊息包裝（per-turn meta 注入）─────────────────────────────────
+
+  /**
+   * 把使用者訊息包在 `<channel>` tag 裡，每 turn 重新提供部署脈絡。
+   *
+   * 效果：
+   * - CLI 內的 Claude 每 turn 都能從 tag 讀到自己的 bridge label / chat_id / user
+   * - 不怕 context 被壓縮（下一 turn 又會重新注入）
+   * - 包含使用 `catclaw-bridge-discord` MCP 的提示，避免誤用官方 plugin 撞 Missing Access
+   */
+  private wrapWithChannelTag(
+    text: string,
+    source: "discord" | "dashboard",
+    meta?: { user?: string; ts?: string },
+  ): string {
+    const ts = meta?.ts ?? new Date().toISOString();
+    const escape = (v: string): string => v.replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const attrs: string[] = [
+      `source="catclaw_cli_bridge"`,
+      `bridge_label="${escape(this.label)}"`,
+      `chat_id="${escape(this.channelId)}"`,
+      `origin="${source}"`,
+      `ts="${ts}"`,
+    ];
+    if (meta?.user) attrs.push(`user="${escape(meta.user)}"`);
+
+    const hint =
+      "要主動操作 Discord 請用 mcp__catclaw-bridge-discord__* 工具（走 Bridge 自己的 bot token，限定本頻道）。" +
+      "官方 plugin:discord:discord 的 bot 可能無權限存取本頻道，會撞 Missing Access。" +
+      "一般回覆直接用 stdout 即可，CatClaw 會自動轉送到 Discord。";
+
+    return `<channel ${attrs.join(" ")}>\n<!-- ${hint} -->\n${text}\n</channel>`;
+  }
+
   // ── 內部：process 建立 ────────────────────────────────────────────────────
 
   private async spawnProcess(): Promise<void> {
@@ -395,6 +433,8 @@ export class CliBridge {
       sessionId: this.sessionId ?? this.channelConfig.sessionId ?? undefined,
       dangerouslySkipPermissions: this.channelConfig.dangerouslySkipPermissions ?? true,
       label: this.label,
+      botToken: this.bridgeConfig.botToken,
+      channelId: this.channelId,
     };
 
     this.process = new CliProcess(procConfig);

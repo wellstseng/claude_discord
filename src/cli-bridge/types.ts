@@ -108,6 +108,10 @@ export interface CliProcessConfig {
   dangerouslySkipPermissions: boolean;
   /** 識別標籤 */
   label: string;
+  /** CLI Bridge 專屬 Discord bot token（注入 catclaw-bridge-discord MCP，用 bridge 自己的 bot） */
+  botToken?: string;
+  /** 綁定的 Discord channel ID（env + MCP DISCORD_ALLOWED_CHANNELS） */
+  channelId?: string;
 }
 
 // ── Turn 追蹤型別 ─────────────────────────────────────────────────────────────

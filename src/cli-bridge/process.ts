@@ -12,8 +12,13 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { log } from "../logger.js";
 import type { CliProcessConfig, StreamJsonMessage, CliBridgeEvent } from "./types.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── stdout 解析輔助型別 ────────────────────────────────────────────────────────
 
@@ -80,13 +85,25 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
       args.push("--resume", this.config.sessionId);
     }
 
+    // 寫入 per-bridge MCP config：catclaw-bridge-discord 用 bridge 自己的 bot token
+    const mcpConfigPath = this.writeMcpConfig();
+    if (mcpConfigPath) {
+      args.push("--mcp-config", mcpConfigPath);
+    }
+
     const label = this.config.label;
     log.info(`[cli-bridge:${label}] spawn: ${this.config.claudeBin} ${args.join(" ")}`);
+
+    // 注入 bridge runtime env（讓 CLI 內可以 echo $CATCLAW_BRIDGE_* 查證部署資訊）
+    const bridgeEnv: Record<string, string> = { ...process.env as Record<string, string> };
+    bridgeEnv.CATCLAW_BRIDGE_LABEL = this.config.label;
+    if (this.config.channelId) bridgeEnv.CATCLAW_BRIDGE_CHANNEL_ID = this.config.channelId;
+    if (this.config.sessionId) bridgeEnv.CATCLAW_BRIDGE_SESSION_ID = this.config.sessionId;
 
     this.proc = spawn(this.config.claudeBin, args, {
       cwd: this.config.workingDir,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: bridgeEnv,
       windowsHide: true,
       detached: process.platform !== "win32",
     });
@@ -129,6 +146,59 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
 
     if (!this.alive) {
       throw new Error(`[cli-bridge:${label}] process 啟動失敗`);
+    }
+  }
+
+  // ── MCP config 寫入 ──────────────────────────────────────────────────────
+
+  /**
+   * 寫入 per-bridge MCP config 檔，供 `claude --mcp-config` 載入。
+   * 讓 CLI 內可以用 `mcp__catclaw-bridge-discord__*` 工具操作 Discord，
+   * 且走 bridge 自己的 bot token（不會撞官方 plugin 的跨 bot 權限問題）。
+   *
+   * 路徑：`$CATCLAW_CONFIG_DIR/runtime/bridges/{label}.mcp.json`（不污染 workingDir）
+   * 沒 botToken 或 channelId → 跳過，不載入 MCP。
+   */
+  private writeMcpConfig(): string | null {
+    const label = this.config.label;
+    if (!this.config.botToken || !this.config.channelId) {
+      log.debug(`[cli-bridge:${label}] 無 botToken/channelId，跳過 MCP 注入`);
+      return null;
+    }
+
+    const catclawDir = process.env.CATCLAW_CONFIG_DIR;
+    if (!catclawDir) {
+      log.warn(`[cli-bridge:${label}] CATCLAW_CONFIG_DIR 未設定，跳過 MCP 注入`);
+      return null;
+    }
+
+    try {
+      const runtimeDir = join(catclawDir, "runtime", "bridges");
+      mkdirSync(runtimeDir, { recursive: true });
+
+      // discord-server.js 相對於 dist/cli-bridge/ 位置
+      const serverPath = resolvePath(__dirname, "..", "mcp", "discord-server.js");
+
+      const mcpConfig = {
+        mcpServers: {
+          "catclaw-bridge-discord": {
+            command: "node",
+            args: [serverPath],
+            env: {
+              DISCORD_TOKEN: this.config.botToken,
+              DISCORD_ALLOWED_CHANNELS: this.config.channelId,
+            },
+          },
+        },
+      };
+
+      const mcpConfigPath = join(runtimeDir, `${label}.mcp.json`);
+      writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2), "utf-8");
+      log.debug(`[cli-bridge:${label}] MCP config 已寫入 ${mcpConfigPath}`);
+      return mcpConfigPath;
+    } catch (err) {
+      log.warn(`[cli-bridge:${label}] 寫入 MCP config 失敗：${err instanceof Error ? err.message : String(err)}`);
+      return null;
     }
   }
 
