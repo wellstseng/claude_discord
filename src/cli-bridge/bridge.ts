@@ -599,16 +599,19 @@ export class CliBridge {
   // ── 內部：process crash 處理 ──────────────────────────────────────────────
 
   private handleClose(code: number | null): void {
+    // 無論狀態如何，先清理 pending turns（防止 typing 永遠不停）
+    const hadPending = this.turnListeners.size > 0;
+    if (hadPending) {
+      this.failAllPendingTurns(`process 關閉 (code=${code})`);
+    }
+
     if (this._status === "dead" || this._status === "restarting") return;
     if (this._crashHandling) return; // handleCrash 正在管理重試，不重複觸發
 
-    const hasPending = this.turnListeners.size > 0;
-    if (code === 0 && !hasPending) {
-      // 正常退出（idle timeout）且無 pending turn → 靜默重啟
+    if (code === 0 && !hadPending) {
       log.info(`[cli-bridge:${this.label}] process 正常退出，靜默重啟`);
     } else {
-      log.warn(`[cli-bridge:${this.label}] process 意外關閉 code=${code}`);
-      this.failAllPendingTurns(`process 意外退出 (code=${code})`);
+      log.warn(`[cli-bridge:${this.label}] process 意外關閉 code=${code} hadPending=${hadPending}`);
     }
     void this.handleCrash();
   }

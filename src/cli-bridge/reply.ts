@@ -110,11 +110,14 @@ export async function handleCliBridgeReply(
   let editCount = 0;
   let lastEditTime = 0;
 
-  // Typing indicator
+  // Typing indicator — turnDone flag 防止 generator 掛住時 typing 永遠不停
+  let turnDone = false;
   sender.sendTyping();
-  let typingInterval: ReturnType<typeof setInterval> | null = setInterval(() => { sender.sendTyping(); }, 8_000);
-  const stopTyping = () => { if (typingInterval) { clearInterval(typingInterval); typingInterval = null; } };
-  const resumeTyping = () => { stopTyping(); sender.sendTyping(); typingInterval = setInterval(() => { sender.sendTyping(); }, 8_000); };
+  let typingInterval: ReturnType<typeof setInterval> | null = setInterval(() => { if (!turnDone) sender.sendTyping(); }, 8_000);
+  const stopTyping = () => { turnDone = true; if (typingInterval) { clearInterval(typingInterval); typingInterval = null; } };
+  const resumeTyping = () => { if (turnDone) return; if (typingInterval) { clearInterval(typingInterval); typingInterval = null; } sender.sendTyping(); typingInterval = setInterval(() => { if (!turnDone) sender.sendTyping(); }, 8_000); };
+  // Safety: 最多 10 分鐘 typing（防 generator 掛住永遠不 stopTyping）
+  const maxTypingTimer = setTimeout(() => { if (!turnDone) { log.warn(`[cli-bridge-reply] turn=${turnId.slice(0, 8)} typing safety timeout (10min)`); stopTyping(); } }, 10 * 60 * 1000);
 
   // ── Streaming edit helpers ──────────────────────────────────────────────
 
@@ -319,6 +322,7 @@ export async function handleCliBridgeReply(
     discordDelivery = "failed";
   } finally {
     stopTyping();
+    clearTimeout(maxTypingTimer);
     cancelEditTimer();
 
     // 更新 turn 送達狀態
