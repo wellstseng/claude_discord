@@ -44,6 +44,8 @@ messageCreate
   ├─ ⑤ allowFrom 白名單過濾
   │     └─ allowFrom 非空 + author.id 不在白名單 → 忽略
   │
+  ├─ ⑤.5 blockGroupMentions：message.mentions.everyone → 忽略
+  │
   ├─ ⑥ requireMention 判斷
   │     ├─ botUser 為 null → 忽略（邊界情況）
   │     ├─ requireMention = true → 未 mention bot → 忽略
