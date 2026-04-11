@@ -1,7 +1,7 @@
 # modules/context-engine — Context 壓縮策略
 
 > 檔案：`src/core/context-engine.ts`
-> 更新日期：2026-04-05
+> 更新日期：2026-04-11
 
 ## 職責
 
@@ -75,10 +75,6 @@ interface ContextBreakdown {
 | `enabled` | true | 開關 |
 | `triggerTokens` | 4000 | 觸發閾值 |
 | `preserveRecentTurns` | 5 | 保留最近 N 輪不壓縮 |
-
-### compactionPreference
-
-呼叫端可指定 `"sliding-window"` 強制跳過 LLM 摘要（不傳 ceProvider 給 compaction）。
 
 ## BudgetGuardStrategy
 

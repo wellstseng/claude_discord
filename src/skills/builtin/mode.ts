@@ -36,7 +36,6 @@ export const skill: Skill = {
       const modes = listModes();
       const presetInfo = [
         `  thinking: ${preset.thinking ?? "off"}`,
-        `  compaction: ${preset.compaction ?? "sliding-window"}`,
         `  resultTokenCap: ${preset.resultTokenCap ?? 8000}`,
         `  contextReserve: ${(preset.contextReserve ?? 0.2) * 100}%`,
         `  extras: ${(preset.systemPromptExtras ?? []).join(", ") || "none"}`,
@@ -65,7 +64,6 @@ export const skill: Skill = {
 
     const info = [
       `thinking: ${target.thinking ?? "off"}`,
-      `compaction: ${target.compaction ?? "sliding-window"}`,
       `resultTokenCap: ${target.resultTokenCap ?? 8000}`,
       `extras: ${(target.systemPromptExtras ?? []).join(", ") || "none"}`,
     ].join(" | ");

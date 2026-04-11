@@ -518,8 +518,6 @@ export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
 export interface ModePreset {
   /** Extended Thinking 等級（null = 關閉） */
   thinking?: ThinkingLevel | null;
-  /** 壓縮策略偏好 */
-  compaction?: "sliding-window" | "llm-summary";
   /** 額外 system prompt 區段（.md 檔名，相對於 workspace/prompts/） */
   systemPromptExtras?: string[];
   /** 工具結果 token 上限覆寫 */
@@ -542,14 +540,12 @@ export interface ModeConfig {
 export const BUILTIN_MODE_PRESETS: Record<string, ModePreset> = {
   normal: {
     thinking: null,
-    compaction: "sliding-window",
     systemPromptExtras: [],
     resultTokenCap: 8000,
     contextReserve: 0.2,
   },
   precision: {
     thinking: "medium",
-    compaction: "llm-summary",
     systemPromptExtras: ["coding-discipline"],
     resultTokenCap: 16000,
     contextReserve: 0.3,

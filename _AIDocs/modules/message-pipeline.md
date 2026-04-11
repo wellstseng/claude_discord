@@ -1,7 +1,7 @@
 # message-pipeline.ts — 統一訊息管線
 
 > 原始碼：`src/core/message-pipeline.ts`
-> 更新日期：2026-04-06
+> 更新日期：2026-04-11
 > keywords: pipeline, 管線, 統一管線, message-pipeline, recall, assembler, trace, web chat, session 共用
 
 ## 概述
@@ -52,7 +52,7 @@
 | `activeMcpServers` | `string[]` | - | 啟用的 MCP server |
 | `conversationLabel` | `string` | - | 對話標籤 |
 | `additionalExtraBlocks` | `Array` | - | 額外 system prompt 區塊 |
-| `modePreset` | `ModePreset` | `{ thinking: null, compaction: "sliding-window" }` | 模式 preset |
+| `modePreset` | `ModePreset` | `{ thinking: null }` | 模式 preset |
 
 #### PipelineResult 主要欄位
 

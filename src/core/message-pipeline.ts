@@ -168,7 +168,7 @@ export async function runMessagePipeline(input: PipelineInput): Promise<Pipeline
     isGroupChannel = false,
     speakerDisplay,
     modeName = "normal",
-    modePreset = { thinking: null, compaction: "sliding-window" as const },
+    modePreset = { thinking: null },
     activeMcpServers,
     memoryRecall: enableMemoryRecall = true,
     inboundHistory: enableInboundHistory = false,

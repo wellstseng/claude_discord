@@ -673,7 +673,6 @@ export async function* agentLoop(
     processedHistory = await contextEngine.build(rawHistory, {
       sessionKey,
       turnIndex: session.turnCount,
-      compactionPreference: opts.modePreset?.compaction,
     });
     // S2: 有 strategy 觸發 → 把壓縮後的 messages 寫回 session（含備份原始）
     const ceBd = contextEngine.lastBuildBreakdown;

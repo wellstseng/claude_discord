@@ -220,11 +220,10 @@ export async function initPlatform(
       const ceProvider = getRegistry().get(ceModel);
       if (ceProvider) {
         ce.setCeProvider(ceProvider);
+        log.info(`[platform] CE compaction provider: ${ceModel} (resolved)`);
       } else {
-        const { ClaudeApiProvider } = await import("../providers/claude-api.js");
-        ce.setCeProvider(new ClaudeApiProvider("ce-compaction", { model: ceModel }));
+        log.warn(`[platform] CE compaction model "${ceModel}" 無法從 registry 解析，LLM 摘要不可用（將使用截斷 fallback）。請檢查 catclaw.json contextEngineering.strategies.compaction.model 設定`);
       }
-      log.debug(`[platform] CE compaction provider: ${ceModel}`);
     }
     log.info("[platform] ContextEngine 初始化完成");
   }

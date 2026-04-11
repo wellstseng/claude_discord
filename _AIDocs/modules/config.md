@@ -72,7 +72,7 @@ export 所有型別定義（包括 cron.ts 使用的 `CronSchedule` / `CronActio
 | `contextEngineering` | `ContextEngineeringConfig` | CE 策略（compaction / budgetGuard / slidingWindow） |
 | `inboundHistory` | `InboundHistoryConfig` | Inbound History 注入（fullWindowHours / decayWindowHours / bucketBTokenCap） |
 | `promptAssembler` | `PromptAssemblerConfig` | Prompt Assembler 設定（disabledModules） |
-| `modes` | `ModeConfig` | 模式切換（normal / precision 預設，含 thinking / compaction / resultTokenCap / contextReserve） |
+| `modes` | `ModeConfig` | 模式切換（normal / precision 預設，含 thinking / resultTokenCap / contextReserve） |
 | `subagents` | `SubagentsConfig` | 子 Agent 設定（maxConcurrent / defaultTimeoutMs / defaultKeepSession） |
 | `agents` | `AgentsConfig` | 多 Agent 單一 bot 入口設定 |
 | `dashboard` | `{ enabled, port, token? }` | Token Usage Dashboard |
