@@ -27,7 +27,7 @@ import { getSessionManager } from "./core/session.js";
 import { getContextEngine, estimateTokens } from "./core/context-engine.js";
 import { getRateLimiter } from "./core/rate-limiter.js";
 import { getAccountRegistry } from "./core/platform.js";
-import { getCliBridge, loadAllCliBridgeConfigs, saveCliBridgeConfigs } from "./cli-bridge/index.js";
+import { getCliBridge, loadAllCliBridgeConfigs } from "./cli-bridge/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -222,27 +222,20 @@ async function handleCd(interaction: ChatInputCommandInteraction): Promise<void>
   await interaction.deferReply();
 
   try {
-    // 1. 更新 runtime
-    await bridge.setWorkingDir(absPath);
-
-    // 2. 持久化到 cli-bridges.json
-    // bridge.label 是 channel 層 label（如 "judy-cli"），需用 bridgeConfig.label 匹配頂層
-    const configLabel = bridge.getBridgeConfig().label;
-    const allConfigs = loadAllCliBridgeConfigs();
-    const cfg = allConfigs.find(c => c.label === configLabel);
-    if (cfg) {
+    // 原子重建：mutator 改 workingDir → 預更新 _lastConfigJson → 寫檔 → 關舊建新
+    const { rebuildBridgeForChannel } = await import("./cli-bridge/index.js");
+    const newBridge = await rebuildBridgeForChannel(channelId, (cfg) => {
       cfg.workingDir = absPath;
-      saveCliBridgeConfigs(allConfigs);
-    }
+    });
 
     await interaction.editReply(
       `✅ **工作目錄已切換**\n` +
-      `• Bridge：${bridge.label}\n` +
+      `• Bridge：${newBridge?.label ?? bridge.label}\n` +
       `• 舊目錄：\`${oldDir}\`\n` +
       `• 新目錄：\`${absPath}\`\n` +
-      `• 狀態：${bridge.status}（process 已重啟）`
+      `• 狀態：${newBridge?.status ?? "unknown"}（process 已重啟）`
     );
-    log.info(`[slash] /cd ${absPath} by=${interaction.user.tag} bridge=${bridge.label}`);
+    log.info(`[slash] /cd ${absPath} by=${interaction.user.tag} bridge=${newBridge?.label ?? bridge.label}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await interaction.editReply(`❌ 切換失敗：${msg}`);
@@ -336,14 +329,13 @@ async function handleSession(interaction: ChatInputCommandInteraction): Promise<
 
     case "new": {
       await interaction.deferReply();
-      // 清除持久化 sessionId → 下次啟動新建
-      if (chCfg) {
-        delete chCfg.sessionId;
-        if (cfg) saveCliBridgeConfigs(allConfigs);
-      }
-      // 清除 runtime sessionId + 重啟 bridge process（不帶 --session-id）
+      // 清除 runtime sessionId，讓新 bridge 啟動時不帶 --session-id
       bridge.clearSessionId();
-      await bridge.setWorkingDir(bridge.workingDir); // 觸發重啟
+      // 原子重建：刪除持久化 sessionId → 關舊建新
+      const { rebuildBridgeForChannel } = await import("./cli-bridge/index.js");
+      await rebuildBridgeForChannel(channelId, (_c, chc) => {
+        delete chc.sessionId;
+      });
       await interaction.editReply(
         `✅ **新 Session**\n` +
         `• Bridge：${bridge.label}\n` +
@@ -361,13 +353,11 @@ async function handleSession(interaction: ChatInputCommandInteraction): Promise<
         return;
       }
       await interaction.deferReply();
-      // 持久化指定 sessionId
-      if (chCfg && cfg) {
-        chCfg.sessionId = targetId;
-        saveCliBridgeConfigs(allConfigs);
-      }
-      // 重啟 bridge process（帶新 --session-id）
-      await bridge.setWorkingDir(bridge.workingDir); // 觸發重啟
+      // 原子重建：持久化新 sessionId → 關舊建新（新 process 會帶 --session-id）
+      const { rebuildBridgeForChannel } = await import("./cli-bridge/index.js");
+      await rebuildBridgeForChannel(channelId, (_c, chc) => {
+        chc.sessionId = targetId;
+      });
       await interaction.editReply(
         `✅ **Session 已切換**\n` +
         `• Bridge：${bridge.label}\n` +

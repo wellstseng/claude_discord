@@ -1,6 +1,6 @@
 # CLI Bridge 模組
 
-> 原始碼：`src/cli-bridge/` | 更新：2026-04-10
+> 原始碼：`src/cli-bridge/` | 更新：2026-04-11
 
 ## 定位
 
@@ -19,7 +19,7 @@
 
 ## 關鍵設計
 
-- **`setWorkingDir(dir)` 靜默重啟** — 更新 cwd 後重啟 process，不送 Discord 錯誤訊息
+- **`rebuildBridgeForChannel(channelId, mutator)` 原子重建** — 單一入口執行「改設定 → 預更新 `_lastConfigJson` → 寫 `cli-bridges.json` → 關舊建新」，消除 `/cd`、`/session new/set` 過去「in-place 重啟 + hot-reload 重建」雙重啟導致 bridge 實例洩漏（同 botToken 雙 Discord Client、雙 CLI process、同一訊息被處理兩次）的 race condition
 - **不排隊，直送 stdin** — CLI 自己管內部 queue，CatClaw 只管送和收
 - **一 channel 一 process** — CLI session 是單對話，避免 context 混亂
 - **指數退避自動重啟** — 1s, 2s, 4s, 8s, 16s, 30s
@@ -54,5 +54,6 @@
 | 對話歷程匯出 | `dashboard.ts` `GET /api/cli-bridge/:label/export` + UI 匯出按鈕 | 一鍵匯出 Markdown，含 user/assistant/tools |
 | rate limit 保護 | `reply.ts` `editIntervalMs` + `lastEditTime` 計數器 | `cliBridge.editIntervalMs` 可設定（預設 800ms），防止 Discord API rate limit |
 | Dashboard 監控 | `dashboard.ts` UI + `_cbAutoRefresh` | 10s 自動刷新狀態、SSE 即時串流、匯出按鈕、刷新按鈕 |
-| `/cd` 工作目錄切換 | `slash.ts` `handleCd()` + `bridge.ts` `setWorkingDir()` | Slash command 切換 bridge cwd，靜默重啟 process，持久化到 `cli-bridges.json` |
+| `/cd` 工作目錄切換 | `slash.ts` `handleCd()` + `index.ts` `rebuildBridgeForChannel()` | Slash command 切換 bridge cwd，原子重建路徑統一關舊建新，持久化到 `cli-bridges.json` |
+| `/session new/set` | `slash.ts` `handleSession()` + `index.ts` `rebuildBridgeForChannel()` | 改寫 channelConfig.sessionId 後走原子重建，讓新 process 以正確的 `--resume` 啟動 |
 | 獨立 bot slash commands | `index.ts` + `discord-sender.ts` `getClient()` | 獨立 bot 啟動後自動 `registerSlashCommands`，讓沒有主 bot 的伺服器也能用管理指令 |

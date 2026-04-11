@@ -14,7 +14,7 @@ import { resolveCatclawDir, config } from "../core/config.js";
 import { checkBotMessage, resetOnHumanMessage } from "../discord/bot-circuit-breaker.js";
 import { CliBridge } from "./bridge.js";
 import { createBridgeSender } from "./discord-sender.js";
-import type { CliBridgeConfig, CliBridgesConfig } from "./types.js";
+import type { CliBridgeConfig, CliBridgeChannelConfig, CliBridgesConfig } from "./types.js";
 
 // ── 型別匯出 ────────────────────────────────────────────────────────────────
 
@@ -449,6 +449,91 @@ async function hotReload(): Promise<void> {
   }
 
   log.info(`[cli-bridge] hot-reload 完成（${bridges.size} 個 bridge）`);
+}
+
+/**
+ * 原子重建單一 channel 的 bridge：
+ * 1. 載入當前 cli-bridges.json
+ * 2. 呼叫 mutator 修改對應 config / channelConfig
+ * 3. 預先更新 _lastConfigJson（pre-empt watchFile 觸發的 hotReload，防止 double-rebuild）
+ * 4. 寫回 cli-bridges.json
+ * 5. 關閉舊 bridge → 建立並啟動新 bridge
+ *
+ * 呼叫者：slash /cd、/session new、/session set
+ * 取代原本的「setWorkingDir 直接重啟 + saveCliBridgeConfigs 觸發 hot-reload」雙重啟路徑
+ */
+export async function rebuildBridgeForChannel(
+  channelId: string,
+  mutator: (cfg: CliBridgeConfig, channelCfg: CliBridgeChannelConfig) => void,
+): Promise<CliBridge | null> {
+  if (!_discordClient) {
+    throw new Error("[cli-bridge] rebuildBridgeForChannel: discordClient 未初始化");
+  }
+
+  const allConfigs = loadAllCliBridgeConfigs();
+  const cfg = allConfigs.find(c => c.channels[channelId]);
+  if (!cfg) {
+    log.warn(`[cli-bridge] rebuildBridgeForChannel: 找不到 channel ${channelId} 的 config`);
+    return null;
+  }
+  const channelCfg = cfg.channels[channelId]!;
+
+  mutator(cfg, channelCfg);
+
+  // Pre-empt hot-reload：先更新 snapshot，watchFile 後續觸發 hotReload 會判定無變更
+  _lastConfigJson.set(channelId, configSnapshotJson(cfg, channelId));
+
+  saveCliBridgeConfigs(allConfigs);
+
+  // 關閉舊 bridge
+  const oldBridge = bridges.get(channelId);
+  if (oldBridge) {
+    log.info(`[cli-bridge] rebuild: 關閉舊 bridge ${oldBridge.label}`);
+    await oldBridge.shutdown();
+    bridges.delete(channelId);
+    bridgesByLabel.delete(oldBridge.label);
+  }
+
+  // 若 config 未 enabled 則不重建
+  if (!cfg.enabled) {
+    log.info(`[cli-bridge] rebuild: config ${cfg.label} 已停用，不重建`);
+    _lastConfigJson.delete(channelId);
+    return null;
+  }
+
+  // 建立新 bridge（單一 channel 範圍）
+  const effectiveLabel = channelCfg.label || cfg.label;
+  const bridge = new CliBridge(effectiveLabel, channelId, cfg, channelCfg);
+  bridges.set(channelId, bridge);
+  bridgesByLabel.set(effectiveLabel, bridge);
+
+  try {
+    const sender = createBridgeSender(_discordClient, { botToken: cfg.botToken });
+    await sender.init(channelId);
+    bridge.setSender(sender);
+    log.info(`[cli-bridge] rebuild: ${bridge.label} sender=${sender.mode}`);
+
+    if (sender.mode === "independent-bot") {
+      sender.onMessage((msg: Message) => {
+        handleIndependentBotMessage(bridge, msg);
+      });
+      try {
+        const { registerSlashCommands, setupSlashCommands } = await import("../slash.js");
+        const indClient = (sender as import("./discord-sender.js").IndependentBotSender).getClient();
+        await registerSlashCommands(indClient);
+        setupSlashCommands(indClient);
+      } catch { /* slash 註冊失敗不影響 bridge 運作 */ }
+    }
+
+    await bridge.start();
+    log.info(`[cli-bridge] rebuild: ${bridge.label} 啟動成功`);
+    return bridge;
+  } catch (err) {
+    log.error(`[cli-bridge] rebuild: ${bridge.label} 啟動失敗：${err instanceof Error ? err.message : String(err)}`);
+    bridges.delete(channelId);
+    bridgesByLabel.delete(effectiveLabel);
+    throw err;
+  }
 }
 
 /**
