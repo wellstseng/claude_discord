@@ -37,17 +37,10 @@ export const tool: Tool = {
     const ce = getContextEngine();
     const contextWindow = ce?.getContextWindowTokens() ?? 100_000;
 
-    const compaction = ce?.getStrategy("compaction") as { enabled: boolean; cfg?: { triggerTokens: number } } | undefined;
-    const budgetGuard = ce?.getStrategy("budget-guard") as { enabled: boolean; cfg?: { maxUtilization: number; contextWindowTokens: number } } | undefined;
-    const overflow = ce?.getStrategy("overflow-hard-stop") as { enabled: boolean; cfg?: { hardLimitUtilization: number; contextWindowTokens: number } } | undefined;
-
-    // Extract thresholds from strategies
-    const compactionTrigger = (compaction as any)?.cfg?.triggerTokens ?? 20000;
-    const bgMaxUtil = (budgetGuard as any)?.cfg?.maxUtilization ?? 0.8;
-    const bgWindow = (budgetGuard as any)?.cfg?.contextWindowTokens ?? contextWindow;
-    const bgTrigger = Math.floor(bgWindow * bgMaxUtil);
-    const ohUtil = (overflow as any)?.cfg?.hardLimitUtilization ?? 0.95;
-    const ohWindow = (overflow as any)?.cfg?.contextWindowTokens ?? contextWindow;
+    const compactionTrigger = (ce?.getStrategy("compaction") as any)?.cfg?.triggerTokens ?? 20000;
+    const overflow = ce?.getStrategy("overflow-hard-stop") as any;
+    const ohUtil = overflow?.cfg?.hardLimitUtilization ?? 0.95;
+    const ohWindow = overflow?.cfg?.contextWindowTokens ?? contextWindow;
     const ohTrigger = Math.floor(ohWindow * ohUtil);
 
     const utilization = tokens / contextWindow;
@@ -83,12 +76,6 @@ export const tool: Tool = {
           trigger: compactionTrigger,
           distance: compactionTrigger - tokens,
           status: tokens > compactionTrigger ? "EXCEEDED" : "OK",
-        },
-        budgetGuard: {
-          trigger: bgTrigger,
-          distance: bgTrigger - tokens,
-          utilization: `${(tokens / bgWindow * 100).toFixed(1)}%`,
-          status: tokens > bgTrigger ? "EXCEEDED" : "OK",
         },
         overflowHardStop: {
           trigger: ohTrigger,

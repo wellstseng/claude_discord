@@ -6,8 +6,7 @@
  * - ContextEngine 持有 Strategy Map，build() 依序套用啟用的 strategies
  * - 各 strategy 可獨立開關（A/B 比較），不動核心
  * - CompactionStrategy：turn 數超閾值時用 LLM 摘要壓縮舊訊息
- * - BudgetGuardStrategy：token 超 budget 時強制壓縮
- * - SlidingWindowStrategy：保留最近 N 輪（現況升級版）
+ * - OverflowHardStopStrategy：context 超硬上限時緊急截斷
  */
 
 import { log } from "../logger.js";
@@ -226,83 +225,6 @@ export class CompactionStrategy implements ContextStrategy {
   }
 }
 
-// ── BudgetGuardStrategy ───────────────────────────────────────────────────────
-
-export interface BudgetGuardConfig {
-  enabled: boolean;
-  maxUtilization: number;  // 0~1，超過則觸發（預設 0.8）
-  contextWindowTokens: number;  // 模型 context window 大小（預設 100000）
-}
-
-export class BudgetGuardStrategy implements ContextStrategy {
-  name = "budget-guard";
-  enabled: boolean;
-  private cfg: BudgetGuardConfig;
-
-  constructor(cfg: Partial<BudgetGuardConfig> = {}) {
-    this.cfg = {
-      enabled: cfg.enabled ?? true,
-      maxUtilization: cfg.maxUtilization ?? 0.8,
-      contextWindowTokens: cfg.contextWindowTokens ?? 100_000,
-    };
-    this.enabled = this.cfg.enabled;
-  }
-
-  get contextWindowTokens(): number { return this.cfg.contextWindowTokens; }
-
-  shouldApply(ctx: ContextBuildContext): boolean {
-    if (!this.enabled) return false;
-    const threshold = this.cfg.contextWindowTokens * this.cfg.maxUtilization;
-    return ctx.estimatedTokens > threshold;
-  }
-
-  async apply(ctx: ContextBuildContext): Promise<ContextBuildContext> {
-    const targetTokens = Math.floor(this.cfg.contextWindowTokens * this.cfg.maxUtilization * 0.7);
-    let messages = [...ctx.messages];
-
-    // 從最舊的非 system message 開始刪
-    while (estimateTokens(messages) > targetTokens && messages.length > 4) {
-      const firstNonSystem = messages.findIndex(m => (m as unknown as { role: string }).role !== "system");
-      if (firstNonSystem === -1) break;
-      messages.splice(firstNonSystem, 1);
-    }
-
-    messages = repairToolPairing(messages);
-    log.info(`[context-engine:budget-guard] 修剪 ${ctx.messages.length} → ${messages.length} messages`);
-    return { ...ctx, messages, estimatedTokens: estimateTokens(messages) };
-  }
-}
-
-// ── SlidingWindowStrategy ─────────────────────────────────────────────────────
-
-export interface SlidingWindowConfig {
-  enabled: boolean;
-  maxTurns: number;  // 保留最近 N 輪（預設 50）
-}
-
-export class SlidingWindowStrategy implements ContextStrategy {
-  name = "sliding-window";
-  enabled: boolean;
-  private cfg: SlidingWindowConfig;
-
-  constructor(cfg: Partial<SlidingWindowConfig> = {}) {
-    this.cfg = {
-      enabled: cfg.enabled ?? false,  // 預設關閉（已有 session.ts 的 compact）
-      maxTurns: cfg.maxTurns ?? 50,
-    };
-    this.enabled = this.cfg.enabled;
-  }
-
-  shouldApply(ctx: ContextBuildContext): boolean {
-    return this.enabled && ctx.messages.length > this.cfg.maxTurns * 2;
-  }
-
-  async apply(ctx: ContextBuildContext): Promise<ContextBuildContext> {
-    const sliced = repairToolPairing(ctx.messages.slice(-this.cfg.maxTurns * 2));
-    return { ...ctx, messages: sliced, estimatedTokens: estimateTokens(sliced) };
-  }
-}
-
 // ── OverflowHardStopStrategy（第三段 failover）────────────────────────────────
 
 export interface OverflowHardStopConfig {
@@ -360,9 +282,6 @@ export class ContextEngine {
   lastAppliedStrategy: string | undefined;
 
   constructor() {
-    // 預設內建 strategies
-    this.register(new SlidingWindowStrategy());
-    this.register(new BudgetGuardStrategy());
     this.register(new CompactionStrategy());
     this.register(new OverflowHardStopStrategy());
   }
@@ -375,10 +294,10 @@ export class ContextEngine {
     return this.strategies.get(name);
   }
 
-  /** 取得 BudgetGuard 設定的 context window 大小（供 nudge 計算用） */
+  /** 取得 context window 大小（供 nudge 計算用） */
   getContextWindowTokens(): number {
-    const bg = this.strategies.get("budget-guard") as BudgetGuardStrategy | undefined;
-    return bg?.contextWindowTokens ?? 100_000;
+    const oh = this.strategies.get("overflow-hard-stop") as OverflowHardStopStrategy | undefined;
+    return oh?.["cfg"]?.contextWindowTokens ?? 100_000;
   }
 
   async build(messages: Message[], opts: BuildOpts): Promise<Message[]> {
@@ -392,8 +311,7 @@ export class ContextEngine {
 
     const applied: string[] = [];
 
-    // 依照 compaction → budget-guard → sliding-window → overflow-hard-stop 順序套用
-    const order = ["compaction", "budget-guard", "sliding-window", "overflow-hard-stop"];
+    const order = ["compaction", "overflow-hard-stop"];
     const effectiveCeProvider = opts.ceProvider ?? this._ceProvider;
 
     for (const name of order) {
@@ -432,19 +350,11 @@ let _contextEngine: ContextEngine | null = null;
 
 export function initContextEngine(cfg?: {
   compaction?: Partial<CompactionConfig> & { model?: string };
-  budgetGuard?: Partial<BudgetGuardConfig>;
-  slidingWindow?: Partial<SlidingWindowConfig>;
 }): ContextEngine {
   _contextEngine = new ContextEngine();
 
   if (cfg?.compaction) {
     _contextEngine.register(new CompactionStrategy(cfg.compaction));
-  }
-  if (cfg?.budgetGuard) {
-    _contextEngine.register(new BudgetGuardStrategy(cfg.budgetGuard));
-  }
-  if (cfg?.slidingWindow) {
-    _contextEngine.register(new SlidingWindowStrategy(cfg.slidingWindow));
   }
 
   return _contextEngine;

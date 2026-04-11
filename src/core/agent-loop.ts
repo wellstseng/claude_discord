@@ -665,7 +665,7 @@ export async function* agentLoop(
     snapshotStore.save(sessionKey, session.turnCount, session.messages);
   }
 
-  // ContextEngine：套用 CE strategies（compaction / budget-guard / sliding-window）
+  // ContextEngine：套用 CE strategies（compaction / overflow-hard-stop）
   const rawHistory = sessionManager.getHistory(sessionKey);
   const contextEngine = getContextEngine();
   let processedHistory: Message[];
@@ -1631,7 +1631,7 @@ export async function* agentLoop(
     const postHistory = sessionManager.getHistory(sessionKey);
     const postTokens = estimateTokens(postHistory);
 
-    // Session CE context window（budgetGuard 設定）
+    // Session CE context window
     const ceWindow = contextEngine?.getContextWindowTokens() ?? 100_000;
     const ceUtil = postTokens / ceWindow;
     const sessionWarned = session as unknown as { _contextWarned?: { high?: boolean; critical?: boolean } };

@@ -269,8 +269,6 @@ async function handleContext(interaction: ChatInputCommandInteraction): Promise<
 
   // CE thresholds
   const compactionTrigger = (ce?.getStrategy("compaction") as any)?.cfg?.triggerTokens ?? 20000;
-  const bgCfg = (ce?.getStrategy("budget-guard") as any)?.cfg;
-  const bgTrigger = Math.floor((bgCfg?.contextWindowTokens ?? contextWindow) * (bgCfg?.maxUtilization ?? 0.8));
   const ohCfg = (ce?.getStrategy("overflow-hard-stop") as any)?.cfg;
   const ohTrigger = Math.floor((ohCfg?.contextWindowTokens ?? contextWindow) * (ohCfg?.hardLimitUtilization ?? 0.95));
 
@@ -303,7 +301,6 @@ async function handleContext(interaction: ChatInputCommandInteraction): Promise<
     `• ${bar(tokens, contextWindow)}\n\n` +
     `**CE Thresholds**\n` +
     `• Compaction（${compactionTrigger.toLocaleString()}）：${tokens > compactionTrigger ? "⚠️ EXCEEDED" : `✅ 距離 ${(compactionTrigger - tokens).toLocaleString()}`}\n` +
-    `• BudgetGuard（${bgTrigger.toLocaleString()}）：${tokens > bgTrigger ? "⚠️ EXCEEDED" : `✅ 距離 ${(bgTrigger - tokens).toLocaleString()}`}\n` +
     `• OverflowHardStop（${ohTrigger.toLocaleString()}）：${tokens > ohTrigger ? "🔴 EXCEEDED" : `✅ 距離 ${(ohTrigger - tokens).toLocaleString()}`}\n\n` +
     rlLine
   );

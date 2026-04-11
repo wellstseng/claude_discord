@@ -209,8 +209,6 @@ export async function initPlatform(
   if (ceCfg?.enabled !== false) {
     const ce = initContextEngine({
       compaction: ceCfg?.strategies?.compaction,
-      budgetGuard: ceCfg?.strategies?.budgetGuard,
-      slidingWindow: ceCfg?.strategies?.slidingWindow,
     });
     // 若 compaction 指定了 model，取得或建立專用 CE provider 並注入
     const ceModel = ceCfg?.strategies?.compaction?.model;

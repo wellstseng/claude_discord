@@ -1484,15 +1484,6 @@ const CFG_SCHEMA = [
       {k:'triggerTurns',t:'num',l:'Trigger Turns',d:'累積幾輪後觸發壓縮'},
       {k:'preserveRecentTurns',t:'num',l:'Preserve Recent Turns',d:'壓縮時保留最近幾輪不壓縮'},
     ]},
-    {k:'contextEngineering.strategies.budgetGuard',l:'Budget Guard',fields:[
-      {k:'enabled',t:'bool',l:'啟用',d:'Context 預算守衛：超過上限時自動截斷'},
-      {k:'maxUtilization',t:'num',l:'Max Utilization',step:'0.01',d:'Context window 最大使用率（0-1），預設 0.8'},
-      {k:'contextWindowTokens',t:'num',l:'Context Window Tokens',d:'手動指定 context window 大小（留空自動偵測）'},
-    ]},
-    {k:'contextEngineering.strategies.slidingWindow',l:'Sliding Window',fields:[
-      {k:'enabled',t:'bool',l:'啟用',d:'滑動窗口：只保留最近 N 輪對話（簡單但激進）'},
-      {k:'maxTurns',t:'num',l:'Max Turns',d:'保留的最大輪數'},
-    ]},
   ]},
   { key:'inboundHistory', label:'Inbound History', fields:[
     {k:'inboundHistory.enabled',t:'bool',l:'啟用',d:'記錄頻道的歷史訊息，供 context 注入'},

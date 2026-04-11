@@ -399,8 +399,6 @@ export async function handleAgentLoopReply(
       } else if (event.type === "ce_applied") {
         const stratNames: Record<string, string> = {
           "compaction": "LLM 摘要壓縮",
-          "budget-guard": "Budget Guard 修剪",
-          "sliding-window": "Sliding Window 截斷",
           "overflow-hard-stop": "硬上限截斷",
         };
         const names = event.strategies.map(s => stratNames[s] ?? s).join(" + ");
