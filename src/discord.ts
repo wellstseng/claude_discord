@@ -694,9 +694,9 @@ async function handleMessage(
       const combinedSystemPrompt = pipeline.systemPrompt;
       const { inboundContext } = pipeline;
 
-      // ── 中途插隊（interruptOnNewMessage）───────────────────────────────
-      // 若此頻道設定了 interruptOnNewMessage=true，新訊息到來時自動 abort 正在執行的 turn
-      if (access.interruptOnNewMessage) {
+      // ── 中途插隊（強制啟用）──────────────────────────────────────────────
+      // 新訊息到來時自動 abort 正在執行的 turn
+      {
         const sessionKey = `discord:ch:${firstMessage.channelId}`;
         if (abortRunningTurn(sessionKey)) {
           getPlatformSessionManager().clearQueue(sessionKey);

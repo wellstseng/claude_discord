@@ -307,6 +307,10 @@ export async function handleCliBridgeReply(
 
       // ── result ──
       if (evt.type === "result") {
+        // 立即停止 typing — 不等 finally，避免 async 操作期間 interval 再觸發 sendTyping
+        stopTyping();
+        clearTimeout(maxTypingTimer);
+
         // 送出殘留的 thinking
         if (showThinking && thinkingBuffer.trim()) {
           const thinkText = thinkingBuffer.length > TEXT_LIMIT - 20
@@ -341,6 +345,8 @@ export async function handleCliBridgeReply(
 
       // ── error ──
       if (evt.type === "error") {
+        stopTyping();
+        clearTimeout(maxTypingTimer);
         cancelEditTimer();
         const errText = `❌ ${evt.message}`;
         const ok = await retrySend(() => sendText(errText));

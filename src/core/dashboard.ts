@@ -1382,7 +1382,6 @@ const CFG_SCHEMA = [
     {k:'provider',t:'text',l:'Provider',d:'此頻道專用模型（覆蓋 modelRouting）'},
     {k:'boundProject',t:'text',l:'Bound Project',d:'綁定專案 ID，此頻道只用該專案的記憶和設定'},
     {k:'blockGroupMentions',t:'bool',l:'Block Group Mentions',d:'忽略群組 mention'},
-    {k:'interruptOnNewMessage',t:'bool',l:'Interrupt On New Message',d:'收到新訊息時中斷目前回覆'},
     {k:'autoThread',t:'bool',l:'Auto Thread',d:'自動建立 thread 回覆'},
     {k:'allowFrom',t:'list',l:'Allow From (IDs)',d:'此頻道白名單 User ID'},
   ]},

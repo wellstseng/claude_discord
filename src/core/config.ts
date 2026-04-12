@@ -33,12 +33,6 @@ export interface ChannelConfig {
   /** 封鎖 @here / @everyone 群組廣播觸發（預設由 guild 層級繼承） */
   blockGroupMentions?: boolean;
   /**
-   * 新訊息自動中斷正在執行的 turn（插隊模式）。
-   * true：新訊息到來時，若有正在執行的 turn，立即 abort 並讓新訊息接續執行。
-   * 預設 false（FIFO 佇列行為）。
-   */
-  interruptOnNewMessage?: boolean;
-  /**
    * 自動為每條使用者訊息建立 Discord Thread（公開 Thread）。
    * 每條新訊息 → startThread → 回覆在 thread 中，session key 以 thread ID 計。
    * 適合想把每次對話隔離在獨立 thread 的頻道。
@@ -1355,8 +1349,6 @@ export interface ChannelAccess {
   provider?: string;
   /** 頻道綁定的專案（undefined = 無限制） */
   boundProject?: string;
-  /** 新訊息自動中斷正在執行的 turn（插隊模式，預設 false） */
-  interruptOnNewMessage: boolean;
   /** 每條使用者訊息自動建立 Discord Thread（預設 false） */
   autoThread: boolean;
 }
@@ -1381,18 +1373,17 @@ export function getChannelAccess(
       allowBot: false,
       allowFrom: [],
       blockGroupMentions: false,
-      interruptOnNewMessage: true,
       autoThread: false,
     };
   }
 
   if (Object.keys(config.discord.guilds).length === 0) {
-    return { allowed: true, requireMention: true, allowBot: false, allowFrom: [], blockGroupMentions: true, interruptOnNewMessage: true, autoThread: false };
+    return { allowed: true, requireMention: true, allowBot: false, allowFrom: [], blockGroupMentions: true, autoThread: false };
   }
 
   const guild = config.discord.guilds[guildId];
   if (!guild) {
-    return { allowed: false, requireMention: true, allowBot: false, allowFrom: [], blockGroupMentions: true, interruptOnNewMessage: true, autoThread: false };
+    return { allowed: false, requireMention: true, allowBot: false, allowFrom: [], blockGroupMentions: true, autoThread: false };
   }
 
   const guildDefaults: Required<Omit<ChannelConfig, "boundProject" | "provider">> = {
@@ -1401,7 +1392,6 @@ export function getChannelAccess(
     allowBot: guild.allowBot ?? false,
     allowFrom: guild.allowFrom ?? [],
     blockGroupMentions: guild.blockGroupMentions ?? true,
-    interruptOnNewMessage: true,
     autoThread: false,
   };
 
@@ -1415,7 +1405,6 @@ export function getChannelAccess(
     allowBot:               channelCfg?.allowBot                 ?? parentCfg?.allowBot                 ?? guildDefaults.allowBot,
     allowFrom:              channelCfg?.allowFrom                ?? parentCfg?.allowFrom                ?? guildDefaults.allowFrom,
     blockGroupMentions:     channelCfg?.blockGroupMentions       ?? parentCfg?.blockGroupMentions       ?? guildDefaults.blockGroupMentions,
-    interruptOnNewMessage:  channelCfg?.interruptOnNewMessage    ?? parentCfg?.interruptOnNewMessage    ?? guildDefaults.interruptOnNewMessage,
     autoThread:             channelCfg?.autoThread               ?? parentCfg?.autoThread               ?? guildDefaults.autoThread,
     provider:               channelCfg?.provider                 ?? parentCfg?.provider,
     boundProject:           channelCfg?.boundProject             ?? parentCfg?.boundProject,
