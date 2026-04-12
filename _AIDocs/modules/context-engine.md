@@ -154,6 +154,51 @@ interface ContextBreakdown {
 | `referenceIntervalSec` | 60 | tempo 參考間隔（秒） |
 | `tempoRange` | [0.5, 2.0] | tempo multiplier 上下限 |
 | `levels` | 見上表 | 自訂 decay level 定義 |
+| `externalize` | 見下方 | 長訊息外部化子設定 |
+
+### Externalization（外部化）
+
+整合在 Decay 內部。Level transition 時，長訊息在 truncate 前存原文到外部檔案，context 只留摘要指標。
+
+**觸發條件**：`targetLevel >= triggerLevel` AND `originalTokens >= minTokens` AND `compressedBy !== "externalize"`
+
+**流程**：
+1. Decay `_calcTargetLevel()` 決定目標 level
+2. 符合外部化條件 → `externalizeMessage()` 存原文到 `data/externalized/{safeSessionKey}/msg_t{turnIndex}_i{msgIdx}.json`
+3. `createExternalizedStub()` 建立摘要指標訊息（前 100 chars + 檔案路徑）
+4. 設定 `compressedBy = "externalize"`，跳過後續 truncate
+5. 存檔失敗 → fallback 到一般 truncate
+
+**摘要指標格式**：
+```
+[📄 外部化] assistant turn 5: 先看一下現況再規劃。現有資訊整理好了...…
+→ externalized/discord_ch_123/msg_t5_i12.json
+```
+
+**外部檔案格式**：
+```json
+{
+  "sessionKey": "discord:ch:123",
+  "turnIndex": 5,
+  "messageIndex": 12,
+  "role": "assistant",
+  "originalTokens": 1500,
+  "externalizedAt": "2026-04-12T16:00:00Z",
+  "content": "（完整原文）"
+}
+```
+
+**ExternalizeConfig**：
+
+| 欄位 | 預設 | 說明 |
+|------|------|------|
+| `enabled` | true | 開關 |
+| `triggerLevel` | 2 | 觸發等級（L1→L2 時外部化） |
+| `minTokens` | 300 | 最小 token 閾值 |
+| `ttlDays` | 14 | 外部檔案保留天數 |
+| `storePath` | "data/externalized" | 存儲路徑 |
+
+**清理**：`cleanupExternalized(dataDir, ttlDays)` 在 `initContextEngine` 時執行，刪除超過 TTL 的檔案。
 
 ## CompactionStrategy
 
@@ -195,7 +240,7 @@ interface ContextBreakdown {
 ## 全域單例
 
 ```typescript
-initContextEngine(cfg?)  → ContextEngine   // 接受 decay / compaction / overflowHardStop 設定
+initContextEngine(cfg?)  → ContextEngine   // 接受 decay / compaction / overflowHardStop / dataDir 設定
 getContextEngine()       → ContextEngine | null
 ```
 
@@ -210,7 +255,7 @@ CE 設定統一在 `catclaw.json` 的 `contextEngineering` 區塊：
     "toolBudget": { "resultTokenCap": 8000, ... },
     "memoryBudget": 2000,
     "strategies": {
-      "decay": { "enabled": true, "mode": "auto", "baseDecay": 0.15 },
+      "decay": { "enabled": true, "mode": "auto", "baseDecay": 0.15, "externalize": { "enabled": true, "triggerLevel": 2, "minTokens": 300 } },
       "compaction": { "enabled": true, "triggerTokens": 20000 },
       "overflowHardStop": { "enabled": true, "hardLimitUtilization": 0.95 }
     }
