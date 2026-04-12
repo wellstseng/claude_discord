@@ -75,7 +75,9 @@ export async function initPlatform(
   workspaceDir?: string,
 ): Promise<void> {
   const wsDir = workspaceDir ?? join(catclawDir, "workspace");
-  log.info("[platform] 初始化新平台子系統...");
+  const { getBootAgentDataDir } = await import("./agent-loader.js");
+  const bootAgentDir = getBootAgentDataDir(catclawDir);
+  log.info(`[platform] 初始化新平台子系統... bootAgent=${bootAgentDir}`);
 
   // ── 1. AccountRegistry ─────────────────────────────────────────────────────
   _accountRegistry = new AccountRegistry(catclawDir);
@@ -175,8 +177,8 @@ export async function initPlatform(
 
   const defaultMemoryCfg = {
     enabled: true,
-    root: join(catclawDir, "memory"),
-    vectorDbPath: join(catclawDir, "memory", "_vectordb"),
+    root: join(bootAgentDir, "memory"),
+    vectorDbPath: join(bootAgentDir, "memory", "_vectordb"),
     contextBudget: 3000,
     contextBudgetRatio: { global: 0.3, project: 0.4, account: 0.3 },
     writeGate: { enabled: true, dedupThreshold: 0.80 },
@@ -267,7 +269,7 @@ export async function initPlatform(
 
   // ── 10. Workflow Engine ─────────────────────────────────────────────────────
   const workflowDataDir = join(wsDir, "data", "workflow");
-  const memoryDir = join(catclawDir, "memory");
+  const memoryDir = join(bootAgentDir, "memory");
   const agentsDir = join(catclawDir, "agents");
   initWorkflow(
     config.workflow,

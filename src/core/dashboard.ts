@@ -4611,7 +4611,8 @@ export class DashboardServer {
           try {
             const { listAtoms } = await import("../memory/memory-api.js");
             const { config } = await import("./config.js");
-            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+            const { getBootAgentDataDir } = await import("./agent-loader.js");
+            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
             const dirs = [memRoot];
             // 加入 accounts 子目錄
             const accountsDir = join(memRoot, "accounts");
@@ -4636,7 +4637,8 @@ export class DashboardServer {
           try {
             const { getStats } = await import("../memory/memory-api.js");
             const { config } = await import("./config.js");
-            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+            const { getBootAgentDataDir } = await import("./agent-loader.js");
+            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
             const dirs = [memRoot];
             const accountsDir = join(memRoot, "accounts");
             if (existsSync(accountsDir)) {
@@ -4661,7 +4663,8 @@ export class DashboardServer {
             const name = decodeURIComponent(url!.split("/api/memory/atoms/")[1]);
             const { getAtom } = await import("../memory/memory-api.js");
             const { config } = await import("./config.js");
-            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+            const { getBootAgentDataDir } = await import("./agent-loader.js");
+            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
             const dirs = [memRoot];
             const accountsDir = join(memRoot, "accounts");
             if (existsSync(accountsDir)) {
@@ -4685,7 +4688,8 @@ export class DashboardServer {
             const name = decodeURIComponent(url!.split("/api/memory/atoms/")[1]);
             const { deleteAtom } = await import("../memory/memory-api.js");
             const { config } = await import("./config.js");
-            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+            const { getBootAgentDataDir } = await import("./agent-loader.js");
+            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
             const dirs = [memRoot];
             const ok = deleteAtom(dirs, name);
             res.writeHead(ok ? 200 : 404);
@@ -4707,7 +4711,8 @@ export class DashboardServer {
               const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { prompt: string; accountId?: string };
               const { testRecall } = await import("../memory/memory-api.js");
               const { config } = await import("./config.js");
-              const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(homedir(), ".catclaw", "memory");
+              const { getBootAgentDataDir } = await import("./agent-loader.js");
+              const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
               const accountId = body.accountId ?? "test";
               const result = await testRecall(
                 body.prompt,
@@ -4916,11 +4921,12 @@ export class DashboardServer {
         void (async () => {
           try {
             const { getPlatformMemoryEngine } = await import("./platform.js");
+            const { getBootAgentDataDir } = await import("./agent-loader.js");
             const engine = getPlatformMemoryEngine();
             if (!engine) { res.writeHead(500); res.end(JSON.stringify({ error: "MemoryEngine 未啟動" })); return; }
 
             const status = engine.getStatus();
-            const memRoot = join(homedir(), ".catclaw", "memory");
+            const memRoot = join(getBootAgentDataDir(), "memory");
             const layers: Array<{ label: string; dir: string; namespace: string }> = [];
             layers.push({ label: "global", dir: status.globalDir, namespace: "global" });
 

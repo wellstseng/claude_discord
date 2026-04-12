@@ -35,7 +35,7 @@ export function parseAgentArg(argv: string[] = process.argv): string | undefined
 // ── Boot Agent ID singleton ──────────────────────────────────────────────────
 
 /** 啟動時的 agent ID（--agent 模式有值，主體模式 = "default"） */
-let _bootAgentId: string = "default";
+let _bootAgentId: string = "wendy";
 let _bootIsAdmin: boolean = true;
 
 /** index.ts 啟動時呼叫，設定 boot agent 身份 */
@@ -49,6 +49,11 @@ export function getBootAgentId(): string { return _bootAgentId; }
 
 /** 取得 boot agent 是否為 admin */
 export function getBootIsAdmin(): boolean { return _bootIsAdmin; }
+
+/** 取得 boot agent 的資料目錄（~/.catclaw/agents/{bootAgentId}/） */
+export function getBootAgentDataDir(catclawDir?: string): string {
+  return resolveAgentDataDir(_bootAgentId, catclawDir);
+}
 
 // ── Per-agent 路徑工具 ────────────────────────────────────────────────────────
 

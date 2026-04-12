@@ -69,7 +69,7 @@ const platformConfig = agentId
     setBootAgent(agentId, ac?.admin ?? false);
     log.info(`[bridge] Agent 模式：${agentId}（admin=${ac?.admin ?? false}）`);
   } else {
-    setBootAgent("default", true);
+    setBootAgent("wendy", true);
   }
 }
 

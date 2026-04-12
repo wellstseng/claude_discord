@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSy
 import { join, relative, basename } from "node:path";
 import { log } from "../logger.js";
 import { resolveCatclawDir } from "../core/config.js";
+import { getBootAgentDataDir } from "../core/agent-loader.js";
 
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
@@ -131,7 +132,7 @@ if (process.argv[1]?.endsWith("rebuild-index.js") || process.argv[1]?.endsWith("
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const memoryDir = args.find(a => !a.startsWith("--"))
-    ?? join(resolveCatclawDir(), "memory");
+    ?? join(getBootAgentDataDir(), "memory");
 
   console.log(`[rebuild-index] memoryDir=${memoryDir}  dryRun=${dryRun}`);
 

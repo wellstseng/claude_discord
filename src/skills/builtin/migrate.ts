@@ -18,6 +18,7 @@ import { homedir } from "node:os";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { log } from "../../logger.js";
 import { resolveCatclawDir } from "../../core/config.js";
+import { getBootAgentDataDir } from "../../core/agent-loader.js";
 
 // ── 子命令 ────────────────────────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ async function handleImport(args: string): Promise<SkillResult> {
   const dryRun = args.includes("--dry-run");
 
   const sourcePath = join(homedir(), ".claude", "memory");
-  const destPath = join(resolveCatclawDir(), "memory");
+  const destPath = join(getBootAgentDataDir(), "memory");
 
   if (!existsSync(sourcePath)) {
     return { text: `❌ 來源路徑不存在：\`${sourcePath}\``, isError: true };
@@ -56,7 +57,7 @@ async function handleRebuild(args: string): Promise<SkillResult> {
   const dryRun = args.includes("--dry-run");
   const customDir = args.trim().replace("--dry-run", "").trim();
 
-  const memoryDir = customDir || join(resolveCatclawDir(), "memory");
+  const memoryDir = customDir || join(getBootAgentDataDir(), "memory");
 
   try {
     const { rebuildIndex } = await import("../../migration/rebuild-index.js");
@@ -121,7 +122,7 @@ async function handleVectorResync(args: string): Promise<SkillResult> {
 
   const { existsSync, readdirSync } = await import("node:fs");
   const status = engine.getStatus();
-  const memRoot = join(resolveCatclawDir(), "memory");
+  const memRoot = join(getBootAgentDataDir(), "memory");
 
   // 收集所有層：global + projects/* + accounts/*
   const layers: Array<{ label: string; dir: string; namespace: string }> = [];
@@ -181,7 +182,7 @@ async function handleVectorResync(args: string): Promise<SkillResult> {
 
 function handleStatus(): SkillResult {
   const claudeMemory = join(homedir(), ".claude", "memory");
-  const catclawMemory = join(resolveCatclawDir(), "memory");
+  const catclawMemory = join(getBootAgentDataDir(), "memory");
 
   const countMd = (dir: string): number => {
     if (!existsSync(dir)) return 0;
