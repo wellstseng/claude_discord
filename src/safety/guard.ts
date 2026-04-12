@@ -16,6 +16,8 @@ import type { SafetyConfig, ToolPermissionRule } from "../core/config.js";
 
 export interface GuardResult {
   blocked: boolean;
+  /** 軟擋：可透過 exec-approval 授權通過。exec-approval 未啟用時降級為硬擋 */
+  needsApproval?: boolean;
   reason?: string;
 }
 
@@ -168,7 +170,7 @@ export class SafetyGuard {
         if (ctx?.agentId && !ctx.isAdmin) {
           return this.checkAgentWritePath(String(params["path"] ?? ""), ctx.agentId);
         }
-        return fsResult;
+        return { blocked: false };
       }
 
       case "glob":
@@ -312,11 +314,11 @@ export class SafetyGuard {
       }
     }
 
-    // 寫入保護
+    // 寫入保護（軟擋 → 可授權）
     if (operation === "write") {
       for (const p of this.protectedWritePaths) {
         if (abs === p || abs.startsWith(p.endsWith("/") ? p : p + "/")) {
-          return { blocked: true, reason: `禁止寫入受保護路徑：${abs}` };
+          return { blocked: true, needsApproval: true, reason: `寫入受保護路徑（需授權）：${abs}` };
         }
       }
 
@@ -367,9 +369,11 @@ export class SafetyGuard {
 
   /**
    * 非 admin agent 只能寫入自己的 agentDir（~/.catclaw/agents/{agentId}/）。
-   * 額外允許 agent config.json 指定的 workspaceDir（未來 Sprint 接入）。
+   * 空 agentId → 視為主體（default），不限制路徑。
    */
-  checkAgentWritePath(filePath: string, agentId: string): GuardResult {
+  checkAgentWritePath(filePath: string, agentId: string | undefined): GuardResult {
+    if (!agentId) return { blocked: false };
+
     const abs = this.expandPath(filePath);
     const catclawDir = resolve(homedir(), ".catclaw");
     const allowedDir = resolve(catclawDir, "agents", agentId);
@@ -380,7 +384,8 @@ export class SafetyGuard {
 
     return {
       blocked: true,
-      reason: `Agent「${agentId}」只能寫入 agents/${agentId}/，不可存取：${abs}`,
+      needsApproval: true,
+      reason: `Agent「${agentId}」只能寫入 agents/${agentId}/（需授權）：${abs}`,
     };
   }
 
@@ -420,7 +425,8 @@ export class SafetyGuard {
         if (command.includes(v)) {
           return {
             blocked: true,
-            reason: `Bash 指令不可操作受保護路徑：${display}`,
+            needsApproval: true,
+            reason: `Bash 指令操作受保護路徑（需授權）：${display}（指令：${command.slice(0, 120)}）`,
           };
         }
       }

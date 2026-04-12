@@ -15,16 +15,21 @@ Permission Gate → Safety Guard → Tool 執行
 
 ## SafetyGuard（guard.ts）
 
-### 攔截規則
+### 攔截規則（分級）
 
-| 規則 | 說明 |
-|------|------|
-| 路徑保護（write） | 禁止寫入敏感路徑（~/.catclaw/、~/.claude/、~/.ssh/ 等） |
-| 路徑保護（read） | 禁止讀取敏感設定（catclaw.json、accounts/、_invites.json） |
-| Auth profile 保護 | 禁止讀寫 auth-profile*.json、*-profiles.json |
-| Bash 黑名單 | 危險指令���截（rm -rf /、chmod 777 等） |
-| Credential 掃描 | 禁止讀取 .env、credentials、secret 等檔案 |
-| Tool permission rules | per-tool 自訂白名單/黑名單規則 |
+| 規則 | 分級 | 說明 |
+|------|------|------|
+| Bash 黑名單 | 硬擋 | fork bomb、eval、shell -c、pipe to shell |
+| Credential 掃描 | 硬擋 | .env、credentials、secret、token、password 等 |
+| Auth profile 保護 | 硬擋 | auth-profile*.json、*-profiles.json |
+| Self Protect | 硬擋 | catclaw.json、accounts/ 核心設定 |
+| 路徑保護（write） | 軟擋 | protectedWritePaths（~/.catclaw/tools/、~/.ssh/ 等） |
+| Bash 路徑保護 | 軟擋 | bash 指令操作受保護路徑 |
+| Agent 越界寫入 | 軟擋 | 非 admin agent 寫 agents/{self}/ 以外 |
+| 路徑保護（read） | 硬擋 | catclaw.json、accounts/、_invites.json |
+| Tool permission rules | 硬擋 | per-tool 自訂規則 |
+
+**軟擋**（`needsApproval`）：exec-approval 啟用 → 送 DM 授權；未啟用 → 降級硬擋。
 
 ### 預設保護路徑
 
@@ -51,6 +56,7 @@ class SafetyGuard {
 
 interface GuardResult {
   blocked: boolean;
+  needsApproval?: boolean;  // 軟擋：可透過 exec-approval 授權
   reason?: string;
 }
 
@@ -74,6 +80,23 @@ interface PermissionContext {
 | 其他 | 不攔截 |
 
 所有 tool 在上述檢查前，先跑 `checkToolPermissions()`（per-role / per-account 規則）。
+
+### agent-loop 整合
+
+```
+runBeforeToolCall
+  ├─ guard.blocked + needsApproval + execApproval 啟用 → 送 DM 授權
+  ├─ guard.blocked + needsApproval + execApproval 未啟用 → 硬擋
+  ├─ guard.blocked（硬擋）→ 直接拒絕
+  └─ 通過 → 繼續到 exec-approval（run_command/write_file/edit_file）
+```
+
+`runBeforeToolCall` 傳入 `agentId` + `isAdmin`（來自 `AgentLoopOpts`），確保 agent 路徑限制生效。
+
+### Boot Agent ID
+
+主體（非 --agent 模式）啟動時 `setBootAgent("wendy", true)`，agentId 注入所有 agentLoop 呼叫。
+空 agentId 的 `checkAgentWritePath` 顯式回傳 `blocked: false`（不受限）。
 
 ### 設定
 

@@ -117,6 +117,8 @@ interface ChildRunOpts {
   agentSystemPrompt?: string;
   /** Agent ID（傳遞到 agentLoop → ToolContext） */
   agentId?: string;
+  /** Agent admin flag（admin agent 不受路徑限制） */
+  isAdmin?: boolean;
 }
 
 // ── ACP Runtime（SUB-6）──────────────────────────────────────────────────────
@@ -277,6 +279,7 @@ async function runChildAgentLoop(opts: ChildRunOpts): Promise<{ text: string; tu
     parentRunId: opts.parentRunId,
     trace: childTrace,
     agentId: opts.agentId,
+    isAdmin: opts.isAdmin,
   }, {
     sessionManager,
     permissionGate,
@@ -517,6 +520,7 @@ export const tool: Tool = {
             parentTraceId: ctx.traceId,
             agentSystemPrompt,
             agentId: agentParam,
+            isAdmin: agentConfig?.admin,
           }),
           new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error("__TIMEOUT__")), timeoutMs + 1000);

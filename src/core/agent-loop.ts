@@ -290,6 +290,8 @@ export interface AgentLoopOpts {
   parentRunId?: string;
   /** Agent ID（spawn_subagent 帶 agent 身份時注入，傳遞到 ToolContext + recall） */
   agentId?: string;
+  /** Agent admin flag（admin agent 不受路徑限制） */
+  isAdmin?: boolean;
   /**
    * 圖片附件（來自 Discord 訊息）。
    * 直接作為 image content blocks 加入第一條 user 訊息，讓 LLM 可直接「看」圖。
@@ -486,12 +488,12 @@ function assessReversibility(toolName: string, params: Record<string, unknown>):
 // ── before_tool_call hook 鏈 ──────────────────────────────────────────────────
 
 type BeforeToolResult =
-  | { blocked: true; reason: string }
+  | { blocked: true; needsApproval?: boolean; reason: string }
   | { blocked: false; params: Record<string, unknown>; warning?: string };
 
 async function runBeforeToolCall(
   call: { id: string; name: string; params: Record<string, unknown> },
-  ctx: { accountId: string; role?: string; recentCalls: ToolCallRecord[]; readFiles?: Set<string>; sessionKey?: string; channelId?: string; toolTier?: string },
+  ctx: { accountId: string; role?: string; agentId?: string; isAdmin?: boolean; recentCalls: ToolCallRecord[]; readFiles?: Set<string>; sessionKey?: string; channelId?: string; toolTier?: string },
   permissionGate: PermissionGate,
   safetyGuard: SafetyGuard,
 ): Promise<BeforeToolResult> {
@@ -499,9 +501,16 @@ async function runBeforeToolCall(
   const perm = permissionGate.check(ctx.accountId, call.name);
   if (!perm.allowed) return { blocked: true, reason: perm.reason ?? "權限不足" };
 
-  // 2. Safety Guard（含 per-role/per-account 工具權限規則）
-  const guard = safetyGuard.check(call.name, call.params, { accountId: ctx.accountId, role: ctx.role });
-  if (guard.blocked) return { blocked: true, reason: guard.reason ?? "安全規則阻擋" };
+  // 2. Safety Guard（含 per-role/per-account 工具權限規則 + agent 路徑白名單）
+  const guard = safetyGuard.check(call.name, call.params, {
+    accountId: ctx.accountId,
+    role: ctx.role,
+    agentId: ctx.agentId,
+    isAdmin: ctx.isAdmin,
+  });
+  if (guard.blocked) {
+    return { blocked: true, needsApproval: guard.needsApproval, reason: guard.reason ?? "安全規則阻擋" };
+  }
 
   // 3. Read-before-Write enforcement
   // write_file / edit_file 的目標路徑必須先被 read_file 讀過（新建檔案除外）
@@ -1202,7 +1211,7 @@ export async function* agentLoop(
           const events: SpawnEvent[] = [];
           const hookResult = await runBeforeToolCall(
             { id: call.id, name: call.name, params },
-            { accountId, role: opts.speakerRole, recentCalls: tracker.toolCalls, readFiles, sessionKey, channelId, toolTier: toolRegistry.get(call.name)?.tier },
+            { accountId, role: opts.speakerRole, agentId: opts.agentId, isAdmin: opts.isAdmin, recentCalls: tracker.toolCalls, readFiles, sessionKey, channelId, toolTier: toolRegistry.get(call.name)?.tier },
             permissionGate, safetyGuard,
           );
           if (hookResult.blocked) {
@@ -1275,7 +1284,7 @@ export async function* agentLoop(
 
           const hookResult = await runBeforeToolCall(
             { id: call.id, name: call.name, params },
-            { accountId, role: opts.speakerRole, recentCalls: tracker.toolCalls, readFiles, sessionKey, channelId, toolTier: toolRegistry.get(call.name)?.tier },
+            { accountId, role: opts.speakerRole, agentId: opts.agentId, isAdmin: opts.isAdmin, recentCalls: tracker.toolCalls, readFiles, sessionKey, channelId, toolTier: toolRegistry.get(call.name)?.tier },
             permissionGate, safetyGuard,
           );
           if (hookResult.blocked) {
@@ -1343,25 +1352,61 @@ export async function* agentLoop(
         // before_tool_call
         const hookResult = await runBeforeToolCall(
           { id: call.id, name: call.name, params },
-          { accountId, role: opts.speakerRole, recentCalls: tracker.toolCalls, sessionKey, channelId, toolTier: toolRegistry.get(call.name)?.tier },
+          { accountId, role: opts.speakerRole, agentId: opts.agentId, isAdmin: opts.isAdmin, recentCalls: tracker.toolCalls, sessionKey, channelId, toolTier: toolRegistry.get(call.name)?.tier },
           permissionGate,
           safetyGuard,
         );
 
         if (hookResult.blocked) {
-          yield { type: "tool_blocked", name: call.name, reason: hookResult.reason };
-          toolResults.push({ tool_use_id: call.id, content: `錯誤：${hookResult.reason}`, is_error: true });
-          continue;
+          // 軟擋（needsApproval）→ 有 exec-approval 就走授權流程，否則硬擋
+          if (hookResult.needsApproval && opts.execApproval?.enabled) {
+            log.info(`[agent-loop] guard 軟擋 → 走 exec-approval：${hookResult.reason}`);
+            const displayCmd = `[Guard] ${hookResult.reason}`;
+            const timeoutMs = opts.execApproval.timeoutMs ?? 60_000;
+            const [approvalId, approvalPromise] = createApproval(displayCmd, channelId, timeoutMs);
+            try {
+              await sendApprovalDm({
+                dmUserId: opts.execApproval.dmUserId,
+                command: displayCmd,
+                channelId,
+                approvalId,
+                timeoutMs,
+                sendTextFallback: opts.execApproval.sendDm,
+              });
+              log.info(`[agent-loop] guard-approval 等待確認 approvalId=${approvalId}`);
+            } catch (err) {
+              log.warn(`[agent-loop] guard-approval 送 DM 失敗，硬擋：${err instanceof Error ? err.message : String(err)}`);
+              toolResults.push({ tool_use_id: call.id, content: `錯誤：${hookResult.reason}（授權請求失敗）`, is_error: true });
+              yield { type: "tool_blocked", name: call.name, reason: hookResult.reason };
+              continue;
+            }
+            const approved = await approvalPromise;
+            if (!approved) {
+              log.info(`[agent-loop] guard-approval 拒絕 approvalId=${approvalId}`);
+              toolResults.push({ tool_use_id: call.id, content: `錯誤：使用者拒絕授權 — ${hookResult.reason}`, is_error: true });
+              yield { type: "tool_blocked", name: call.name, reason: `使用者拒絕：${hookResult.reason}` };
+              continue;
+            }
+            log.info(`[agent-loop] guard-approval 允許 approvalId=${approvalId}`);
+            // 授權通過 → 繼續執行（不 continue）
+          } else {
+            yield { type: "tool_blocked", name: call.name, reason: hookResult.reason };
+            toolResults.push({ tool_use_id: call.id, content: `錯誤：${hookResult.reason}`, is_error: true });
+            continue;
+          }
         }
+
+        // guard-approval 通過後，effectiveParams 為原始參數（hookResult.blocked=true 時無 params）
+        const effectiveParams: Record<string, unknown> = hookResult.blocked ? params : (hookResult.params ?? params);
 
         // ── Reversibility Warning ─────────────────────────────────────────────
         // score ≥ 2 → 在 tool result 前注入警告（不阻擋，但提醒 LLM）
-        const _reversibilityWarning = hookResult.warning;
+        const _reversibilityWarning = hookResult.blocked ? undefined : hookResult.warning;
 
         // ── Exec Approval（run_command / write_file / edit_file DM 確認）────────
         const _approvalTools = ["run_command", "write_file", "edit_file"];
         if (_approvalTools.includes(call.name) && opts.execApproval?.enabled) {
-          const p = hookResult.params as Record<string, unknown>;
+          const p = effectiveParams;
           // 組成可讀的操作描述
           let displayCmd: string;
           if (call.name === "run_command") {
@@ -1406,31 +1451,31 @@ export async function* agentLoop(
         }
 
         if (opts.showToolCalls !== "none") {
-          yield { type: "tool_start", name: call.name, id: call.id, params: hookResult.params };
+          yield { type: "tool_start", name: call.name, id: call.id, params: effectiveParams };
         }
 
-        eventBus.emit("tool:before", { id: call.id, name: call.name, params: hookResult.params });
+        eventBus.emit("tool:before", { id: call.id, name: call.name, params: effectiveParams });
         const t0 = Date.now();
 
-        let toolResult = await toolRegistry.execute(call.name, hookResult.params, toolCtx);
+        let toolResult = await toolRegistry.execute(call.name, effectiveParams, toolCtx);
         const durationMs = Date.now() - t0;
         // PostToolUse hook
-        const postHookResult = await runPostToolUseHook(call.name, hookResult.params, toolResult, durationMs, { accountId, sessionKey, channelId });
+        const postHookResult = await runPostToolUseHook(call.name, effectiveParams, toolResult, durationMs, { accountId, sessionKey, channelId });
         if (postHookResult.result !== undefined) toolResult = { ...toolResult, result: postHookResult.result };
 
         if (toolResult.error) {
-          eventBus.emit("tool:error", { id: call.id, name: call.name, params: hookResult.params }, new Error(toolResult.error));
+          eventBus.emit("tool:error", { id: call.id, name: call.name, params: effectiveParams }, new Error(toolResult.error));
         } else {
-          eventBus.emit("tool:after", { id: call.id, name: call.name, params: hookResult.params }, toolResult);
+          eventBus.emit("tool:after", { id: call.id, name: call.name, params: effectiveParams }, toolResult);
           if (toolResult.fileModified && toolResult.modifiedPath) {
             eventBus.emit("file:modified", toolResult.modifiedPath, call.name, accountId);
           }
         }
 
-        tracker.recordToolCall(call.name, hookResult.params, toolResult.result, toolResult.error, durationMs);
+        tracker.recordToolCall(call.name, effectiveParams, toolResult.result, toolResult.error, durationMs);
         // Read-before-Write：read_file 成功後記錄路徑
         if (call.name === "read_file" && !toolResult.error) {
-          const readPath = String(hookResult.params["path"] ?? hookResult.params["file_path"] ?? "");
+          const readPath = String(effectiveParams["path"] ?? effectiveParams["file_path"] ?? "");
           if (readPath) readFiles.add(readPath);
         }
         // Trace: tool call 記錄
@@ -1439,7 +1484,7 @@ export async function* agentLoop(
           durationMs,
           error: toolResult.error,
           resultPreview: toolResultPreview(toolResult.result, toolResult.error),
-          paramsPreview: toolParamsPreview(call.name, hookResult.params),
+          paramsPreview: toolParamsPreview(call.name, effectiveParams),
         });
         if (toolResult.error) {
           log.debug(`[agent-loop] [使用工具] (${call.name}) :: error ${durationMs}ms — ${toolResult.error}`);

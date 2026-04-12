@@ -61,7 +61,17 @@ const platformConfig = agentId
   ? loadAgentBootConfig(config as unknown as CoreBridgeConfig, agentId)
   : config as unknown as CoreBridgeConfig;
 
-if (agentId) log.info(`[bridge] Agent 模式：${agentId}`);
+// 設定 boot agent 身份（主體 = "default" + admin，--agent ��式讀 config）
+{
+  const { setBootAgent, loadAgentConfig } = await import("./core/agent-loader.js");
+  if (agentId) {
+    const ac = loadAgentConfig(agentId);
+    setBootAgent(agentId, ac?.admin ?? false);
+    log.info(`[bridge] Agent 模式：${agentId}（admin=${ac?.admin ?? false}）`);
+  } else {
+    setBootAgent("default", true);
+  }
+}
 
 // ── 新平台子系統初始化（僅當 config.providers 有設定時啟用）──────────────────
 const workspaceDir = resolveWorkspaceDirSafe();

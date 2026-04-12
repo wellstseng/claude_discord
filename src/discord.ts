@@ -726,10 +726,13 @@ async function handleMessage(
       // ── Ack Reaction：⏳ queued ──────────────────────────────────────────
       void firstMessage.react("⏳").catch(() => { /* 無 permission 時靜默 */ });
 
+      const { getBootAgentId, getBootIsAdmin } = await import("./core/agent-loader.js");
       const gen = agentLoop(prompt, {
         platform: "discord",
         channelId: effectiveChannelId,
         accountId,
+        agentId: getBootAgentId(),
+        isAdmin: getBootIsAdmin(),
         isGroupChannel,
         speakerDisplay: firstMessage.author.displayName,
         speakerRole: accountRole,

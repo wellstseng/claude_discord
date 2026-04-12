@@ -397,12 +397,16 @@ export async function handleAgentLoopReply(
         }
 
       } else if (event.type === "ce_applied") {
+        // decay 單獨觸發且省下 < 1000 tokens → 靜默（避免每輪都發訊息）
+        const saved = event.tokensBefore - event.tokensAfter;
+        const hasHeavyStrategy = event.strategies.some(s => s !== "decay");
+        if (!hasHeavyStrategy && saved < 1000) continue;
         const stratNames: Record<string, string> = {
           "compaction": "LLM 摘要壓縮",
           "overflow-hard-stop": "硬上限截斷",
+          "decay": "漸進衰減",
         };
         const names = event.strategies.map(s => stratNames[s] ?? s).join(" + ");
-        const saved = event.tokensBefore - event.tokensAfter;
         const ceMsg = `📦 **Context 壓縮**：${names}（${event.tokensBefore.toLocaleString()} → ${event.tokensAfter.toLocaleString()} tokens，節省 ${saved.toLocaleString()}）`;
         try { await send(ceMsg); isFirst = false; } catch { /* 靜默 */ }
 

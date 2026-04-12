@@ -1453,9 +1453,9 @@ const CFG_SCHEMA = [
   { key:'safety', label:'Safety', fields:[
     {k:'safety.enabled',t:'bool',l:'啟用',d:'安全系統總開關（強烈建議保持啟用）'},
     {k:'safety.selfProtect',t:'bool',l:'Self Protect',d:'保護 catclaw.json、accounts/ 等核心檔案不被 AI 直接修改'},
-    {k:'safety.bash.blacklist',t:'list',l:'Bash Blacklist',d:'Bash 指令黑名單（正則表達式），匹配的指令會被阻擋'},
-    {k:'safety.filesystem.protectedPaths',t:'list',l:'Protected Paths',d:'額外受保護路徑，AI 不可寫入',defaults:${JSON.stringify(PROTECTED_WRITE_PATHS_DEFAULT)}},
-    {k:'safety.filesystem.credentialPatterns',t:'list',l:'Credential Patterns',d:'憑證檔案模式（正則），匹配的檔案禁止存取'},
+    {k:'safety.bash.blacklist',t:'list',l:'Bash Blacklist (硬擋)',d:'Bash 指令黑名單（正則表達式），匹配的指令永遠阻擋，不可授權'},
+    {k:'safety.filesystem.protectedPaths',t:'list',l:'Protected Paths (軟擋)',d:'受保護路徑，寫入/bash 操作需 Exec Approval 授權（未啟用 Approval 時為硬擋）',defaults:${JSON.stringify(PROTECTED_WRITE_PATHS_DEFAULT)}},
+    {k:'safety.filesystem.credentialPatterns',t:'list',l:'Credential Patterns (硬擋)',d:'憑證檔案模式（正則），匹配的檔案永遠禁止存取，不可授權'},
   ], sub:[
     {k:'safety.execApproval',l:'Exec Approval',fields:[
       {k:'enabled',t:'bool',l:'啟用',d:'高風險指令執行前需要 owner DM 核准'},
