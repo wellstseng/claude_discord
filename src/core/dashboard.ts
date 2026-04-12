@@ -3116,6 +3116,7 @@ const _cbDefaults = {
   turnTimeoutMs: 300000,
   turnTimeoutAction: 'ask',
   showThinking: false,
+  showIntermediateText: 'quote',
   editIntervalMs: 800,
   idleSuspendMs: 600000,
   channels: {},
@@ -3163,6 +3164,7 @@ function _cbRenderBridge(idx, cfg) {
   html += _cbField(p+'turnTimeoutMs', 'Turn Timeout (ms)', 'num', cfg.turnTimeoutMs ?? _cbDefaults.turnTimeoutMs);
   html += _cbField(p+'turnTimeoutAction', 'Timeout Action', 'select', cfg.turnTimeoutAction || _cbDefaults.turnTimeoutAction, ['ask','interrupt','warn','restart']);
   html += _cbField(p+'showThinking', 'Show Thinking', 'bool', cfg.showThinking ?? _cbDefaults.showThinking);
+  html += _cbField(p+'showIntermediateText', 'Intermediate Text（tool 間推理文字）', 'select', cfg.showIntermediateText || _cbDefaults.showIntermediateText, ['quote','spoiler','none','normal']);
   html += _cbField(p+'editIntervalMs', 'Edit Interval (ms)', 'num', cfg.editIntervalMs ?? _cbDefaults.editIntervalMs);
   html += _cbField(p+'idleSuspendMs', 'Idle Suspend (ms)，預設 600000 (10min)。0=常駐不卸載', 'num', cfg.idleSuspendMs ?? _cbDefaults.idleSuspendMs);
 
@@ -3202,6 +3204,7 @@ function _cbCollectForm() {
       turnTimeoutMs: parseInt(g(p+'turnTimeoutMs')) || 300000,
       turnTimeoutAction: g(p+'turnTimeoutAction') || 'ask',
       showThinking: !!g(p+'showThinking'),
+      showIntermediateText: g(p+'showIntermediateText') || 'quote',
       editIntervalMs: parseInt(g(p+'editIntervalMs')) || 800,
       idleSuspendMs: parseInt(g(p+'idleSuspendMs')) ?? 600000,
       channels: {},
