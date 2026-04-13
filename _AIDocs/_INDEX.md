@@ -33,7 +33,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Accounts | `src/accounts/` | 帳號 + 角色 + 權限 + identity linking |
 | Providers | `src/providers/` | LLM Provider 抽象：claude-api / codex-oauth / cli-claude / cli-gemini / cli-codex / ollama / openai-compat + failover + circuit-breaker |
 | Tools | `src/tools/` | Tool 註冊 + 19 builtin tools（read/write/edit/glob/grep/run/web/memory/subagent/task/atom_write...） |
-| Skills | `src/skills/` | Skill registry + 28 builtin skills（status/help/configure/mode/plan/restart/...） |
+| Skills | `src/skills/` | Skill registry + 32 builtin skills（29 TS + 3 prompt） |
 | Hooks | `src/hooks/` | Hook 系統：registry + runner（tool 前後觸發） |
 | Safety | `src/safety/` | 安全攔截：guard + collab-conflict |
 | Workflow | `src/workflow/` | 工作流引擎：rut/oscillation/fix-escalation/sync/wisdom/failure-detector |

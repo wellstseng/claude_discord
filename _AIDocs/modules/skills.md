@@ -61,7 +61,7 @@ interface SkillResult {
 - `loadPromptSkills()` — 掃描 `dist/skills/builtin-prompt/**/SKILL.md`
 - `matchSkill(text)` — 前綴匹配 trigger，回傳 `{ skill, args }`
 
-## Builtin Skills（28 個）
+## Builtin Skills（29 個）
 
 ### 單一 export（`export const skill`）
 
