@@ -97,7 +97,7 @@ export async function handleCliBridgeReply(
   const showToolCalls = bridgeConfig.showToolCalls;
   const showThinking = cliBridgeConfig?.showThinking ?? false;
   const editIntervalMs = cliBridgeConfig?.editIntervalMs ?? 800;
-  const intermediateStyle = cliBridgeConfig?.showIntermediateText ?? "quote";
+  const intermediateStyle = cliBridgeConfig?.showIntermediateText ?? "none";
 
   let buffer = "";
   let thinkingBuffer = "";
