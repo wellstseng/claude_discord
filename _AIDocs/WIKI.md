@@ -291,7 +291,7 @@ Strategy Pattern 架構，4 策略依序執行：
 
 ### 4.7 Subagent 編排
 
-`spawn_subagent` tool 讓主 agent 啟動子 agent 執行獨立任務。
+`spawn_subagent` tool 讓 agent 啟動另一個 agent 執行獨立任務。
 
 **模式**：
 - `run`：一次性任務，完成後回傳結果

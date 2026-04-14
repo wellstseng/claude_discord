@@ -42,7 +42,7 @@ interface SkillContext {
   authorId: string;
   /** 平台帳號 ID（如 discord:{discordId}），平台就緒時有值 */
   accountId?: string;
-  /** 當前 boot agent ID */
+  /** 當前 agent ID */
   agentId?: string;
   config: BridgeConfig;
 }

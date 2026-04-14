@@ -56,7 +56,7 @@ reply-handler.ts ─── Streaming 分段回覆 → Discord
 | SafetyGuard | 指令攔截 + 協作衝突偵測 |
 | Dashboard | Web UI + REST API + trace 視覺化 |
 | WorkflowEngine | Rut/oscillation/fix-escalation/sync 偵測 |
-| SubagentRegistry | 子 agent 生命週期管理 |
+| SubagentRegistry | Subagent 生命週期管理 |
 
 ## 快速開始
 

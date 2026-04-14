@@ -62,9 +62,9 @@ export 所有型別定義（包括 cron.ts 使用的 `CronSchedule` / `CronActio
 
 | 欄位 | 型別 | 說明 |
 |------|------|------|
-| `defaultAgent` | `string?` | 無 `--agent` 參數時的預設 boot agent ID（預設 `"default"`） |
+| `defaultAgent` | `string?` | 無 `--agent` 參數時的預設啟動 agent ID（預設 `"default"`） |
 | `session` | `SessionConfig` | Session 持久化設定（ttlHours / maxHistoryTurns / compactAfterTurns / persistPath） |
-| `memory` | `MemoryConfig` | 記憶系統（recall / extract / consolidate / episodic / sessionMemory 等子區塊）。`root` 和 `vectorDbPath` 由 platform.ts 根據 boot agent 動態覆寫 |
+| `memory` | `MemoryConfig` | 記憶系統（recall / extract / consolidate / episodic / sessionMemory 等子區塊）。`root` 和 `vectorDbPath` 由 platform.ts 根據啟動 agent 動態覆寫 |
 | `ollama` | `OllamaConfig` | Ollama 雙 Backend 設定 |
 | `safety` | `SafetyConfig` | 安全設定（bash blacklist / filesystem / execApproval / toolPermissions / collabConflict / reversibility） |
 | `workflow` | `WorkflowConfig` | 工作流設定（guardian / fixEscalation / wisdomEngine / aidocs） |

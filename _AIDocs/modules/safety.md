@@ -92,9 +92,9 @@ runBeforeToolCall
 
 `runBeforeToolCall` 傳入 `agentId` + `isAdmin`（來自 `AgentLoopOpts`），確保 agent 路徑限制生效。
 
-### Boot Agent ID
+### 啟動 Agent ID
 
-主體（非 --agent 模式）啟動時 `setBootAgent("wendy", true)`，agentId 注入所有 agentLoop 呼叫。
+啟動時 `setBootAgent(agentId, isAdmin)` 設定當前 agent，agentId 注入所有 agentLoop 呼叫。
 空 agentId 的 `checkAgentWritePath` 顯式回傳 `blocked: false`（不受限）。
 
 ### 設定

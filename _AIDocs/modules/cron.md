@@ -6,7 +6,7 @@
 
 定時排程執行任務（發送訊息、呼叫 Claude、或執行 shell 指令），支援三種排程模式。
 Job 定義 + 執行狀態統一存在 `data/cron-jobs.json`，支援 hot-reload。
-每個 job 可帶 `agentId` 欄位做 agent 隔離（skill 建立時自動帶入 boot agent ID）。
+每個 job 可帶 `agentId` 欄位做 agent 隔離（skill 建立時自動帶入當前 agent ID）。
 `config.json` 控制 `cron.enabled`、`maxConcurrentRuns`、`defaultAccountId`、`defaultProvider`。
 
 ## 排程模式

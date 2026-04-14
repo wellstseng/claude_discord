@@ -8,12 +8,12 @@
 一次性初始化所有平台子系統，提供 module-level singleton getter。
 策略：`config.providers` 有設定 → 啟用新 agentLoop 路徑；否則保留舊 CLI 路徑。
 
-## Boot Agent 資料路徑
+## Agent 資料路徑
 
-`initPlatform` 啟動時透過 `getBootAgentDataDir(catclawDir)` 取得 boot agent 的資料目錄。
+`initPlatform` 啟動時透過 `getBootAgentDataDir(catclawDir)` 取得啟動 agent 的資料目錄。
 所有 per-agent 資料（memory、vectordb、workflow memoryDir）以此為根：
 
-- 主體 Wendy：`~/.catclaw/agents/wendy/`
+- 預設：`~/.catclaw/agents/{defaultAgent}/`（catclaw.json 的 `defaultAgent` 設定）
 - `--agent` 模式：`~/.catclaw/agents/{agentId}/`
 
 平台級設定（catclaw.json、accounts/、workspace/）留在 `~/.catclaw/` root。

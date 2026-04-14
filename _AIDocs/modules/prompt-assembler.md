@@ -47,7 +47,7 @@ detectIntent(userMessage: string): "coding" | "research" | "conversation"
 2. Agent 層級：agents/{bootAgentId}/CATCLAW.md（agent 專屬規則，疊加在全域之後）
 ```
 
-所有 agent（boot / sub）統一機制。子 agent 由 spawn-subagent.ts 的 `loadAgentPrompt()` 載入。
+所有 agent 統一機制。spawn 出的 agent 由 spawn-subagent.ts 的 `loadAgentPrompt()` 載入。
 
 自動建立：workspace 無 CATCLAW.md 時優先從 `templates/CATCLAW.md` 複製，否則用內建預設。
 

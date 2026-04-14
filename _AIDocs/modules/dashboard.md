@@ -142,7 +142,7 @@ Bearer token 認證（可選）：
 
 ### Memory
 
-所有 Memory 端點支援 `?agent=<agentId>` 查詢參數，切換查看不同 agent 的記憶。未指定時使用 boot agent。
+所有 Memory 端點支援 `?agent=<agentId>` 查詢參數，切換查看不同 agent 的記憶。未指定時使用啟動 agent。
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
