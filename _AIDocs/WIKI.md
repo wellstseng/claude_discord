@@ -1,7 +1,7 @@
 # CatClaw WIKI
 
 > Codex 版 Claude Code CLI + 多人 AI 開發平台
-> 最近更新：2026-04-07
+> 最近更新：2026-04-13
 
 ---
 
@@ -25,22 +25,25 @@ CatClaw 是一套以 Discord 為前端的多人 AI 開發平台，提供等同 C
 multi-turn agent loop、19 builtin tools、32 builtin skills、多 provider failover、
 四層記憶引擎、Context Engineering、subagent 編排、帳號/角色/權限系統、Web Dashboard。
 
-### 安裝
+### 一鍵安裝
 
 ```bash
-# 1. Clone
-git clone <repo-url> catclaw && cd catclaw
+git clone git@github.com:wellstseng/catclaw.git
+cd catclaw
+bash setup.sh
+```
 
-# 2. 安裝依賴（pnpm）
+`setup.sh` 自動完成：前置檢查（Node.js >= 18、pnpm、PM2）→ 安裝依賴 → 建立 `.env` → 初始化目錄 → 互動設定 Discord Token + API Key → 編譯 + PM2 啟動。
+
+### 手動安裝
+
+```bash
+git clone git@github.com:wellstseng/catclaw.git && cd catclaw
 pnpm install
-
-# 3. 初始化設定（自動複製 catclaw.example.json → ~/.catclaw/catclaw.json）
-node catclaw.js init
-
-# 4. 編輯設定：填入 discord.token，設定 guilds 權限
-#    位置：~/.catclaw/catclaw.json（JSONC 格式，支援 // 註解）
-
-# 5. 編譯 + 啟動
+cp .env.example .env
+node catclaw.js init    # 自動複製 catclaw.example.json → ~/.catclaw/catclaw.json
+# 編輯 ~/.catclaw/catclaw.json：填入 discord.token
+pnpm build
 node catclaw.js start
 ```
 
@@ -102,7 +105,7 @@ Discord 訊息
 |--------|------|
 | **Agent Loop** | 一軌制：CatClaw 控制所有 tool，LLM 只負責思考 |
 | **Provider** | Claude API / Ollama / OpenAI-compat / ACP CLI，failover + circuit-breaker |
-| **Memory** | 四層記憶引擎（Global / Project / Personal）+ LanceDB 向量搜尋 |
+| **Memory** | 四層記憶引擎（Global / Project / Account / Agent）+ LanceDB 向量搜尋 |
 | **Context Engine** | 4 策略壓縮：compaction / budget-guard / sliding-window / overflow-hard-stop |
 | **Session** | Per-channel 串行佇列 + 磁碟持久化 + TTL |
 | **Accounts** | 5 級角色（guest → platform-owner）+ Tool Tier 物理移除 |
@@ -390,6 +393,20 @@ Hook = 外部 shell command，在 agent-loop 關鍵時機點執行。
 
 > 詳見：[modules/hooks.md](modules/hooks.md)
 
+### 4.13 CLI Bridge
+
+持久 process 模式，在指定工作目錄啟動 Claude CLI 並綁定 Discord 頻道。
+
+**特性**：
+- 每個 Bridge = 一個持久 Claude CLI process，綁定特定 `channelId` + `cwd`
+- 設定存於 `cli-bridges.json`，支援 hot-reload
+- Auto-restart on crash，keepAlive 機制
+- 中間推理文字格式化 + 可選 `showIntermediateText`
+
+**新增 Bridge**：在 Discord 使用 `/add-bridge label=<name> channel=<id> cwd=<path>`
+
+> 詳見：[modules/cli-bridge.md](modules/cli-bridge.md)
+
 ---
 
 ## 5. 部署與維運
@@ -498,7 +515,9 @@ strip 註解後仍需合法 JSON，否則 hot-reload 持續失敗。
 | [mcp-client.md](modules/mcp-client.md) | `src/mcp/client.ts` | MCP 整合 |
 | [discord.md](modules/discord.md) | `src/discord.ts` | Discord 入口 |
 | [inbound-history.md](modules/inbound-history.md) | `src/discord/inbound-history.ts` | 未處理訊息記錄 |
+| [cli-bridge.md](modules/cli-bridge.md) | `src/cli-bridge/` | CLI Bridge 持久 process |
 | [cron.md](modules/cron.md) | `src/cron.ts` | 排程服務 |
+| [acp.md](modules/acp.md) | `src/acp.ts` | Legacy CLI spawn（僅 cron 使用） |
 | [config.md](modules/config.md) | `src/core/config.ts` | JSON 設定載入 |
 | [logger.md](modules/logger.md) | `src/logger.ts` | Log 系統 |
 | [pm2.md](modules/pm2.md) | `catclaw.js` | PM2 進程管理 |

@@ -652,6 +652,11 @@ label.cfg-toggle { min-width: 36px; }
 <!-- Chat -->
 <!-- Memory -->
 <div id="pane-memory" class="pane">
+  <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px">
+    <label style="font-size:0.85rem;color:var(--fg2)">Agent:</label>
+    <select id="mem-agent-select" style="padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.85rem" onchange="onMemAgentChange()">
+    </select>
+  </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
     <!-- Stats Panel -->
     <div class="card">
@@ -898,7 +903,7 @@ function switchTab(id, el) {
   if (id === 'traces') { loadTraces(); _traceAutoRefresh = setInterval(loadTraces, 5000); }
   if (id === 'cron') loadCron();
   if (id === 'config') loadCfg();
-  if (id === 'memory') loadMemory();
+  if (id === 'memory') { loadAgentList().then(() => loadMemory()); }
   if (id === 'pipeline') loadPipeline();
   if (id === 'clibridge') { cbLoadConfig(); loadCliBridges(); _cbAutoRefresh = setInterval(() => { loadCliBridges(); if (_cbSelectedLabel) cbLoadStatus(); }, 10000); }
   if (id !== 'clibridge') cbDisconnectStream();
@@ -2630,12 +2635,34 @@ async function loadAndShowContext(traceId) {
 
 // ── Memory ─────────────────────────────────────────────────────────────────
 let _memAtoms = [];
+let _memAgent = '';
+
+async function loadAgentList() {
+  try {
+    const agents = await authFetch('/api/agents').then(r => r.json());
+    const sel = document.getElementById('mem-agent-select');
+    if (!sel) return;
+    sel.innerHTML = agents.map(a =>
+      '<option value="' + a.id + '"' + (a.isBoot ? ' selected' : '') + '>' + a.id + (a.isBoot ? ' (boot)' : '') + (!a.hasMemory ? ' (no memory)' : '') + '</option>'
+    ).join('');
+    _memAgent = sel.value;
+  } catch (e) { console.warn('loadAgentList failed:', e); }
+}
+
+function memAgentParam() {
+  return _memAgent ? '?agent=' + encodeURIComponent(_memAgent) : '';
+}
+
+function onMemAgentChange() {
+  _memAgent = document.getElementById('mem-agent-select').value;
+  loadMemory();
+}
 
 async function loadMemory() {
   try {
     const [atoms, stats] = await Promise.all([
-      authFetch('/api/memory/atoms').then(r => r.json()),
-      authFetch('/api/memory/stats').then(r => r.json()),
+      authFetch('/api/memory/atoms' + memAgentParam()).then(r => r.json()),
+      authFetch('/api/memory/stats' + memAgentParam()).then(r => r.json()),
     ]);
     _memAtoms = atoms;
     renderMemStats(stats);
@@ -2698,7 +2725,7 @@ function sortMemAtoms() {
 
 async function showMemDetail(name) {
   try {
-    const atom = await authFetch('/api/memory/atoms/' + encodeURIComponent(name)).then(r => r.json());
+    const atom = await authFetch('/api/memory/atoms/' + encodeURIComponent(name) + memAgentParam()).then(r => r.json());
     document.getElementById('mem-detail-title').textContent = atom.name;
     document.getElementById('mem-detail-content').textContent = atom.content || atom.raw || '(空)';
     document.getElementById('mem-detail-meta').innerHTML =
@@ -2718,7 +2745,7 @@ function closeMemDetail() {
 async function deleteMemAtom(name) {
   if (!confirm('確定刪除 atom "' + name + '"？')) return;
   try {
-    await authFetch('/api/memory/atoms/' + encodeURIComponent(name), { method: 'DELETE' });
+    await authFetch('/api/memory/atoms/' + encodeURIComponent(name) + memAgentParam(), { method: 'DELETE' });
     loadMemory();
   } catch (e) { alert('刪除失敗: ' + e.message); }
 }
@@ -2730,7 +2757,7 @@ async function testMemRecall() {
   const el = document.getElementById('mem-recall-result');
   el.innerHTML = '<div style="color:var(--fg3)">查詢中...</div>';
   try {
-    const r = await authFetch('/api/memory/recall-test', {
+    const r = await authFetch('/api/memory/recall-test' + memAgentParam(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt }),
@@ -2915,7 +2942,7 @@ async function pipelineRecallTest() {
   var el = document.getElementById('pl-recall-result');
   el.innerHTML = '<div style="color:var(--fg2)">查詢中...</div>';
   try {
-    var r = await authFetch('/api/memory/recall-test', {
+    var r = await authFetch('/api/memory/recall-test' + memAgentParam(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: prompt }),
@@ -3493,10 +3520,13 @@ export class DashboardServer {
   start(): void {
     const authToken = this.token;
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      const url = req.url ?? "/";
+      const rawUrl = req.url ?? "/";
+      const urlObj = new URL(rawUrl, "http://localhost");
+      const url = urlObj.pathname;
+      const urlParams = urlObj.searchParams;
       const method = req.method ?? "GET";
 
-      if (!this.checkAuth(req, url)) {
+      if (!this.checkAuth(req, rawUrl)) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized. Provide ?token=xxx or Authorization: Bearer xxx" }));
         return;
@@ -4615,14 +4645,47 @@ export class DashboardServer {
       // Memory API
       // ══════════════════════════════════════════════════════════════════════
 
+      // helper: 根據 ?agent= 參數解析 memRoot
+      const resolveMemRootForAgent = async (): Promise<string> => {
+        const agentParam = urlParams.get("agent");
+        if (agentParam) {
+          const { resolveCatclawDir } = await import("./config.js");
+          return join(resolveCatclawDir(), "agents", agentParam, "memory");
+        }
+        const { getBootAgentDataDir } = await import("./agent-loader.js");
+        return join(getBootAgentDataDir(), "memory");
+      };
+
+      // GET /api/agents — 列出所有 agent
+      if (url === "/api/agents" && method === "GET") {
+        void (async () => {
+          try {
+            const { resolveCatclawDir } = await import("./config.js");
+            const { getBootAgentId } = await import("./agent-loader.js");
+            const agentsDir = join(resolveCatclawDir(), "agents");
+            const agents: Array<{ id: string; hasMemory: boolean; isBoot: boolean }> = [];
+            if (existsSync(agentsDir)) {
+              for (const d of readdirSync(agentsDir)) {
+                if (d.startsWith(".")) continue;
+                const memDir = join(agentsDir, d, "memory");
+                agents.push({ id: d, hasMemory: existsSync(memDir), isBoot: d === getBootAgentId() });
+              }
+            }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(agents));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
+        return;
+      }
+
       // GET /api/memory/atoms — 列出所有 atom
       if (url === "/api/memory/atoms" && method === "GET") {
         void (async () => {
           try {
             const { listAtoms } = await import("../memory/memory-api.js");
-            const { config } = await import("./config.js");
-            const { getBootAgentDataDir } = await import("./agent-loader.js");
-            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
+            const memRoot = await resolveMemRootForAgent();
             const dirs = [memRoot];
             // 加入 accounts 子目錄
             const accountsDir = join(memRoot, "accounts");
@@ -4646,9 +4709,7 @@ export class DashboardServer {
         void (async () => {
           try {
             const { getStats } = await import("../memory/memory-api.js");
-            const { config } = await import("./config.js");
-            const { getBootAgentDataDir } = await import("./agent-loader.js");
-            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
+            const memRoot = await resolveMemRootForAgent();
             const dirs = [memRoot];
             const accountsDir = join(memRoot, "accounts");
             if (existsSync(accountsDir)) {
@@ -4672,9 +4733,7 @@ export class DashboardServer {
           try {
             const name = decodeURIComponent(url!.split("/api/memory/atoms/")[1]);
             const { getAtom } = await import("../memory/memory-api.js");
-            const { config } = await import("./config.js");
-            const { getBootAgentDataDir } = await import("./agent-loader.js");
-            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
+            const memRoot = await resolveMemRootForAgent();
             const dirs = [memRoot];
             const accountsDir = join(memRoot, "accounts");
             if (existsSync(accountsDir)) {
@@ -4697,9 +4756,7 @@ export class DashboardServer {
           try {
             const name = decodeURIComponent(url!.split("/api/memory/atoms/")[1]);
             const { deleteAtom } = await import("../memory/memory-api.js");
-            const { config } = await import("./config.js");
-            const { getBootAgentDataDir } = await import("./agent-loader.js");
-            const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
+            const memRoot = await resolveMemRootForAgent();
             const dirs = [memRoot];
             const ok = deleteAtom(dirs, name);
             res.writeHead(ok ? 200 : 404);
@@ -4720,9 +4777,7 @@ export class DashboardServer {
             try {
               const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { prompt: string; accountId?: string };
               const { testRecall } = await import("../memory/memory-api.js");
-              const { config } = await import("./config.js");
-              const { getBootAgentDataDir } = await import("./agent-loader.js");
-              const memRoot = config.memory?.root?.replace("~", homedir()) ?? join(getBootAgentDataDir(), "memory");
+              const memRoot = await resolveMemRootForAgent();
               const accountId = body.accountId ?? "test";
               const result = await testRecall(
                 body.prompt,
@@ -4931,12 +4986,11 @@ export class DashboardServer {
         void (async () => {
           try {
             const { getPlatformMemoryEngine } = await import("./platform.js");
-            const { getBootAgentDataDir } = await import("./agent-loader.js");
             const engine = getPlatformMemoryEngine();
             if (!engine) { res.writeHead(500); res.end(JSON.stringify({ error: "MemoryEngine 未啟動" })); return; }
 
             const status = engine.getStatus();
-            const memRoot = join(getBootAgentDataDir(), "memory");
+            const memRoot = await resolveMemRootForAgent();
             const layers: Array<{ label: string; dir: string; namespace: string }> = [];
             layers.push({ label: "global", dir: status.globalDir, namespace: "global" });
 

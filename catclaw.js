@@ -160,7 +160,7 @@ function ensureInitialized() {
 
 1. 編譯程式碼（若有修改）：
    \`\`\`bash
-   npx tsc
+   pnpm build
    \`\`\`
 
 2. 寫入重啟信號（帶入頻道 ID，讓重啟後可回報）：
@@ -234,7 +234,7 @@ switch (cmd) {
       process.exit(0);
     }
 
-    run("npx tsc");
+    run("npx pnpm build");
     mkdirSync(resolve(__dirname, "signal"), { recursive: true });
     // --update-env：確保 ecosystem.config.cjs 的 env 覆蓋舊 PM2 進程環境（-f 必填）
     run(forceFlag
@@ -250,7 +250,7 @@ switch (cmd) {
     break;
 
   case "restart":
-    run("npx tsc");
+    run("npx pnpm build");
     triggerRestart();
     run("npx pm2 restart catclaw");
     console.log("🔄 catclaw 已重啟");
