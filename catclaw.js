@@ -32,7 +32,7 @@ if (existsSync(_envPath)) {
   }
 }
 
-/** String-aware JSONC comment stripper（跳過字串內的 //、/* */，如 URL） */
+/** String-aware JSONC comment stripper（跳過字串內的 //，刪除行注解和區塊注解） */
 function stripJsoncComments(text) {
   let result = "";
   let inString = false;
