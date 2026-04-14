@@ -1,6 +1,6 @@
 # skills — 內建 Skill 系統
 
-> 更新日期：2026-04-12
+> 更新日期：2026-04-13
 
 ## 檔案結構
 
@@ -8,7 +8,7 @@
 src/skills/
   types.ts          — Skill, SkillContext, SkillResult 型別
   registry.ts       — loadBuiltinSkills(), loadPromptSkills(), matchSkill()
-  builtin/          — TypeScript 執行型 skills（23 檔 / 29 個 skill）
+  builtin/          — TypeScript 執行型 skills（24 檔 / 30 個 skill）
   builtin-prompt/   — SKILL.md 格式 prompt-type skills（3 個）
 ```
 
@@ -61,7 +61,7 @@ interface SkillResult {
 - `loadPromptSkills()` — 掃描 `dist/skills/builtin-prompt/**/SKILL.md`
 - `matchSkill(text)` — 前綴匹配 trigger，回傳 `{ skill, args }`
 
-## Builtin Skills（29 個）
+## Builtin Skills（30 個）
 
 ### 單一 export（`export const skill`）
 
@@ -79,6 +79,7 @@ interface SkillResult {
 | `plan.ts` | plan | 計畫管理 |
 | `project.ts` | project | 專案管理 |
 | `register.ts` | register | 帳號註冊 |
+| `remind.ts` | remind | 提醒/排程管理（trigger: `/remind`、`/提醒`、`/排程`、`/cron add/list/delete`） |
 | `restart.ts` | restart | 重啟（trigger: `重啟`、`重啟catclaw`、`重啟 catclaw`、`restart`、`restart catclaw`） |
 | `session-manage.ts` | session | Session 管理 |
 | `subagents.ts` | subagents | 子 agent 管理 |

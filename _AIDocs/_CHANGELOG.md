@@ -3,6 +3,7 @@
 > 知識庫變更紀錄（最新在上，超過 8 筆觸發滾動淘汰）
 
 | 日期 | 變更 | 影響文件 |
+| 2026-04-13 | **feat: /remind skill + cron 公開 CRUD API** — ①新增 remind.ts skill（/remind、/提醒、/排程、/cron），支援一次性/重複/cron 排程建立、列出、刪除②cron.ts 新增 addCronJob/removeCronJob/listCronJobs 公開 API③全域 skill 數量更新 29→30 TS / 32→33 total | src/skills/builtin/remind.ts, src/cron.ts, _AIDocs/modules/{skills,cron}.md, README.md, README.en.md, WIKI.md, 00-OVERVIEW.md, _INDEX.md |
 | 2026-04-13 | **docs: README.md 重寫 + WIKI.md 更新 + setup.sh 一鍵安裝** — ①README.md：GitHub 標準格式重寫，含架構圖、一鍵安裝、CLI、Dashboard、Skills 說明②WIKI.md：安裝段落加入 setup.sh、新增 CLI Bridge 4.13 區段、修正 Memory 層名 Personal→Account/Agent、模組索引補齊 cli-bridge+acp③setup.sh：7 步互動安裝腳本（前置檢查/pnpm/env/目錄/Token/APIKey/編譯啟動） | README.md, _AIDocs/WIKI.md, setup.sh |
 | 2026-04-13 | **audit: 100% 覆蓋率補齊** — ①vector-service.md：新增 Embedding Provider 抽象層（4 provider class + factory + singleton）②discord.md：新增 Bot Circuit Breaker 區段（API + 觸發條件 + 設定）③memory-engine.md：擴充 episodic.ts（生成門檻/覆轍偵測/TTL/跨 session 掃描）+ session-memory.ts（機制/API）詳細文件④_INDEX.md：更新 3 處模組描述+日期 | _AIDocs/modules/{vector-service,discord,memory-engine}.md, _AIDocs/_INDEX.md |
 | 2026-04-13 | **audit: 知識庫全面同步** — ①_INDEX/WIKI/00-OVERVIEW：tools 17+→19、skills→32(29 TS+3 prompt) 全域統一②tool-registry.md：新增 atom_write tool、count→19③dashboard.md：行數→5325、新增 /api/agents + Memory ?agent= + cli-bridge export④acp.md：標記 Legacy、移除不存在的 AGENTS.md/--system-prompt 描述、修正 reply.ts 引用⑤platform.md：初始化步數 12→13⑥刪除孤兒檔 src/reply.ts⑦深度邏輯審計 8 模組全部通過 | _AIDocs 全域, src/reply.ts (deleted) |

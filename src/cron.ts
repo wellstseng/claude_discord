@@ -728,4 +728,44 @@ export function getCronStorePath(): string {
   return STORE_PATH;
 }
 
+// ── 公開 CRUD API（供 skill / tool 呼叫）─────────────────────────────────────
+
+/**
+ * 動態新增 cron job（寫入 store + 持久化，hot-reload 自動生效）
+ * @returns job ID
+ */
+export function addCronJob(entry: Omit<CronJobEntry, "nextRunAtMs" | "lastRunAtMs" | "lastResult" | "lastError" | "retryCount">): string {
+  const id = entry.name.replace(/\s+/g, "-").toLowerCase() + "-" + randomUUID().slice(0, 6);
+  const nowMs = Date.now();
+  const full: CronJobEntry = {
+    ...entry,
+    retryCount: 0,
+    nextRunAtMs: computeNextRunAtMs(entry.schedule, nowMs),
+  };
+  store.jobs[id] = full;
+  saveStore();
+  log.info(`[cron] 動態新增 job: ${entry.name} (${id}), next: ${new Date(full.nextRunAtMs!).toISOString()}`);
+  return id;
+}
+
+/**
+ * 刪除 cron job
+ * @returns 是否成功刪除
+ */
+export function removeCronJob(id: string): boolean {
+  if (!store.jobs[id]) return false;
+  const name = store.jobs[id].name;
+  delete store.jobs[id];
+  saveStore();
+  log.info(`[cron] 動態刪除 job: ${name} (${id})`);
+  return true;
+}
+
+/**
+ * 列出所有 cron job（供 skill / dashboard 使用）
+ */
+export function listCronJobs(): Array<{ id: string; entry: CronJobEntry }> {
+  return Object.entries(store.jobs).map(([id, entry]) => ({ id, entry }));
+}
+
 export type { CronJobEntry };

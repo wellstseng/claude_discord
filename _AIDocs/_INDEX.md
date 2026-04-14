@@ -6,7 +6,7 @@
 
 CatClaw = Codex 版 Claude Code CLI + 多人 AI 開發平台。
 以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、19 builtin tools、
-32 builtin skills（29 TS + 3 prompt）、多 provider failover、四層記憶引擎、Context Engineering、subagent 編排、
+33 builtin skills（30 TS + 3 prompt）、多 provider failover、四層記憶引擎、Context Engineering、subagent 編排、
 帳號/角色/權限系統、Web Dashboard + Trace 追蹤。
 
 ## 架構一句話摘要
@@ -33,7 +33,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Accounts | `src/accounts/` | 帳號 + 角色 + 權限 + identity linking |
 | Providers | `src/providers/` | LLM Provider 抽象：claude-api / codex-oauth / cli-claude / cli-gemini / cli-codex / ollama / openai-compat + failover + circuit-breaker |
 | Tools | `src/tools/` | Tool 註冊 + 19 builtin tools（read/write/edit/glob/grep/run/web/memory/subagent/task/atom_write...） |
-| Skills | `src/skills/` | Skill registry + 32 builtin skills（29 TS + 3 prompt） |
+| Skills | `src/skills/` | Skill registry + 33 builtin skills（30 TS + 3 prompt） |
 | Hooks | `src/hooks/` | Hook 系統：registry + runner（tool 前後觸發） |
 | Safety | `src/safety/` | 安全攔截：guard + collab-conflict |
 | Workflow | `src/workflow/` | 工作流引擎：rut/oscillation/fix-escalation/sync/wisdom/failure-detector |

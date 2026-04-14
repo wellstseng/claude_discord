@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **繁體中文**
 
-以 Discord 為介面的 AI Agent 運行平台 — multi-turn agent loop、19 builtin tools、32 builtin skills、多 provider failover、四層記憶引擎、Web Dashboard。
+以 Discord 為介面的 AI Agent 運行平台 — multi-turn agent loop、19 builtin tools、33 builtin skills、多 provider failover、四層記憶引擎、Web Dashboard。
 
 ## 功能總覽
 
@@ -10,7 +10,7 @@
 |------|------|
 | **Agent Loop** | Multi-turn 推理迴圈、tool 執行、output token recovery、auto-compact |
 | **Tools** | 19 builtin tools — 檔案讀寫編輯、glob、grep、bash 執行、web 抓取/搜尋、記憶、subagent、任務管理 |
-| **Skills** | 32 builtin skills（29 TypeScript + 3 prompt 型）— config、session、account、status、restart、plan 等 |
+| **Skills** | 33 builtin skills（30 TypeScript + 3 prompt 型）— config、session、account、status、restart、plan、remind 等 |
 | **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / cli-* + circuit-breaker failover |
 | **記憶引擎** | 四層記憶（Global / Project / Account / Agent）— 向量 recall + 關鍵字搜尋 + 自動萃取 + 晉升/衰減 |
 | **Context Engine** | compaction / budget-guard / sliding-window / overflow-hard-stop 四策略 |
@@ -254,7 +254,7 @@ src/
   memory/         四層記憶引擎（engine、recall、extract、consolidate）
   providers/      LLM Provider 抽象（claude-api、ollama、openai-compat、cli-*）
   tools/          Tool Registry + 19 builtin tools
-  skills/         Skill Registry + 32 builtin skills（29 TS + 3 prompt）
+  skills/         Skill Registry + 33 builtin skills（30 TS + 3 prompt）
   hooks/          Hook 系統（tool 前後觸發）
   safety/         安全攔截（guard、collab-conflict）
   workflow/       工作流引擎（rut、oscillation、fix-escalation、sync）

@@ -2,7 +2,7 @@
 
 **English** | [繁體中文](README.md)
 
-Discord-based AI Agent platform with full development capabilities — multi-turn agent loop, 19 builtin tools, 32 builtin skills, multi-provider failover, four-layer memory engine, and web dashboard.
+Discord-based AI Agent platform with full development capabilities — multi-turn agent loop, 19 builtin tools, 33 builtin skills, multi-provider failover, four-layer memory engine, and web dashboard.
 
 ## Features
 
@@ -10,7 +10,7 @@ Discord-based AI Agent platform with full development capabilities — multi-tur
 |----------|-------------|
 | **Agent Loop** | Multi-turn reasoning loop, tool execution, output token recovery, auto-compact |
 | **Tools** | 19 builtin tools — file read/write/edit, glob, grep, bash exec, web fetch/search, memory, subagent, task management |
-| **Skills** | 32 builtin skills (29 TypeScript + 3 prompt-type) — config, session, account, status, restart, plan, and more |
+| **Skills** | 33 builtin skills (30 TypeScript + 3 prompt-type) — config, session, account, status, restart, plan, remind, and more |
 | **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / cli-* + circuit-breaker failover |
 | **Memory** | Four-layer engine (Global / Project / Account / Agent) — vector recall + keyword search + auto-extraction + consolidation |
 | **Context Engine** | Compaction / budget-guard / sliding-window / overflow-hard-stop strategies |
@@ -254,7 +254,7 @@ src/
   memory/         Four-layer memory engine (engine, recall, extract, consolidate)
   providers/      LLM Provider abstraction (claude-api, ollama, openai-compat, cli-*)
   tools/          Tool Registry + 19 builtin tools
-  skills/         Skill Registry + 32 builtin skills (29 TS + 3 prompt)
+  skills/         Skill Registry + 33 builtin skills (30 TS + 3 prompt)
   hooks/          Hook system (pre/post tool execution)
   safety/         Safety interception (guard, collab-conflict)
   workflow/       Workflow engine (rut, oscillation, fix-escalation, sync)

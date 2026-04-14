@@ -22,7 +22,7 @@
 ### CatClaw 是什麼
 
 CatClaw 是一套以 Discord 為前端的多人 AI 開發平台，提供等同 Claude Code 的完整開發能力：
-multi-turn agent loop、19 builtin tools、32 builtin skills、多 provider failover、
+multi-turn agent loop、19 builtin tools、33 builtin skills、多 provider failover、
 四層記憶引擎、Context Engineering、subagent 編排、帳號/角色/權限系統、Web Dashboard。
 
 ### 一鍵安裝
@@ -110,7 +110,7 @@ Discord 訊息
 | **Session** | Per-channel 串行佇列 + 磁碟持久化 + TTL |
 | **Accounts** | 5 級角色（guest → platform-owner）+ Tool Tier 物理移除 |
 | **Tools** | 19 builtin tools + MCP tool 自動整合 |
-| **Skills** | 32 builtin skills（29 TS + 3 prompt） |
+| **Skills** | 33 builtin skills（30 TS + 3 prompt） |
 | **Dashboard** | Web 監控面板 + REST API + Web Chat |
 | **Cron** | 排程服務（cron/every/at）+ 4 種動作型別 |
 | **Hooks** | Shell command 在 tool 執行前後觸發 |
@@ -124,7 +124,7 @@ catclaw/                          <- 程式碼
 │   ├── core/                     核心模組（agent-loop, session, dashboard...）
 │   ├── providers/                LLM Provider 抽象層
 │   ├── tools/                    19 builtin tools
-│   ├── skills/                   32 builtin skills
+│   ├── skills/                   33 builtin skills
 │   ├── memory/                   四層記憶引擎
 │   ├── accounts/                 帳號/角色/權限
 │   ├── hooks/                    Hook 系統
@@ -221,9 +221,9 @@ LLM 需先呼叫 `tool_search` 載入完整 schema 才能使用（節省 context
 
 > 詳見：[modules/tool-registry.md](modules/tool-registry.md)
 
-### 4.3 Skill 系統（32 builtin skills）
+### 4.3 Skill 系統（33 builtin skills）
 
-Skill = Discord 指令層，在 agent loop 之前攔截。29 個 TypeScript 執行型（23 檔）+ 3 個 prompt 型。
+Skill = Discord 指令層，在 agent loop 之前攔截。30 個 TypeScript 執行型（24 檔）+ 3 個 prompt 型。
 
 **觸發**：前綴匹配（如 `/think`、`/mode`、`/use`、`/stop`、`/plan`、`/status`）
 
