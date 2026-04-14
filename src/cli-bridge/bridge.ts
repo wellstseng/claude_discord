@@ -343,7 +343,7 @@ export class CliBridge {
   async shutdown(): Promise<void> {
     log.info(`[cli-bridge:${this.label}] shutdown`);
     this.stopKeepAlive();
-    this.failAllPendingTurns("bridge 關閉中");
+    this.failAllPendingTurns("bridge 關閉中", true);
 
     if (this.process?.alive) {
       await this.process.shutdown();
@@ -803,24 +803,40 @@ export class CliBridge {
     };
   }
 
-  private failAllPendingTurns(reason: string): void {
+  /**
+   * @param reason 失敗原因
+   * @param silent true 時不送 error event 到 reply handler（用於 graceful shutdown，避免在 Discord 顯示紅色錯誤）
+   */
+  private failAllPendingTurns(reason: string, silent = false): void {
     // 清除所有 turn timeout
     for (const [, timer] of this.turnTimeouts) clearTimeout(timer);
     this.turnTimeouts.clear();
 
-    for (const [turnId, listener] of this.turnListeners) {
-      if (!listener.done) {
-        listener.done = true;
-        const errEvt: CliBridgeEvent = { type: "error", message: reason };
-        if (listener.resolve) listener.resolve(errEvt);
-        else listener.queue.push(errEvt);
+    if (!silent) {
+      for (const [turnId, listener] of this.turnListeners) {
+        if (!listener.done) {
+          listener.done = true;
+          const errEvt: CliBridgeEvent = { type: "error", message: reason };
+          if (listener.resolve) listener.resolve(errEvt);
+          else listener.queue.push(errEvt);
+        }
+      }
+    } else {
+      // silent：直接標記 done，不送 error（reply handler 會因 generator return 自然結束）
+      for (const [turnId, listener] of this.turnListeners) {
+        if (!listener.done) {
+          listener.done = true;
+          const doneEvt: CliBridgeEvent = { type: "result", is_error: false };
+          if (listener.resolve) listener.resolve(doneEvt);
+          else listener.queue.push(doneEvt);
+        }
       }
     }
     for (const [turnId, pending] of this.pendingTurns) {
       pending.record.completedAt = new Date().toISOString();
       pending.record.assistantReply = pending.textParts.join("");
-      pending.record.discordDelivery = "failed";
-      pending.record.failedReason = reason;
+      pending.record.discordDelivery = silent ? "success" : "failed";
+      pending.record.failedReason = silent ? undefined : reason;
       this.stdoutLogger.recordTurn(pending.record);
     }
     this.pendingTurns.clear();
