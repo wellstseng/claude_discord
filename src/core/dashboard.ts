@@ -4658,8 +4658,8 @@ export class DashboardServer {
       const resolveMemRootForAgent = async (): Promise<string> => {
         const agentParam = urlParams.get("agent");
         if (agentParam) {
-          const { resolveCatclawDir } = await import("./config.js");
-          return join(resolveCatclawDir(), "agents", agentParam, "memory");
+          const { resolveAgentDataDir } = await import("./agent-loader.js");
+          return join(resolveAgentDataDir(agentParam), "memory");
         }
         const { getBootAgentDataDir } = await import("./agent-loader.js");
         return join(getBootAgentDataDir(), "memory");
@@ -4669,10 +4669,9 @@ export class DashboardServer {
       if (url === "/api/agents" && method === "GET") {
         void (async () => {
           try {
-            const { resolveCatclawDir } = await import("./config.js");
-            const { getBootAgentId } = await import("./agent-loader.js");
-            const agentsDir = join(resolveCatclawDir(), "agents");
-            const { loadAgentConfig } = await import("./agent-loader.js");
+            const { resolveWorkspaceDir } = await import("./config.js");
+            const { getBootAgentId, loadAgentConfig } = await import("./agent-loader.js");
+            const agentsDir = join(resolveWorkspaceDir(), "agents");
             const agents: Array<{ id: string; hasMemory: boolean; isBoot: boolean; label?: string; admin?: boolean; globalMemoryWrite?: boolean; hasCatclawMd: boolean }> = [];
             if (existsSync(agentsDir)) {
               for (const d of readdirSync(agentsDir)) {
