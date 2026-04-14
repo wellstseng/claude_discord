@@ -9,7 +9,7 @@
 | 類別 | 能力 |
 |------|------|
 | **Agent Loop** | Multi-turn 推理迴圈、tool 執行、output token recovery、auto-compact |
-| **Tools** | 21 builtin tools — 檔案讀寫編輯、glob、grep、bash 執行、web 抓取/搜尋、記憶、subagent、任務管理 |
+| **Tools** | 21 builtin tools — 檔案讀寫編輯、glob、grep、bash 執行、web 抓取/搜尋、記憶、subagent、任務管理、skill 執行 |
 | **Skills** | 33 builtin skills（30 TypeScript + 3 prompt 型）— config、session、account、status、restart、plan、remind 等 |
 | **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / cli-* + circuit-breaker failover |
 | **記憶引擎** | 四層記憶（Global / Project / Account / Agent）— 向量 recall + 關鍵字搜尋 + 自動萃取 + 晉升/衰減 |

@@ -9,7 +9,7 @@ Discord-based AI Agent platform with full development capabilities — multi-tur
 | Category | Capabilities |
 |----------|-------------|
 | **Agent Loop** | Multi-turn reasoning loop, tool execution, output token recovery, auto-compact |
-| **Tools** | 21 builtin tools — file read/write/edit, glob, grep, bash exec, web fetch/search, memory, subagent, task management |
+| **Tools** | 21 builtin tools — file read/write/edit, glob, grep, bash exec, web fetch/search, memory, subagent, task management, skill execution |
 | **Skills** | 33 builtin skills (30 TypeScript + 3 prompt-type) — config, session, account, status, restart, plan, remind, and more |
 | **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / cli-* + circuit-breaker failover |
 | **Memory** | Four-layer engine (Global / Project / Account / Agent) — vector recall + keyword search + auto-extraction + consolidation |

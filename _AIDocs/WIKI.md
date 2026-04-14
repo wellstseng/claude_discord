@@ -224,6 +224,7 @@ LLM 需先呼叫 `tool_search` 載入完整 schema 才能使用（節省 context
 ### 4.3 Skill 系統（33 builtin skills）
 
 Skill = Discord 指令層，在 agent loop 之前攔截。30 個 TypeScript 執行型（24 檔）+ 3 個 prompt 型。
+LLM 也可透過 `skill` tool 主動執行 builtin skill（不需引導使用者手動輸入）。
 
 **觸發**：前綴匹配（如 `/think`、`/mode`、`/use`、`/stop`、`/plan`、`/status`）
 
