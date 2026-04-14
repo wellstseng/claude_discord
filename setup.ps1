@@ -22,7 +22,7 @@ function Write-Utf8($path, $text) { [System.IO.File]::WriteAllText($path, $text,
 # ═══════════════════════════════════════════════════════════════════
 # Step 1: 前置需求檢查
 # ═══════════════════════════════════════════════════════════════════
-Step "Step 1/7: 前置需求檢查"
+Step "Step 1/9: 前置需求檢查"
 
 # Node.js
 $nodePath = Get-Command node -ErrorAction SilentlyContinue
@@ -56,7 +56,7 @@ if (-not $pm2Path) {
 # ═══════════════════════════════════════════════════════════════════
 # Step 2: 安裝依賴
 # ═══════════════════════════════════════════════════════════════════
-Step "Step 2/7: 安裝 Node.js 依賴"
+Step "Step 2/9: 安裝 Node.js 依賴"
 
 Push-Location $ProjectDir
 try {
@@ -70,7 +70,7 @@ try {
 # ═══════════════════════════════════════════════════════════════════
 # Step 3: 建立 .env
 # ═══════════════════════════════════════════════════════════════════
-Step "Step 3/7: 環境變數設定"
+Step "Step 3/9: 環境變數設定"
 
 $EnvFile = Join-Path $ProjectDir ".env"
 if (Test-Path $EnvFile) {
@@ -100,7 +100,7 @@ CATCLAW_WORKSPACE=$Workspace
 # ═══════════════════════════════════════════════════════════════════
 # Step 4: 初始化目錄結構
 # ═══════════════════════════════════════════════════════════════════
-Step "Step 4/7: 初始化目錄結構"
+Step "Step 4/9: 初始化目錄結構"
 
 # 建立目錄
 $dirs = @(
@@ -160,7 +160,7 @@ Ok "目錄結構就緒"
 # ═══════════════════════════════════════════════════════════════════
 # Step 5: 互動設定 — Discord Bot Token
 # ═══════════════════════════════════════════════════════════════════
-Step "Step 5/7: Discord Bot Token 設定"
+Step "Step 5/9: Discord Bot Token 設定"
 
 # 讀取 JSONC：去掉 // 註解後 parse
 function Read-Jsonc($path) {
@@ -229,9 +229,73 @@ if ($NeedToken) {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# Step 6: 互動設定 — LLM Provider API Key
+# Step 6: 預設 Discord 頻道
 # ═══════════════════════════════════════════════════════════════════
-Step "Step 6/7: LLM Provider 設定"
+Step "Step 6/9: Discord 預設頻道設定"
+
+# 檢查是否已有 guilds
+$ExistingGuilds = 0
+try {
+    $cfg2 = Read-Jsonc $CatclawJson
+    $guildKeys = $cfg2.discord.guilds | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name
+    $ExistingGuilds = ($guildKeys | Measure-Object).Count
+} catch {}
+
+if ($ExistingGuilds -gt 0) {
+    Info "已有 $ExistingGuilds 個 Guild 設定，跳過"
+} else {
+    Write-Host ""
+    Write-Host "  預設 Discord 頻道" -ForegroundColor White
+    Write-Host "  格式：guildId:channelId（多個以逗號分隔）"
+    Write-Host "  範例：123456789:987654321,123456789:111222333"
+    Write-Host ""
+    Write-Host "  取得方式："
+    Write-Host "    1. Discord 設定 -> 進階 -> 開啟「開發者模式」"
+    Write-Host "    2. 右鍵點 Server -> 複製 Server ID（= guildId）"
+    Write-Host "    3. 右鍵點頻道 -> 複製頻道 ID（= channelId）"
+    Write-Host ""
+    $ChannelsInput = Read-Host "  輸入頻道（留空稍後手動設定）"
+
+    if ($ChannelsInput) {
+        # 解析 guildId:channelId 並建立 guilds 結構
+        $guildsObj = @{}
+        foreach ($pair in $ChannelsInput -split ',') {
+            $pair = $pair.Trim()
+            if ($pair -match '^(\d+):(\d+)$') {
+                $gid = $Matches[1]; $cid = $Matches[2]
+                if (-not $guildsObj.ContainsKey($gid)) {
+                    $guildsObj[$gid] = @{
+                        allow = $true
+                        requireMention = $true
+                        allowBot = $false
+                        channels = @{}
+                    }
+                }
+                $guildsObj[$gid].channels[$cid] = @{
+                    allow = $true
+                    requireMention = $false
+                }
+            }
+        }
+        if ($guildsObj.Count -gt 0) {
+            $content = Get-Content $CatclawJson -Raw -Encoding UTF8
+            if ($content.Length -gt 0 -and $content[0] -eq [char]0xFEFF) { $content = $content.Substring(1) }
+            # 組裝 guilds JSON
+            $guildsJson = ($guildsObj | ConvertTo-Json -Depth 5 -Compress:$false)
+            # 替換 guilds 區塊
+            $content = $content -replace '("guilds"\s*:\s*)\{[^}]*(?:\{[^}]*\}[^}]*)*\}', "`${1}$guildsJson"
+            Write-Utf8 $CatclawJson $content
+            Ok "Discord 頻道已寫入"
+        }
+    } else {
+        Warn "稍後請手動編輯 $CatclawJson 填入 discord.guilds"
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Step 7: LLM Provider API Key
+# ═══════════════════════════════════════════════════════════════════
+Step "Step 7/9: LLM Provider 設定"
 
 $AuthProfile = Join-Path $Workspace "agents\default\auth-profile.json"
 if (Test-Path $AuthProfile) {
@@ -276,9 +340,43 @@ if (Test-Path $AuthProfile) {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# Step 7: 編譯 & 啟動
+# Step 8: 功能開關（Dashboard / 排程）
 # ═══════════════════════════════════════════════════════════════════
-Step "Step 7/7: 編譯 & 啟動"
+Step "Step 8/9: 功能開關"
+
+# ── Dashboard ────────────────────────────────────────────────────
+Write-Host ""
+$enableDash = Read-Host "  啟用 Dashboard（Web 管理介面，port 8088）？(Y/n)"
+if ($enableDash -match '^[Nn]') {
+    $dashEnabled = "false"
+    Info "Dashboard 已停用"
+} else {
+    $dashEnabled = "true"
+    Ok "Dashboard 已啟用（http://localhost:8088）"
+}
+
+# ── 排程（Cron）──────────────────────────────────────────────────
+Write-Host ""
+$enableCron = Read-Host "  啟用排程功能（Cron Jobs）？(y/N)"
+if ($enableCron -match '^[Yy]') {
+    $cronEnabled = "true"
+    Ok "排程已啟用"
+} else {
+    $cronEnabled = "false"
+    Info "排程已停用（稍後可在 catclaw.json 開啟）"
+}
+
+# 寫入設定
+$content = Get-Content $CatclawJson -Raw -Encoding UTF8
+if ($content.Length -gt 0 -and $content[0] -eq [char]0xFEFF) { $content = $content.Substring(1) }
+$content = $content -replace '("dashboard"\s*:\s*\{[^}]*"enabled"\s*:\s*)(true|false)', "`${1}$dashEnabled"
+$content = $content -replace '("cron"\s*:\s*\{[^}]*"enabled"\s*:\s*)(true|false)', "`${1}$cronEnabled"
+Write-Utf8 $CatclawJson $content
+
+# ═══════════════════════════════════════════════════════════════════
+# Step 9: 編譯 & 啟動
+# ═══════════════════════════════════════════════════════════════════
+Step "Step 9/9: 編譯 & 啟動"
 
 Push-Location $ProjectDir
 $env:CATCLAW_CONFIG_DIR = $ConfigDir

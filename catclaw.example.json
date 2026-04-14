@@ -227,6 +227,83 @@
     "pairingExpireMinutes": 5
   },
 
+  // ── 預設 Agent ────────────────────────────────────────────────────
+  // providerRouting 未指定時使用此 agent
+  "defaultAgent": "default",
+
+  // ── 記憶系統 ──────────────────────────────────────────────────────
+  "memory": {
+    "enabled": false,
+    "root": "",                       // 空字串 = 用 CATCLAW_WORKSPACE
+    "vectorDbPath": "~/.catclaw/_vectordb",
+    "contextBudget": 3000,
+    "contextBudgetRatio": { "global": 1, "project": 1, "account": 1 },
+    "writeGate": { "enabled": true, "dedupThreshold": 0.8 },
+    "recall": {
+      "triggerMatch": true,
+      "vectorSearch": true,
+      "relatedEdgeSpreading": true,
+      "vectorMinScore": 0.35,
+      "vectorTopK": 10,
+      "llmSelect": false,
+      "llmSelectMax": 5
+    },
+    "extract": { "enabled": false, "perTurnLimit": 3 }
+  },
+
+  // ── 記憶管線（embedding / extraction / reranker 後端）────────────
+  "memoryPipeline": {
+    "embedding": {
+      "provider": "ollama",
+      "model": "qwen3-embedding:8b",
+      "host": "http://localhost:11434"
+    },
+    "extraction": {
+      "provider": "ollama",
+      "model": "qwen3:14b",
+      "host": "http://localhost:11434"
+    },
+    "reranker": { "provider": "none", "model": "" }
+  },
+
+  // ── Dashboard ─────────────────────────────────────────────────────
+  "dashboard": {
+    "enabled": true,
+    "port": 8088
+  },
+
+  // ── Rate Limit（每分鐘請求上限，依角色）──────────────────────────
+  "rateLimit": {
+    "guest":          { "requestsPerMinute": 5 },
+    "member":         { "requestsPerMinute": 30 },
+    "developer":      { "requestsPerMinute": 60 },
+    "admin":          { "requestsPerMinute": 120 },
+    "platform-owner": { "requestsPerMinute": 300 }
+  },
+
+  // ── Workflow（Guardian / Fix Escalation / AIDocs）────────────────
+  "workflow": {
+    "guardian": { "enabled": false, "syncReminder": true, "fileTracking": true },
+    "fixEscalation": { "enabled": false },
+    "wisdomEngine": { "enabled": false },
+    "aidocs": { "enabled": false, "contentGate": true }
+  },
+
+  // ── Bot Circuit Breaker（Discord API 異常時自動斷路）─────────────
+  "botCircuitBreaker": {
+    "enabled": false
+  },
+
+  // ── MCP Servers（CatClaw 內建 MCP server 設定）──────────────────
+  // "mcpServers": {
+  //   "catclaw-discord": {
+  //     "command": "node",
+  //     "args": ["./dist/mcp/discord-server.js"],
+  //     "env": { "DISCORD_TOKEN": "<你的 bot token>" },
+  //     "tier": "public"
+  //   }
+  // },
+
   // ── Safety（Sprint 4 新增）────────────────────────────────────────
   // "safety": {
   //   "enabled": true,
