@@ -368,15 +368,20 @@ export class SafetyGuard {
   // ── Agent 路徑白名單 ────────────────────────────────────────────────────────
 
   /**
-   * 非 admin agent 只能寫入自己的 agentDir（~/.catclaw/agents/{agentId}/）。
+   * 非 admin agent 只能寫入自己的 agentDir（~/.catclaw/workspace/agents/{agentId}/）。
    * 空 agentId → 視為主體（default），不限制路徑。
    */
   checkAgentWritePath(filePath: string, agentId: string | undefined): GuardResult {
     if (!agentId) return { blocked: false };
 
     const abs = this.expandPath(filePath);
-    const catclawDir = resolve(homedir(), ".catclaw");
-    const allowedDir = resolve(catclawDir, "agents", agentId);
+    const catclawDir = process.env.CATCLAW_CONFIG_DIR
+      ? resolve(process.env.CATCLAW_CONFIG_DIR)
+      : resolve(homedir(), ".catclaw");
+    const workspaceDir = process.env.CATCLAW_WORKSPACE
+      ? resolve(process.env.CATCLAW_WORKSPACE)
+      : resolve(catclawDir, "workspace");
+    const allowedDir = resolve(workspaceDir, "agents", agentId);
 
     if (abs.startsWith(allowedDir + "/") || abs === allowedDir) {
       return { blocked: false };

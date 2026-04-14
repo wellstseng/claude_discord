@@ -274,7 +274,7 @@ export async function initPlatform(
   // ── 10. Workflow Engine ─────────────────────────────────────────────────────
   const workflowDataDir = join(wsDir, "data", "workflow");
   const memoryDir = join(bootAgentDir, "memory");
-  const agentsDir = join(catclawDir, "agents");
+  const agentsDir = join(wsDir, "agents");
   initWorkflow(
     config.workflow,
     workflowDataDir,
