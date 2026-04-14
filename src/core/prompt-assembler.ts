@@ -291,13 +291,42 @@ const claudeMdModule: PromptModule = {
   build: (ctx) => {
     const wsDir = ctx.workspaceDir ?? (() => { try { return resolveWorkspaceDir(); } catch { return ""; } })();
     if (!wsDir) return "";
-    const content = loadCatclawMdHierarchy(wsDir);
-    if (content) return `## Project Instructions (CATCLAW.md)\n\n${content}`;
-    // Auto-create default CATCLAW.md (mirrors loadBaseSystemPrompt behavior)
-    const defaultContent = `# CATCLAW.md — CatClaw Bot 行為規則\n\n你是 CatClaw，一個專案知識代理人。\n\n## 工作目錄\n\n你的工作目錄是 \`${wsDir}\`。`;
-    const p = join(wsDir, "CATCLAW.md");
-    try { writeFileSync(p, defaultContent, "utf-8"); log.info(`[prompt-assembler] 已產生預設 CATCLAW.md：${p}`); } catch { /* ignore */ }
-    return `## Project Instructions (CATCLAW.md)\n\n${defaultContent}`;
+
+    // 1. Workspace 層級 CATCLAW.md（全域共用規則）
+    let content = loadCatclawMdHierarchy(wsDir);
+    if (!content) {
+      // Auto-create: 優先從 templates/CATCLAW.md 複製，否則用內建預設
+      const p = join(wsDir, "CATCLAW.md");
+      let defaultContent: string | undefined;
+      try {
+        const templatePath = join(__dirname, "..", "..", "templates", "CATCLAW.md");
+        if (existsSync(templatePath)) {
+          defaultContent = readFileSync(templatePath, "utf-8");
+        }
+      } catch { /* ignore */ }
+      if (!defaultContent) {
+        defaultContent = `# CATCLAW.md — CatClaw Bot 行為規則\n\n你是 CatClaw，一個專案知識代理人。\n\n## 工作目錄\n\n你的工作目錄是 \`${wsDir}\`。`;
+      }
+      try { writeFileSync(p, defaultContent, "utf-8"); log.info(`[prompt-assembler] 已產生預設 CATCLAW.md：${p}`); } catch { /* ignore */ }
+      content = defaultContent;
+    }
+
+    // 2. Agent 層級 CATCLAW.md（agent 專屬規則，所有 agent 統一機制）
+    try {
+      const { getBootAgentId, resolveAgentDataDir } = require("./agent-loader.js") as typeof import("./agent-loader.js");
+      const agentId = getBootAgentId();
+      if (agentId) {
+        const agentMdPath = join(resolveAgentDataDir(agentId), "CATCLAW.md");
+        if (existsSync(agentMdPath)) {
+          const agentContent = readFileSync(agentMdPath, "utf-8").trim();
+          if (agentContent) {
+            content += `\n\n<!-- Agent CATCLAW.md: ${agentMdPath} -->\n${agentContent}`;
+          }
+        }
+      }
+    } catch { /* agent-loader not ready yet */ }
+
+    return `## Project Instructions (CATCLAW.md)\n\n${content}`;
   },
 };
 

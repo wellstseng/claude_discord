@@ -123,24 +123,11 @@ if (-not (Test-Path $CatclawJson)) {
     Info "catclaw.json 已存在，跳過"
 }
 
-# 建立 CATCLAW.md（若不存在）
+# 建立 CATCLAW.md（若不存在）— 從 template 複製
 $CatclawMd = Join-Path $Workspace "CATCLAW.md"
 if (-not (Test-Path $CatclawMd)) {
-    $catclawMdContent = @"
-# CATCLAW.md - CatClaw Bot 行為規則
-
-你是 CatClaw，一個整合 Discord 的 AI Agent 平台。
-
-## 重啟機制
-
-當使用者要求重啟 bot 時：
-``````bash
-node catclaw.js restart
-``````
-"@
-    $catclawMdContent = $catclawMdContent -replace '``````', '```'
-    Write-Utf8 $CatclawMd $catclawMdContent
-    Ok "已建立 CATCLAW.md"
+    Copy-Item (Join-Path $ProjectDir "templates\CATCLAW.md") $CatclawMd
+    Ok "已建立 CATCLAW.md（from template）"
 }
 
 # 複製 cron-jobs.example.json（若不存在）

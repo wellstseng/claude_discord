@@ -101,22 +101,11 @@ else
   info "catclaw.json 已存在，跳過"
 fi
 
-# 建立 CATCLAW.md（若不存在）
+# 建立 CATCLAW.md（若不存在）— 從 template 複製
 CATCLAW_MD="$WORKSPACE/CATCLAW.md"
 if [ ! -f "$CATCLAW_MD" ]; then
-  cat > "$CATCLAW_MD" <<'MDEOF'
-# CATCLAW.md — CatClaw Bot 行為規則
-
-你是 CatClaw，一個整合 Discord 的 AI Agent 平台。
-
-## 重啟機制
-
-當使用者要求重啟 bot 時：
-```bash
-node catclaw.js restart
-```
-MDEOF
-  ok "已建立 CATCLAW.md"
+  cp "$PROJECT_DIR/templates/CATCLAW.md" "$CATCLAW_MD"
+  ok "已建立 CATCLAW.md（from template）"
 fi
 
 # 複製 cron-jobs.example.json（若不存在）
