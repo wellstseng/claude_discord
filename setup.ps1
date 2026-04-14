@@ -221,10 +221,8 @@ if ($NeedToken) {
     $BotToken = Read-Host "  貼上 Bot Token（留空稍後手動設定）"
 
     if ($BotToken) {
-        # 直接 parse → 修改 → 寫回（乾淨 JSON）
-        $cfg = Read-Jsonc $CatclawJson
-        $cfg.discord.token = $BotToken
-        Write-Utf8 $CatclawJson ($cfg | ConvertTo-Json -Depth 10)
+        # 用 node 修改 JSON（避免 PowerShell ConvertTo-Json 造成巢狀重複）
+        node -e "const fs=require('fs'),p=process.argv[1],t=process.argv[2];const c=JSON.parse(fs.readFileSync(p,'utf-8'));c.discord.token=t;fs.writeFileSync(p,JSON.stringify(c,null,2),'utf-8')" $CatclawJson $BotToken
         Ok "Discord Token 已寫入"
     } else {
         Warn "稍後請手動編輯 $CatclawJson 填入 discord.token"
@@ -281,28 +279,28 @@ if ($ExistingGuilds -gt 0) {
             }
         }
         if ($guildsObj.Count -gt 0) {
-            # 直接 parse → 修改 → 寫回（乾淨 JSON，不用 regex）
-            $cfg = Read-Jsonc $CatclawJson
-            # 建立 guilds PSObject
-            $guildsPso = New-Object PSObject
+            # 用 node 修改 JSON（避免 PowerShell ConvertTo-Json 巢狀重複問題）
+            # 組裝 guild pairs 字串傳給 node
+            $pairList = @()
             foreach ($gid in $guildsObj.Keys) {
-                $chPso = New-Object PSObject
                 foreach ($cid in $guildsObj[$gid].channels.Keys) {
-                    $chPso | Add-Member -NotePropertyName $cid -NotePropertyValue ([PSCustomObject]@{
-                        allow = $true
-                        requireMention = $false
-                    })
+                    $pairList += "$gid/$cid"
                 }
-                $guildsPso | Add-Member -NotePropertyName $gid -NotePropertyValue ([PSCustomObject]@{
-                    allow = $true
-                    requireMention = $true
-                    allowBot = $false
-                    channels = $chPso
-                })
             }
-            $cfg.discord.guilds = $guildsPso
-            $jsonOut = $cfg | ConvertTo-Json -Depth 10
-            Write-Utf8 $CatclawJson $jsonOut
+            $pairsArg = $pairList -join ","
+            node -e "
+                const fs=require('fs'),p=process.argv[1],input=process.argv[2];
+                const c=JSON.parse(fs.readFileSync(p,'utf-8'));
+                const guilds={};
+                for(const pair of input.split(',')){
+                    const m=pair.trim().match(/^(\d+)[:/](\d+)$/);
+                    if(!m)continue;
+                    const[,gid,cid]=m;
+                    if(!guilds[gid])guilds[gid]={allow:true,requireMention:true,allowBot:false,channels:{}};
+                    guilds[gid].channels[cid]={allow:true,requireMention:false};
+                }
+                if(Object.keys(guilds).length>0){c.discord.guilds=guilds;fs.writeFileSync(p,JSON.stringify(c,null,2),'utf-8')}
+            " $CatclawJson $pairsArg
             Ok "Discord 頻道已寫入"
         }
     } else {
@@ -384,11 +382,8 @@ if ($enableCron -match '^[Yy]') {
     Info "排程已停用（稍後可在 catclaw.json 開啟）"
 }
 
-# 寫入設定（parse → modify → write）
-$cfg = Read-Jsonc $CatclawJson
-$cfg.dashboard.enabled = ($dashEnabled -eq "true")
-$cfg.cron.enabled = ($cronEnabled -eq "true")
-Write-Utf8 $CatclawJson ($cfg | ConvertTo-Json -Depth 10)
+# 寫入設定（用 node 避免 ConvertTo-Json 巢狀問題）
+node -e "const fs=require('fs'),p=process.argv[1];const c=JSON.parse(fs.readFileSync(p,'utf-8'));c.dashboard.enabled=(process.argv[2]==='true');c.cron.enabled=(process.argv[3]==='true');fs.writeFileSync(p,JSON.stringify(c,null,2),'utf-8')" $CatclawJson $dashEnabled $cronEnabled
 
 # ═══════════════════════════════════════════════════════════════════
 # Step 9: 編譯 & 啟動
