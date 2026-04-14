@@ -89,8 +89,21 @@ fi
 # ═══════════════════════════════════════════════════════════════════
 step "Step 4/9: 初始化目錄結構"
 
+# ── Boot Agent ID ───────────────────────────────────────────────
+# 啟動時預設使用哪個 agent（可之後用 --agent <id> 覆寫）
+BOOT_AGENT_ID_DEFAULT="default"
+if [ -n "${CATCLAW_BOOT_AGENT:-}" ]; then
+  BOOT_AGENT_ID="$CATCLAW_BOOT_AGENT"
+  info "Boot agent ID（從環境變數）：$BOOT_AGENT_ID"
+else
+  echo ""
+  echo -n "  Boot agent ID（預設 $BOOT_AGENT_ID_DEFAULT，直接 Enter 沿用）: "
+  read -r BOOT_AGENT_ID
+  BOOT_AGENT_ID="${BOOT_AGENT_ID:-$BOOT_AGENT_ID_DEFAULT}"
+fi
+
 # 建立目錄
-mkdir -p "$CONFIG_DIR" "$WORKSPACE/data/sessions" "$WORKSPACE/data/active-turns" "$WORKSPACE/agents/default" "$PROJECT_DIR/signal"
+mkdir -p "$CONFIG_DIR" "$WORKSPACE/data/sessions" "$WORKSPACE/data/active-turns" "$WORKSPACE/agents/$BOOT_AGENT_ID" "$PROJECT_DIR/signal"
 
 # 複製 catclaw.json（若不存在）— 去掉 JSONC 註解寫入乾淨 JSON
 CATCLAW_JSON="$CONFIG_DIR/catclaw.json"
@@ -114,6 +127,34 @@ CATCLAW_MD="$WORKSPACE/CATCLAW.md"
 if [ ! -f "$CATCLAW_MD" ]; then
   cp "$PROJECT_DIR/templates/CATCLAW.md" "$CATCLAW_MD"
   ok "已建立 CATCLAW.md（from template）"
+fi
+
+# 建立 AGENTS.md（若不存在）
+AGENTS_MD="$WORKSPACE/AGENTS.md"
+if [ ! -f "$AGENTS_MD" ] && [ -f "$PROJECT_DIR/templates/AGENTS.md" ]; then
+  cp "$PROJECT_DIR/templates/AGENTS.md" "$AGENTS_MD"
+  ok "已建立 AGENTS.md（from template）"
+fi
+
+# 建立 BOOT.md（若不存在）
+BOOT_MD="$WORKSPACE/BOOT.md"
+if [ ! -f "$BOOT_MD" ] && [ -f "$PROJECT_DIR/templates/BOOT.md" ]; then
+  cp "$PROJECT_DIR/templates/BOOT.md" "$BOOT_MD"
+  ok "已建立 BOOT.md（from template）"
+fi
+
+# 建立 boot agent 的 CATCLAW.md 與 BOOTSTRAP.md（首次儀式）
+BOOT_AGENT_DIR="$WORKSPACE/agents/$BOOT_AGENT_ID"
+BOOT_AGENT_CATCLAW="$BOOT_AGENT_DIR/CATCLAW.md"
+if [ ! -f "$BOOT_AGENT_CATCLAW" ] && [ -f "$PROJECT_DIR/templates/agents/default/CATCLAW.md" ]; then
+  cp "$PROJECT_DIR/templates/agents/default/CATCLAW.md" "$BOOT_AGENT_CATCLAW"
+  ok "已建立 agents/$BOOT_AGENT_ID/CATCLAW.md（from template）"
+fi
+
+BOOT_AGENT_BOOTSTRAP="$BOOT_AGENT_DIR/BOOTSTRAP.md"
+if [ ! -f "$BOOT_AGENT_BOOTSTRAP" ] && [ -f "$PROJECT_DIR/templates/BOOTSTRAP.md" ]; then
+  cp "$PROJECT_DIR/templates/BOOTSTRAP.md" "$BOOT_AGENT_BOOTSTRAP"
+  ok "已建立 agents/$BOOT_AGENT_ID/BOOTSTRAP.md（首次儀式，完成後可自行刪除）"
 fi
 
 # 複製 cron-jobs.example.json（若不存在）
@@ -229,7 +270,7 @@ fi
 # ═══════════════════════════════════════════════════════════════════
 step "Step 7/9: LLM Provider 設定"
 
-AUTH_PROFILE="$WORKSPACE/agents/default/auth-profile.json"
+AUTH_PROFILE="$WORKSPACE/agents/$BOOT_AGENT_ID/auth-profile.json"
 if [ -f "$AUTH_PROFILE" ]; then
   info "auth-profile.json 已存在，跳過"
 else

@@ -102,12 +102,23 @@ CATCLAW_WORKSPACE=$Workspace
 # ═══════════════════════════════════════════════════════════════════
 Step "Step 4/9: 初始化目錄結構"
 
+# ── Boot Agent ID ───────────────────────────────────────────────
+$BootAgentIdDefault = "default"
+if ($env:CATCLAW_BOOT_AGENT) {
+    $BootAgentId = $env:CATCLAW_BOOT_AGENT
+    Info "Boot agent ID（從環境變數）：$BootAgentId"
+} else {
+    Write-Host ""
+    $BootAgentId = Read-Host "  Boot agent ID（預設 $BootAgentIdDefault，直接 Enter 沿用）"
+    if (-not $BootAgentId) { $BootAgentId = $BootAgentIdDefault }
+}
+
 # 建立目錄
 $dirs = @(
     $ConfigDir,
     (Join-Path $Workspace "data\sessions"),
     (Join-Path $Workspace "data\active-turns"),
-    (Join-Path $Workspace "agents\default"),
+    (Join-Path $Workspace "agents\$BootAgentId"),
     (Join-Path $ProjectDir "signal")
 )
 foreach ($d in $dirs) {
@@ -145,6 +156,38 @@ $CatclawMd = Join-Path $Workspace "CATCLAW.md"
 if (-not (Test-Path $CatclawMd)) {
     Copy-Item (Join-Path $ProjectDir "templates\CATCLAW.md") $CatclawMd
     Ok "已建立 CATCLAW.md（from template）"
+}
+
+# 建立 AGENTS.md
+$AgentsMd = Join-Path $Workspace "AGENTS.md"
+$AgentsSrc = Join-Path $ProjectDir "templates\AGENTS.md"
+if (-not (Test-Path $AgentsMd) -and (Test-Path $AgentsSrc)) {
+    Copy-Item $AgentsSrc $AgentsMd
+    Ok "已建立 AGENTS.md（from template）"
+}
+
+# 建立 BOOT.md
+$BootMd = Join-Path $Workspace "BOOT.md"
+$BootSrc = Join-Path $ProjectDir "templates\BOOT.md"
+if (-not (Test-Path $BootMd) -and (Test-Path $BootSrc)) {
+    Copy-Item $BootSrc $BootMd
+    Ok "已建立 BOOT.md（from template）"
+}
+
+# 建立 boot agent 的 CATCLAW.md 與 BOOTSTRAP.md
+$BootAgentDir = Join-Path $Workspace "agents\$BootAgentId"
+$BootAgentCatclaw = Join-Path $BootAgentDir "CATCLAW.md"
+$BootAgentCatclawSrc = Join-Path $ProjectDir "templates\agents\default\CATCLAW.md"
+if (-not (Test-Path $BootAgentCatclaw) -and (Test-Path $BootAgentCatclawSrc)) {
+    Copy-Item $BootAgentCatclawSrc $BootAgentCatclaw
+    Ok "已建立 agents/$BootAgentId/CATCLAW.md（from template）"
+}
+
+$BootAgentBootstrap = Join-Path $BootAgentDir "BOOTSTRAP.md"
+$BootstrapSrc = Join-Path $ProjectDir "templates\BOOTSTRAP.md"
+if (-not (Test-Path $BootAgentBootstrap) -and (Test-Path $BootstrapSrc)) {
+    Copy-Item $BootstrapSrc $BootAgentBootstrap
+    Ok "已建立 agents/$BootAgentId/BOOTSTRAP.md（首次儀式，完成後可自行刪除）"
 }
 
 # 複製 cron-jobs.example.json（若不存在）
@@ -313,7 +356,7 @@ if ($ExistingGuilds -gt 0) {
 # ═══════════════════════════════════════════════════════════════════
 Step "Step 7/9: LLM Provider 設定"
 
-$AuthProfile = Join-Path $Workspace "agents\default\auth-profile.json"
+$AuthProfile = Join-Path $Workspace "agents\$BootAgentId\auth-profile.json"
 if (Test-Path $AuthProfile) {
     Info "auth-profile.json 已存在，跳過"
 } else {

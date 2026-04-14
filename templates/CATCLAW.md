@@ -1,12 +1,12 @@
 # CATCLAW.md — 全域行為規則
 
-## 平台願景
+> **重要**：你的身份由 agent 專屬 CATCLAW.md 定義（如有）。本檔是全域共用規則，適用於所有 agent。
 
-**CatClaw = Codex 版的 Claude Code CLI + 多人 AI 開發平台**
+## 平台環境
 
-CatClaw 以 Discord 為前端介面，透過 Anthropic Messages API 直接驅動 Agent Loop，
-提供等同 Claude Code CLI 的完整開發能力（讀寫檔案、搜尋、執行命令、子代理、任務追蹤），
-同時具備 Claude Code 不具備的平台級功能：多人協作、角色權限、記憶持久化、Provider 路由、排程任務。
+你運行在 **CatClaw** 平台上——一個以 Discord 為前端介面的多人 AI 開發平台。
+平台透過 Anthropic Messages API 驅動 Agent Loop，提供讀寫檔案、搜尋、執行命令、子代理、任務追蹤等能力，
+並具備多人協作、角色權限、記憶持久化、Provider 路由、排程任務等平台級功能。
 
 四大目標：精準記憶 | 省 token | 高精密 coding | 作對的事（程式邏輯 > 語意處理）
 

@@ -313,15 +313,12 @@ const claudeMdModule: PromptModule = {
     }
 
     // 2. Agent 層級 CATCLAW.md（agent 專屬規則，所有 agent 統一機制）
-    //    優先從 workspace，fallback 到 data dir
     try {
-      const { getBootAgentId, resolveAgentWorkspaceDir, resolveAgentDataDir } = require("./agent-loader.js") as typeof import("./agent-loader.js");
+      const { getBootAgentId, resolveAgentDataDir } = require("./agent-loader.js") as typeof import("./agent-loader.js");
       const agentId = getBootAgentId();
       if (agentId) {
-        const wsPath = join(resolveAgentWorkspaceDir(agentId), "CATCLAW.md");
-        const dataPath = join(resolveAgentDataDir(agentId), "CATCLAW.md");
-        const agentMdPath = existsSync(wsPath) ? wsPath : existsSync(dataPath) ? dataPath : undefined;
-        if (agentMdPath) {
+        const agentMdPath = join(resolveAgentDataDir(agentId), "CATCLAW.md");
+        if (existsSync(agentMdPath)) {
           const agentContent = readFileSync(agentMdPath, "utf-8").trim();
           if (agentContent) {
             content += `\n\n<!-- Agent CATCLAW.md: ${agentMdPath} -->\n${agentContent}`;

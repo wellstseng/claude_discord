@@ -57,20 +57,26 @@ export function getBootAgentDataDir(catclawDir?: string): string {
 
 // ── Per-agent 路徑工具 ────────────────────────────────────────────────────────
 
+/**
+ * Agent 的統一目錄（~/.catclaw/workspace/agents/{id}/）
+ * 包含：CATCLAW.md, config.json, BOOTSTRAP.md, BOOT.md, memory/, sessions/, _vectordb/, skills/
+ *
+ * 歷史上曾經分 `~/.catclaw/agents/{id}/`（data）和 `workspace/agents/{id}/`（docs），
+ * 但路徑分裂容易出錯，2026-04-14 合併為單一 workspace 路徑。
+ * catclawDir 參數保留是為了 bootstrap 階段 workspaceDir 尚未初始化時回退。
+ */
 export function resolveAgentDataDir(agentId: string, catclawDir?: string): string {
-  const base = catclawDir ?? resolveCatclawDir();
-  return join(base, "agents", agentId);
-}
-
-/** Agent 的 workspace 目錄（~/.catclaw/workspace/agents/{id}/），放 CATCLAW.md、config.json 等文件 */
-export function resolveAgentWorkspaceDir(agentId: string): string {
   try {
     return join(resolveWorkspaceDir(), "agents", agentId);
   } catch {
-    // CATCLAW_WORKSPACE 未設定時 fallback 到 data dir
-    return resolveAgentDataDir(agentId);
+    // CATCLAW_WORKSPACE 未設定時 fallback 到舊路徑（搬遷過渡期）
+    const base = catclawDir ?? resolveCatclawDir();
+    return join(base, "agents", agentId);
   }
 }
+
+/** @deprecated 已合併到 resolveAgentDataDir，保留向後相容 */
+export const resolveAgentWorkspaceDir = resolveAgentDataDir;
 
 // ── 設定解析 ──────────────────────────────────────────────────────────────────
 
@@ -119,11 +125,9 @@ export function loadAgentBootConfig(base: BridgeConfig, agentId: string): Bridge
  * 檔案不存在時回傳 undefined。
  */
 export function loadAgentConfig(agentId: string): AgentConfig | undefined {
-  const wsPath = join(resolveAgentWorkspaceDir(agentId), "config.json");
-  const dataPath = join(resolveAgentDataDir(agentId), "config.json");
-  const configPath = existsSync(wsPath) ? wsPath : existsSync(dataPath) ? dataPath : undefined;
-  if (!configPath) {
-    log.debug(`[agent-loader] agent config 不存在：${agentId}`);
+  const configPath = join(resolveAgentDataDir(agentId), "config.json");
+  if (!existsSync(configPath)) {
+    log.debug(`[agent-loader] agent config 不存在：${configPath}`);
     return undefined;
   }
   try {
@@ -142,10 +146,8 @@ export function loadAgentConfig(agentId: string): AgentConfig | undefined {
  * 不存在時回傳 undefined。
  */
 export function loadAgentPrompt(agentId: string): string | undefined {
-  const wsPath = join(resolveAgentWorkspaceDir(agentId), "CATCLAW.md");
-  const dataPath = join(resolveAgentDataDir(agentId), "CATCLAW.md");
-  const promptPath = existsSync(wsPath) ? wsPath : existsSync(dataPath) ? dataPath : undefined;
-  if (!promptPath) return undefined;
+  const promptPath = join(resolveAgentDataDir(agentId), "CATCLAW.md");
+  if (!existsSync(promptPath)) return undefined;
   try {
     log.debug(`[agent-loader] agent CATCLAW.md 載入：${promptPath}`);
     return readFileSync(promptPath, "utf-8");
