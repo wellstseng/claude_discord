@@ -15,6 +15,10 @@ $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $ConfigDir  = if ($env:CATCLAW_CONFIG_DIR) { $env:CATCLAW_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".catclaw" }
 $Workspace  = if ($env:CATCLAW_WORKSPACE)  { $env:CATCLAW_WORKSPACE }  else { Join-Path $ConfigDir "workspace" }
 
+# UTF-8 without BOM 寫入（Windows PowerShell 5.x 的 -Encoding UTF8 會加 BOM）
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+function Write-Utf8($path, $text) { [System.IO.File]::WriteAllText($path, $text, $Utf8NoBom) }
+
 # ═══════════════════════════════════════════════════════════════════
 # Step 1: 前置需求檢查
 # ═══════════════════════════════════════════════════════════════════
@@ -80,7 +84,7 @@ if (Test-Path $EnvFile) {
         }
     }
 } else {
-    @"
+    $envContent = @"
 # catclaw 啟動環境變數（由 setup.ps1 自動產生）
 
 # catclaw.json 所在目錄
@@ -88,7 +92,8 @@ CATCLAW_CONFIG_DIR=$ConfigDir
 
 # Agent 工作目錄
 CATCLAW_WORKSPACE=$Workspace
-"@ | Set-Content -Path $EnvFile -Encoding UTF8
+"@
+    Write-Utf8 $EnvFile $envContent
     Ok "已建立 .env（CONFIG_DIR=$ConfigDir）"
 }
 
@@ -134,7 +139,7 @@ node catclaw.js restart
 ``````
 "@
     $catclawMdContent = $catclawMdContent -replace '``````', '```'
-    Set-Content -Path $CatclawMd -Value $catclawMdContent -Encoding UTF8
+    Write-Utf8 $CatclawMd $catclawMdContent
     Ok "已建立 CATCLAW.md"
 }
 
@@ -145,7 +150,7 @@ if (-not (Test-Path $CronJson)) {
     if (Test-Path $cronSrc) {
         Copy-Item $cronSrc $CronJson
     } else {
-        '{ "version": 1, "jobs": {} }' | Set-Content -Path $CronJson -Encoding UTF8
+        Write-Utf8 $CronJson '{ "version": 1, "jobs": {} }'
     }
     Ok "已建立 cron-jobs.json"
 }
@@ -160,6 +165,8 @@ Step "Step 5/7: Discord Bot Token 設定"
 # 讀取 JSONC：去掉 // 註解後 parse
 function Read-Jsonc($path) {
     $raw = Get-Content $path -Raw -Encoding UTF8
+    # 移除 BOM（若存在）
+    if ($raw.Length -gt 0 -and $raw[0] -eq [char]0xFEFF) { $raw = $raw.Substring(1) }
     # 去掉 // 行註解（不在字串內的）
     $lines = $raw -split "`n"
     $cleaned = @()
@@ -209,11 +216,12 @@ if ($NeedToken) {
     $BotToken = Read-Host "  貼上 Bot Token（留空稍後手動設定）"
 
     if ($BotToken) {
-        # 讀取原始內容，用 regex 替換 token
+        # 讀取原始內容，用 regex 替換 token（移除 BOM 若存在）
         $content = Get-Content $CatclawJson -Raw -Encoding UTF8
+        if ($content.Length -gt 0 -and $content[0] -eq [char]0xFEFF) { $content = $content.Substring(1) }
         $replacement = '$1"' + $BotToken + '"'
         $content = $content -replace '("token"\s*:\s*)"[^"]*"', $replacement
-        Set-Content -Path $CatclawJson -Value $content -Encoding UTF8 -NoNewline
+        Write-Utf8 $CatclawJson $content
         Ok "Discord Token 已寫入"
     } else {
         Warn "稍後請手動編輯 $CatclawJson 填入 discord.token"
@@ -236,7 +244,7 @@ if (Test-Path $AuthProfile) {
     $ApiKey = Read-Host "  貼上 API Key（sk-ant-...）（留空跳過）"
 
     if ($ApiKey) {
-        @"
+        $authContent = @"
 {
   "version": 2,
   "profiles": {
@@ -250,16 +258,18 @@ if (Test-Path $AuthProfile) {
     "anthropic": ["anthropic:default"]
   }
 }
-"@ | Set-Content -Path $AuthProfile -Encoding UTF8
+"@
+        Write-Utf8 $AuthProfile $authContent
         Ok "auth-profile.json 已建立"
     } else {
-        @'
+        $authContent = @'
 {
   "version": 2,
   "profiles": {},
   "order": {}
 }
-'@ | Set-Content -Path $AuthProfile -Encoding UTF8
+'@
+        Write-Utf8 $AuthProfile $authContent
         Warn "未設定 API Key — 稍後請手動編輯 $AuthProfile"
         Write-Host "  或在 Dashboard 的 Auth Profiles 頁面新增"
     }
