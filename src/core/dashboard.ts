@@ -2644,9 +2644,16 @@ async function loadAgentList() {
     const agents = await authFetch('/api/agents').then(r => r.json());
     const sel = document.getElementById('mem-agent-select');
     if (!sel) return;
-    sel.innerHTML = agents.map(a =>
-      '<option value="' + a.id + '"' + (a.isBoot ? ' selected' : '') + '>' + a.id + (a.isBoot ? ' (boot)' : '') + (!a.hasMemory ? ' (no memory)' : '') + '</option>'
-    ).join('');
+    sel.innerHTML = agents.map(a => {
+      const tags = [];
+      if (a.isBoot) tags.push('boot');
+      if (a.label) tags.push(a.label);
+      if (a.admin) tags.push('admin');
+      if (a.globalMemoryWrite) tags.push('global-write');
+      if (!a.hasMemory) tags.push('no memory');
+      const suffix = tags.length ? ' (' + tags.join(', ') + ')' : '';
+      return '<option value="' + a.id + '"' + (a.isBoot ? ' selected' : '') + '>' + a.id + suffix + '</option>';
+    }).join('');
     _memAgent = sel.value;
   } catch (e) { console.warn('loadAgentList failed:', e); }
 }
@@ -4665,12 +4672,23 @@ export class DashboardServer {
             const { resolveCatclawDir } = await import("./config.js");
             const { getBootAgentId } = await import("./agent-loader.js");
             const agentsDir = join(resolveCatclawDir(), "agents");
-            const agents: Array<{ id: string; hasMemory: boolean; isBoot: boolean }> = [];
+            const { loadAgentConfig } = await import("./agent-loader.js");
+            const agents: Array<{ id: string; hasMemory: boolean; isBoot: boolean; label?: string; admin?: boolean; globalMemoryWrite?: boolean; hasCatclawMd: boolean }> = [];
             if (existsSync(agentsDir)) {
               for (const d of readdirSync(agentsDir)) {
                 if (d.startsWith(".")) continue;
                 const memDir = join(agentsDir, d, "memory");
-                agents.push({ id: d, hasMemory: existsSync(memDir), isBoot: d === getBootAgentId() });
+                const catclawMd = join(agentsDir, d, "CATCLAW.md");
+                const cfg = loadAgentConfig(d);
+                agents.push({
+                  id: d,
+                  hasMemory: existsSync(memDir),
+                  isBoot: d === getBootAgentId(),
+                  label: cfg?.label,
+                  admin: cfg?.admin,
+                  globalMemoryWrite: cfg?.globalMemoryWrite,
+                  hasCatclawMd: existsSync(catclawMd),
+                });
               }
             }
             res.writeHead(200, { "Content-Type": "application/json" });
