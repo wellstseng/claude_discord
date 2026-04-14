@@ -1,5 +1,7 @@
 # CatClaw
 
+**English** | [繁體中文](README.zh-TW.md)
+
 Discord-based AI Agent platform with full development capabilities — multi-turn agent loop, 19 builtin tools, 32 builtin skills, multi-provider failover, four-layer memory engine, and web dashboard.
 
 ## Features
