@@ -137,11 +137,22 @@ catclaw/                          <- 程式碼
 
 ~/.catclaw/                       <- 執行期資料
 ├── catclaw.json                  設定檔
+├── memory/                       全域 + account + project atom
+│   └── _vectordb/                LanceDB 全域向量
 └── workspace/
     ├── CATCLAW.md                全域行為規則（from templates/CATCLAW.md）
-    ├── agents/{id}/CATCLAW.md    agent 專屬行為規則（靈魂）
+    ├── AGENTS.md                 Agent 註冊表
+    ├── agents/{id}/              Agent 完整工作目錄（2026-04-14 起合併）
+    │   ├── CATCLAW.md            agent 專屬行為規則（靈魂）
+    │   ├── BOOTSTRAP.md          首次啟動儀式（可選）
+    │   ├── BOOT.md               每次啟動執行（可選）
+    │   ├── config.json           agent 設定
+    │   ├── memory/               agent 專屬 atom
+    │   ├── sessions/             agent 獨立 session
+    │   ├── _vectordb/            agent 專屬向量
+    │   └── skills/               agent 自建 skill
     └── data/
-        ├── sessions/             per-channel session 持久化
+        ├── sessions/             per-channel session 持久化（default agent）
         ├── cron-jobs.json        排程定義 + 狀態
         └── active-turns/         crash recovery
 ```

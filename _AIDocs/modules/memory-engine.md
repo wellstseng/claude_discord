@@ -35,7 +35,7 @@
   ├── episodic/              — episodic memory
   └── _vectordb/             — LanceDB 向量資料庫
 
-~/.catclaw/agents/{agentId}/memory/  — agent 專屬記憶
+~/.catclaw/workspace/agents/{agentId}/memory/  — agent 專屬記憶
 ```
 
 ### 記憶四層結構
@@ -45,7 +45,7 @@
 | global  | `global`      | `{memoryRoot}/`                      | 平台共用知識             |
 | project | `project/{id}`| `{memoryRoot}/projects/{id}/`        | 專案知識（暫停用）       |
 | account | `account/{id}`| `{memoryRoot}/accounts/{id}/`        | 使用者偏好/個人資訊      |
-| agent   | `agent/{id}`  | `~/.catclaw/agents/{id}/memory/`     | agent 專屬記憶           |
+| agent   | `agent/{id}`  | `~/.catclaw/workspace/agents/{id}/memory/`     | agent 專屬記憶           |
 
 Recall 範圍 = global + account(當前使用者) + agent(若有 agentId)。
 寫入：agent context 下寫入 agent 層。

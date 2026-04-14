@@ -1,7 +1,7 @@
 # modules/dashboard — Web Dashboard + REST API
 
-> 檔案：`src/core/dashboard.ts` (~5325 行)
-> 更新日期：2026-04-13
+> 檔案：`src/core/dashboard.ts` (~5344 行)
+> 更新日期：2026-04-14
 
 ## 職責
 

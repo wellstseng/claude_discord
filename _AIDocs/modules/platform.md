@@ -13,8 +13,8 @@
 `initPlatform` 啟動時透過 `getBootAgentDataDir(catclawDir)` 取得啟動 agent 的資料目錄。
 所有 per-agent 資料（memory、vectordb、workflow memoryDir）以此為根：
 
-- 預設：`~/.catclaw/agents/{defaultAgent}/`（catclaw.json 的 `defaultAgent` 設定）
-- `--agent` 模式：`~/.catclaw/agents/{agentId}/`
+- 預設：`~/.catclaw/workspace/agents/{defaultAgent}/`（catclaw.json 的 `defaultAgent` 設定）
+- `--agent` 模式：`~/.catclaw/workspace/agents/{agentId}/`
 
 平台級設定（catclaw.json、accounts/、workspace/）留在 `~/.catclaw/` root。
 

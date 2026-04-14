@@ -36,7 +36,7 @@ agent-loop.ts ─── Multi-turn 推理迴圈（LLM <-> Tool 執行）
     |                         |
     v                         v
 providers/ ───────── tools/ + skills/
-LLM 抽象層            21 Tools + 32 Skills
+LLM 抽象層            21 Tools + 33 Skills
 + Failover
     |
     v
@@ -137,6 +137,16 @@ pnpm build
     agents/
       default/
         auth-profile.json           LLM API 憑證
+        models.json                 Provider/Model 定義
+        CATCLAW.md                  Agent 專屬行為規則（可選）
+      {agentId}/
+        BOOTSTRAP.md                首次啟動儀式（可選）
+        BOOT.md                     每次啟動執行（可選）
+        config.json                 Agent 設定（provider/model/admin）
+        memory/                     Agent 專屬 atom 記憶
+        sessions/                   Agent 獨立 session
+        _vectordb/                  Agent 專屬 LanceDB
+        skills/                     Agent 自建 skill
     data/
       sessions/                     Session 持久化
       cron-jobs.json                排程定義

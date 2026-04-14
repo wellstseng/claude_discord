@@ -1,12 +1,12 @@
 # CatClaw _AIDocs 知識庫索引
 
-> 建立日期：2026-03-18 | 最近更新：2026-04-13 | 專案：catclaw
+> 建立日期：2026-03-18 | 最近更新：2026-04-14 | 專案：catclaw
 
 ## 專案簡介
 
 CatClaw = Codex 版 Claude Code CLI + 多人 AI 開發平台。
 以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、21 builtin tools、
-33 builtin skills（30 TS + 3 prompt）、多 provider failover、四層記憶引擎、Context Engineering、subagent 編排、
+33 builtin skills（30 TS + 3 prompt，來自 24 個 TS 檔案）、多 provider failover、四層記憶引擎、Context Engineering、subagent 編排、
 帳號/角色/權限系統、Web Dashboard + Trace 追蹤。
 
 ## 架構一句話摘要

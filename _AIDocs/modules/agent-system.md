@@ -1,7 +1,7 @@
 # Agent System — Multi-Agent 設定與型別
 
 > 對應原始碼：`src/core/agent-loader.ts`、`src/core/agent-registry.ts`、`src/core/agent-types.ts`、`src/core/agent-skill-loader.ts`
-> 更新日期：2026-04-09
+> 更新日期：2026-04-14
 
 ## 概觀
 
@@ -24,16 +24,32 @@ CatClaw 支援多 bot 部署（`--agent <id>`），每個 agent 可覆寫頂層 
 | 函式 | 說明 |
 |------|------|
 | `parseAgentArg(argv?)` | 解析 `--agent <id>` 或 `--agent=<id>` |
-| `resolveAgentDataDir(agentId, catclawDir?)` | 回傳 `~/.catclaw/agents/{id}/` |
-| `loadAgentConfig(base, agentId)` | 從 `base.agents[agentId]` 深合併，自動設定 per-agent session/vectordb 路徑 |
+| `setBootAgent(agentId, isAdmin)` | 設定 boot agent 身份單例（index.ts 啟動時呼叫） |
+| `getBootAgentId()` | 取得 boot agent ID（主體 = `"default"`） |
+| `getBootIsAdmin()` | boot agent 是否為 admin |
+| `getBootAgentDataDir(catclawDir?)` | 取得 boot agent 的資料目錄 |
+| `resolveAgentDataDir(agentId, catclawDir?)` | 回傳 `~/.catclaw/workspace/agents/{id}/`（`CATCLAW_WORKSPACE` 未設定時 fallback 到舊 `~/.catclaw/agents/{id}/`） |
+| `loadAgentBootConfig(base, agentId)` | 從 `base.agents[agentId]` 深合併，自動設定 per-agent session/vectordb 路徑 |
+| `loadAgentConfig(agentId)` | 讀取 `agents/{id}/config.json`（供 spawn_subagent 使用） |
+| `loadAgentPrompt(agentId)` | 讀取 `agents/{id}/CATCLAW.md`（agent 專屬 system prompt） |
 
 ### Per-agent 路徑
 
+2026-04-14 路徑統一：歷史上曾經分 `~/.catclaw/agents/{id}/`（data）與 `workspace/agents/{id}/`（docs），已合併為單一 workspace 路徑。
+
 ```
-~/.catclaw/agents/{agentId}/
+~/.catclaw/workspace/agents/{agentId}/
+  ├── CATCLAW.md       # agent 專屬行為規則（可選）
+  ├── BOOTSTRAP.md     # 首次啟動儀式（可選）
+  ├── BOOT.md          # 每次啟動執行（可選）
+  ├── config.json      # agent 設定（provider/model/admin flag）
+  ├── memory/          # agent 專屬記憶（atom + MEMORY.md + 向量）
   ├── sessions/        # session 持久化
-  └── _vectordb/       # 向量資料庫
+  ├── _vectordb/       # 向量資料庫
+  └── skills/          # agent 專屬 skills
 ```
+
+`resolveAgentWorkspaceDir` 為 `resolveAgentDataDir` 的 alias（deprecated，向後相容保留）。
 
 ## agent-registry.ts
 
@@ -90,7 +106,7 @@ interface AgentTypeConfig {
 
 ### 概觀
 
-掃描 `~/.catclaw/agents/{id}/skills/*.md`，解析 YAML frontmatter，組裝為 system prompt 區塊。
+掃描 `~/.catclaw/workspace/agents/{id}/skills/*.md`，解析 YAML frontmatter，組裝為 system prompt 區塊。
 由 `spawn-subagent.ts` 在載入 agent config 後呼叫。
 
 ### AgentSkill 介面
@@ -129,7 +145,7 @@ userInvocable: true
 ### AI 自建 Skill（Sprint 5）
 
 Agent spawn 時自動注入 `buildSkillCreationHint`，告知 agent：
-- skill 檔案位置：`~/.catclaw/agents/{agentId}/skills/{name}.md`
+- skill 檔案位置：`~/.catclaw/workspace/agents/{agentId}/skills/{name}.md`
 - 格式範例（frontmatter + body）
 - 用 write_file 建立，下次 spawn 自動載入
 
