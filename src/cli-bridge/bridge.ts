@@ -25,6 +25,7 @@ import type {
   TurnRecord,
   BridgeStatus,
   StdoutLogEntry,
+  StdinImageBlock,
 } from "./types.js";
 import type { BridgeSender } from "./discord-sender.js";
 
@@ -110,7 +111,7 @@ export class CliBridge {
 
   // ── 送訊息（直送 stdin，不排隊）──────────────────────────────────────────
 
-  send(text: string, source: "discord" | "dashboard", meta?: { user?: string; ts?: string }): TurnHandle {
+  send(text: string, source: "discord" | "dashboard", meta?: { user?: string; ts?: string; imageBlocks?: StdinImageBlock[] }): TurnHandle {
     this._lastUsedAt = Date.now();
     const turnId = randomUUID();
 
@@ -172,11 +173,15 @@ export class CliBridge {
     // Per-turn meta tag 注入：讓 CLI 每 turn 重新知道部署脈絡，不怕 context 壓縮
     const wrappedText = this.wrapWithChannelTag(text, source, meta);
 
-    // 送 stdin
+    // 送 stdin（有圖片時改送 content block 陣列，讓 CLI 直接把 base64 圖傳給 API）
+    const imageBlocks = meta?.imageBlocks;
+    const content = imageBlocks && imageBlocks.length > 0
+      ? [{ type: "text" as const, text: wrappedText }, ...imageBlocks]
+      : wrappedText;
     try {
       this.process.send({
         type: "user",
-        message: { role: "user", content: wrappedText },
+        message: { role: "user", content },
       });
     } catch (err) {
       this.turnListeners.delete(turnId);

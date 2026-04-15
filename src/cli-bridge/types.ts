@@ -9,12 +9,30 @@
 
 // ── stdin 訊息型別（送給 CLI 的 NDJSON）────────────────────────────────────────
 
+/** stdin 文字區塊 */
+export interface StdinTextBlock {
+  type: "text";
+  text: string;
+}
+
+/** stdin 圖片區塊（base64 編碼，符合 Anthropic API 格式） */
+export interface StdinImageBlock {
+  type: "image";
+  source: {
+    type: "base64";
+    media_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+    data: string;
+  };
+}
+
+export type StdinContentBlock = StdinTextBlock | StdinImageBlock;
+
 /** 使用者訊息 */
 export interface StdinUserMessage {
   type: "user";
   message: {
     role: "user";
-    content: string;
+    content: string | StdinContentBlock[];
   };
 }
 

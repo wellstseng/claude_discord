@@ -260,8 +260,8 @@ function handleIndependentBotMessage(bridge: CliBridge, msg: Message): void {
   void (async () => {
     try {
       await bridge.ensureAlive();
-      const { handleCliBridgeReply, extractAttachmentText } = await import("./reply.js");
-      const attachmentText = extractAttachmentText(msg);
+      const { handleCliBridgeReply, extractAttachments } = await import("./reply.js");
+      const { text: attachmentText, imageBlocks } = await extractAttachments(msg);
       let fullText = msg.content + attachmentText;
       const bridgeConfig = bridge.getBridgeConfig();
 
@@ -277,7 +277,7 @@ function handleIndependentBotMessage(bridge: CliBridge, msg: Message): void {
       log.info(`[cli-bridge] independent bot 路由：${bridge.label} channel=${msg.channelId}`);
       void handleCliBridgeReply(bridge, fullText, msg, {
         showToolCalls: "none",
-      } as Parameters<typeof handleCliBridgeReply>[3], bridgeConfig);
+      } as Parameters<typeof handleCliBridgeReply>[3], bridgeConfig, imageBlocks);
     } catch (err) {
       log.error(`[cli-bridge] independent bot handler error: ${err instanceof Error ? err.message : String(err)}`);
     }

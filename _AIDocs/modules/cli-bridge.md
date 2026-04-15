@@ -34,6 +34,7 @@
 - **`--resume` 取代 `--session-id`** — `--session-id` 會因 `~/.claude/projects/<cwd>/<uuid>.jsonl` 存在報 "already in use"；`--resume` 直接載入既有 session 不做此檢查
 - **Hot-reload sessionId 排除** — `configSnapshotJson()` 比對設定時排除 sessionId，避免 `persistSessionId()` 觸發不必要的 bridge 重建
 - **process.lastStderr** — `CliProcess` 記錄最後 stderr 輸出，供 bridge crash 偵測使用
+- **圖片附件（multimodal stdin）** — `reply.ts` `extractAttachments()` 下載支援的圖片（png/jpeg/gif/webp，≤5MB）並 base64 編碼成 `StdinImageBlock[]`；`bridge.send()` 有 `imageBlocks` 時改送 `content: [{type:"text"}, {type:"image", source:{type:"base64", ...}}]` 而非純字串。避免 Claude CLI 把 Discord CDN URL 當 image URL source 傳給 Anthropic API（CDN 權限/過期會導致 "Could not process image" 400）。下載失敗或超過大小限制時降級為 URL 文字描述。
 
 ## 整合點
 
@@ -55,7 +56,7 @@
 |------|---------|------|
 | control_request | `reply.ts` `handleControlRequest()` + `bridge.ts` `sendControlResponse()` | CLI 權限請求 → Discord Approve/Deny 按鈕，60s 超時自動拒絕 |
 | thinking 顯示 | `reply.ts` + `types.ts` `showThinking` | `cliBridge.showThinking: true` → thinking 以 Discord spoiler (`||..||`) 顯示 |
-| 附件支援 | `reply.ts` `extractAttachmentText()` + `discord.ts` 路由 | Discord 附件 → 文字描述（名稱/類型/大小/URL）附加到 stdin |
+| 附件支援 | `reply.ts` `extractAttachments()` + `discord.ts` / `cli-bridge/index.ts` 路由 | 圖片下載後轉 base64 inline（stdin content 變 array），其他檔案仍以 URL 文字描述附加 |
 | 對話歷程匯出 | `dashboard.ts` `GET /api/cli-bridge/:label/export` + UI 匯出按鈕 | 一鍵匯出 Markdown，含 user/assistant/tools |
 | 中間推理文字格式化 | `reply.ts` `flushIntermediateBuffer()` + `types.ts` `showIntermediateText` | tool_call 前的中間推理文字依設定格式化：`"quote"`（引用區塊，預設）/ `"spoiler"`（摺疊）/ `"none"`（不顯示）/ `"normal"`（原樣）。quote/spoiler 模式下所有中間文字累積 edit 同一條訊息（超過 2000 字才開新訊息），最終回覆用新訊息發送 |
 | 外部 bot mention 過濾 | `index.ts` `handleIndependentBotMessage()` | mention 非 CatClaw 註冊的外部 bot 時不回覆（檢查 Discord user.bot flag + allRegisteredBotIds） |

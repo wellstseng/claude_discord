@@ -28,10 +28,19 @@ import {
 } from "discord.js";
 import { log } from "../logger.js";
 import type { CliBridge } from "./bridge.js";
-import type { CliBridgeEvent } from "./types.js";
+import type { CliBridgeEvent, StdinImageBlock } from "./types.js";
 import type { BridgeConfig } from "../core/config.js";
 import type { CliBridgeConfig } from "./types.js";
 import type { BridgeSender } from "./discord-sender.js";
+
+const SUPPORTED_IMAGE_TYPES: Record<string, StdinImageBlock["source"]["media_type"]> = {
+  "image/png": "image/png",
+  "image/jpeg": "image/jpeg",
+  "image/jpg": "image/jpeg",
+  "image/gif": "image/gif",
+  "image/webp": "image/webp",
+};
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // Anthropic API 單張上限 5MB
 
 const TEXT_LIMIT = 2000;
 const RETRY_DELAYS = [1000, 2000, 4000];
@@ -65,7 +74,49 @@ async function retrySend(
   return false;
 }
 
-/** 從 Discord Message 提取附件描述（供 stdin 附加） */
+/**
+ * 從 Discord Message 提取附件：
+ * - 圖片（支援的 media_type）→ 下載並 base64 編碼成 StdinImageBlock
+ * - 其他檔案 → 文字描述（URL）
+ * - 圖片下載失敗或超過 5MB → 降級為文字描述
+ */
+export async function extractAttachments(msg: Message): Promise<{ text: string; imageBlocks: StdinImageBlock[] }> {
+  if (!msg.attachments.size) return { text: "", imageBlocks: [] };
+  const textParts: string[] = [];
+  const imageBlocks: StdinImageBlock[] = [];
+
+  for (const [, att] of msg.attachments) {
+    const ct = (att.contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+    const mediaType = SUPPORTED_IMAGE_TYPES[ct];
+    const sizeKb = Math.round((att.size ?? 0) / 1024);
+    const descPrefix = `[附件: ${att.name} (${att.contentType ?? "unknown"}, ${sizeKb}KB)`;
+
+    if (mediaType && (att.size ?? 0) <= MAX_IMAGE_BYTES) {
+      try {
+        const resp = await fetch(att.url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const buf = Buffer.from(await resp.arrayBuffer());
+        if (buf.length > MAX_IMAGE_BYTES) throw new Error(`下載後超過 ${MAX_IMAGE_BYTES} bytes`);
+        imageBlocks.push({
+          type: "image",
+          source: { type: "base64", media_type: mediaType, data: buf.toString("base64") },
+        });
+        textParts.push(`${descPrefix} 已以 inline image 附上]`);
+        continue;
+      } catch (err) {
+        log.warn(`[cli-bridge-reply] 圖片下載失敗，改用 URL 文字：${att.url} (${err instanceof Error ? err.message : String(err)})`);
+      }
+    } else if (mediaType && (att.size ?? 0) > MAX_IMAGE_BYTES) {
+      log.warn(`[cli-bridge-reply] 圖片超過 ${MAX_IMAGE_BYTES} bytes，改用 URL 文字：${att.name}`);
+    }
+
+    textParts.push(`${descPrefix} URL: ${att.url}]`);
+  }
+
+  return { text: textParts.length ? "\n" + textParts.join("\n") : "", imageBlocks };
+}
+
+/** @deprecated 保留給尚未遷移的呼叫端；新路徑請用 extractAttachments */
 export function extractAttachmentText(msg: Message): string {
   if (!msg.attachments.size) return "";
   const parts: string[] = [];
@@ -86,11 +137,13 @@ export async function handleCliBridgeReply(
   originalMessage: Message,
   bridgeConfig: BridgeConfig,
   cliBridgeConfig?: CliBridgeConfig,
+  imageBlocks?: StdinImageBlock[],
 ): Promise<void> {
   const sender = bridge.getSender();
   const handle = bridge.send(text, "discord", {
     user: originalMessage.author.displayName || originalMessage.author.username,
     ts: new Date(originalMessage.createdTimestamp).toISOString(),
+    imageBlocks,
   });
   const turnId = handle.turnId;
   const stdoutLogger = bridge.getStdoutLogger();
