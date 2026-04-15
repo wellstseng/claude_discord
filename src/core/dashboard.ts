@@ -1583,30 +1583,31 @@ function setPath(obj, path, val) {
 }
 
 // ── 表單欄位渲染 ──
-function renderField(f, val, prefix) {
+function renderField(f, val, prefix, dataPath) {
   const id = prefix + '__' + f.k;
+  const dp = dataPath ?? id;
   const v = val ?? '';
   const hint = f.d ? \`<span class="cfg-hint" title="\${esc(f.d)}">ℹ️ \${f.d}</span>\` : '';
   if (f.t === 'bool') {
-    return \`<div class="cfg-row"><label>\${f.l}\${hint}</label><label class="cfg-toggle"><input type="checkbox" data-path="\${id}" \${v ? 'checked' : ''}><span class="slider"></span></label></div>\`;
+    return \`<div class="cfg-row"><label>\${f.l}\${hint}</label><label class="cfg-toggle"><input type="checkbox" data-path="\${dp}" \${v ? 'checked' : ''}><span class="slider"></span></label></div>\`;
   }
   if (f.t === 'select') {
     const opts = (f.opts||[]).map(o => \`<option value="\${o}" \${v===o?'selected':''}>\${o||'(auto)'}</option>\`).join('');
-    return \`<div class="cfg-row"><label>\${f.l}\${hint}</label><select data-path="\${id}">\${opts}</select></div>\`;
+    return \`<div class="cfg-row"><label>\${f.l}\${hint}</label><select data-path="\${dp}">\${opts}</select></div>\`;
   }
   if (f.t === 'list') {
     const items = Array.isArray(val) ? val : [];
     const rows = items.map((item, i) =>
-      \`<div class="cfg-list-item"><input value="\${esc(item)}" data-path="\${id}[\${i}]"><button class="btn-x" onclick="this.parentElement.remove()">✕</button></div>\`
+      \`<div class="cfg-list-item"><input value="\${esc(item)}" data-path="\${dp}[\${i}]"><button class="btn-x" onclick="this.parentElement.remove()">✕</button></div>\`
     ).join('');
     const defaultsHtml = Array.isArray(f.defaults) && f.defaults.length
       ? \`<div style="font-size:0.7rem;color:#9ca3af;margin-top:4px;padding:4px 6px;background:#0f1117;border-left:2px solid #818cf8;border-radius:2px">🔒 預設保護（不可移除）：\${f.defaults.map(esc).join(', ')}</div>\`
       : '';
-    return \`<div class="cfg-row" style="align-items:start"><label>\${f.l}\${hint}</label><div class="cfg-list" id="list_\${id}">\${rows}<button class="cfg-add" onclick="addListItem('list_\${id}','\${id}')">+ 新增</button>\${defaultsHtml}</div></div>\`;
+    return \`<div class="cfg-row" style="align-items:start"><label>\${f.l}\${hint}</label><div class="cfg-list" id="list_\${id}">\${rows}<button class="cfg-add" onclick="addListItem('list_\${id}','\${dp}')">+ 新增</button>\${defaultsHtml}</div></div>\`;
   }
   const inputType = f.t === 'pw' ? 'password' : f.t === 'num' ? 'number' : 'text';
   const step = f.step ? \` step="\${f.step}"\` : '';
-  return \`<div class="cfg-row"><label>\${f.l}\${hint}</label><input type="\${inputType}" data-path="\${id}" value="\${esc(String(v ?? ''))}"\${step}></div>\`;
+  return \`<div class="cfg-row"><label>\${f.l}\${hint}</label><input type="\${inputType}" data-path="\${dp}" value="\${esc(String(v ?? ''))}"\${step}></div>\`;
 }
 
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
@@ -1642,7 +1643,7 @@ function addMapRow(containerId) {
 // ── Sub section ──
 function renderSub(s, data) {
   const subData = getPath(data, s.k) || {};
-  const fields = (s.fields||[]).map(f => renderField(f, subData[f.k], s.k)).join('');
+  const fields = (s.fields||[]).map(f => renderField(f, subData[f.k], s.k, s.k + '.' + f.k)).join('');
   return \`<div class="cfg-sub"><div style="font-size:0.78rem;color:#818cf8;margin-bottom:6px;font-weight:bold">\${s.l}</div>\${fields}</div>\`;
 }
 
@@ -1654,13 +1655,15 @@ function renderDynamic(section, data) {
   const secId = path.replace(/\\./g, '_');
   for (const [entryKey, entryVal] of Object.entries(obj)) {
     const ev = entryVal || {};
-    let fieldsHtml = (section.entryFields||[]).map(f => renderField(f, ev[f.k], path+'.'+entryKey)).join('');
+    const entryPrefix = path+'.'+entryKey;
+    let fieldsHtml = (section.entryFields||[]).map(f => renderField(f, ev[f.k], entryPrefix, entryPrefix+'.'+f.k)).join('');
     // Guilds 有 channels 子區塊
     if (section.hasChannels && ev.channels) {
       let chHtml = '';
       for (const [chId, chVal] of Object.entries(ev.channels)) {
         const cv = chVal || {};
-        const chFields = (section.channelFields||[]).map(f => renderField(f, cv[f.k], path+'.'+entryKey+'.channels.'+chId)).join('');
+        const chPrefix = entryPrefix+'.channels.'+chId;
+        const chFields = (section.channelFields||[]).map(f => renderField(f, cv[f.k], chPrefix, chPrefix+'.'+f.k)).join('');
         chHtml += \`<div class="cfg-dynamic-entry" style="background:#0f1117"><div class="entry-header"><span style="color:#60a5fa;font-size:0.75rem">📌 Channel</span><input value="\${esc(chId)}" class="dyn-key" style="font-size:0.75rem" disabled></div>\${chFields}</div>\`;
       }
       fieldsHtml += \`<div class="cfg-sub"><div style="font-size:0.75rem;color:#60a5fa;margin-bottom:6px">Channels</div>\${chHtml}</div>\`;
@@ -1701,7 +1704,7 @@ function renderConfigGUI(data) {
     if (sec.fields) {
       content += sec.fields.map(f => {
         const val = f.k.includes('.') ? getPath(data, f.k) : data[f.k];
-        return renderField(f, val, sec.key);
+        return renderField(f, val, sec.key, f.k);
       }).join('');
     }
     // Maps
@@ -1726,8 +1729,7 @@ function collectConfigJSON() {
     const listMatch = rawPath.match(/^(.+)\\[(\\d+)\\]\$/);
     if (listMatch) return; // list items 下面統一處理
 
-    // 將 section__key 轉回 dot path
-    const path = rawPath.replace(/__/g, '.');
+    const path = rawPath.includes('__') ? rawPath.replace(/__/g, '.') : rawPath;
     let val;
     if (el.type === 'checkbox') val = el.checked;
     else if (el.type === 'number') val = el.value === '' ? undefined : Number(el.value);
@@ -1740,7 +1742,8 @@ function collectConfigJSON() {
     const items = listEl.querySelectorAll('.cfg-list-item input');
     const firstItem = items[0];
     if (!firstItem) return;
-    const basePath = firstItem.dataset.path.replace(/\\[\\d+\\]\$/, '').replace(/__/g, '.');
+    const rawBase = firstItem.dataset.path.replace(/\\[\\d+\\]\$/, '');
+    const basePath = rawBase.includes('__') ? rawBase.replace(/__/g, '.') : rawBase;
     const arr = Array.from(items).map(i => i.value).filter(v => v !== '');
     setPath(result, basePath, arr);
   });
