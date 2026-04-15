@@ -78,7 +78,7 @@ function toolResultPreview(result: unknown, error?: string): string {
 
 const MAX_LOOPS = 20;
 const MAX_CONTINUATIONS = 3;  // Output Token Recovery：max_tokens 截斷時最多自動續接次數
-const DEFAULT_RESULT_TOKEN_CAP = 8000;   // 1 token ≈ 4 chars → 32000 chars
+const DEFAULT_RESULT_TOKEN_CAP = 0;   // 0 = 不截斷（讓上游/per-tool 自行控制）
 
 // ── Tool result 智慧截斷 ──────────────────────────────────────────────────────
 

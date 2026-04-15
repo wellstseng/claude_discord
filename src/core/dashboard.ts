@@ -1528,7 +1528,7 @@ const CFG_SCHEMA = [
       {k:'contextWindowTokens',t:'num',l:'Context Window Tokens',d:'context window 大小（預設 100000）'},
     ]},
     {k:'contextEngineering.toolBudget',l:'Tool Budget',fields:[
-      {k:'resultTokenCap',t:'num',l:'Result Token Cap',d:'單次 tool 回傳結果的 token 上限（預設 8000，0=無限制）'},
+      {k:'resultTokenCap',t:'num',l:'Result Token Cap',d:'單次 tool 回傳結果的 token 上限（預設 0=無限制；per-tool 設定仍生效）'},
       {k:'perTurnTotalCap',t:'num',l:'Per Turn Total Cap',d:'單 turn 內所有 tool 結果的 token 總上限（預設 0=無限制）'},
       {k:'toolTimeoutMs',t:'num',l:'Tool Timeout (ms)',d:'單次 tool 執行逾時（預設 30000ms，0=無限制）'},
       {k:'maxWriteFileBytes',t:'num',l:'Max Write Bytes',d:'write/edit 單次上限 bytes（預設 512000=500KB，0=無限制）'},

@@ -455,7 +455,7 @@ export type RateLimitConfig = Record<string, { requestsPerMinute: number }>;
 
 /** Tool Budget 設定 */
 export interface ToolBudgetConfig {
-  /** 單一工具結果 token 上限（預設 8000，0 = 無限制） */
+  /** 單一工具結果 token 上限（預設 0 = 無限制；per-tool resultTokenCap 仍生效） */
   resultTokenCap?: number;
   /** 每個 turn 所有工具結果合計 token 上限（預設 0 = 無限制） */
   perTurnTotalCap?: number;

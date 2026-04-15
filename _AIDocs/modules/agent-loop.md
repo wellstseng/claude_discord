@@ -22,7 +22,7 @@
 |------|-----|------|
 | `MAX_LOOPS` | 20 | 單次 turn 最大 LLM 迴圈數 |
 | `MAX_CONTINUATIONS` | 3 | Output Token Recovery 最大續接次數 |
-| `DEFAULT_RESULT_TOKEN_CAP` | 8000 | Tool result 截斷上限（tokens） |
+| `DEFAULT_RESULT_TOKEN_CAP` | 0 | Tool result 預設不截斷（per-tool resultTokenCap 仍生效） |
 
 ## 主函式
 

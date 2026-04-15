@@ -537,11 +537,12 @@ export const tool: Tool = {
             const { join: pathJoin } = await import("node:path");
             const { homedir: osHomedir } = await import("node:os");
             const { mkdirSync: mkdirSyncFs } = await import("node:fs");
+            const { resolveAgentDataDir } = await import("../../core/agent-loader.js");
 
-            // agent context → 寫入 agent 專屬目錄；否則 global
+            // agent context → 寫入 agent 專屬 workspace 目錄；否則 global
             const hasAgent = !!agentParam;
             const memDir = hasAgent
-              ? pathJoin(osHomedir(), ".catclaw", "agents", agentParam!, "memory")
+              ? pathJoin(resolveAgentDataDir(agentParam!), "memory")
               : pathJoin(osHomedir(), ".catclaw", "memory");
             const ns = hasAgent ? `agent/${agentParam!}` : "global";
 
