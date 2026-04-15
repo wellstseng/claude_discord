@@ -139,12 +139,14 @@ export async function handleCliBridgeReply(
   cliBridgeConfig?: CliBridgeConfig,
   imageBlocks?: StdinImageBlock[],
   senderOverride?: import("./discord-sender.js").BridgeSender,
+  sourceChannelId?: string,
 ): Promise<void> {
   const sender = senderOverride ?? bridge.getSender();
   const handle = bridge.send(text, "discord", {
     user: originalMessage.author.displayName || originalMessage.author.username,
     ts: new Date(originalMessage.createdTimestamp).toISOString(),
     imageBlocks,
+    sourceChannelId,
   });
   const turnId = handle.turnId;
   const stdoutLogger = bridge.getStdoutLogger();

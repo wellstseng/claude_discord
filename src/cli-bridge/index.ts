@@ -286,7 +286,8 @@ function handleIndependentBotMessage(bridge: CliBridge, msg: Message): void {
       log.info(`[cli-bridge] independent bot 路由：${bridge.label} channel=${msg.channelId}${isHomeChannel ? "" : " (跨頻道)"}`);
       void handleCliBridgeReply(bridge, fullText, msg, {
         showToolCalls: "none",
-      } as Parameters<typeof handleCliBridgeReply>[3], bridgeConfig, imageBlocks, senderOverride);
+      } as Parameters<typeof handleCliBridgeReply>[3], bridgeConfig, imageBlocks, senderOverride,
+        isHomeChannel ? undefined : msg.channelId);
     } catch (err) {
       log.error(`[cli-bridge] independent bot handler error: ${err instanceof Error ? err.message : String(err)}`);
     }

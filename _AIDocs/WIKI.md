@@ -460,6 +460,7 @@ echo "$STDIN_JSON" >> /tmp/tool-audit.log
 - Auto-restart on crash，keepAlive 機制
 - 中間推理文字格式化 + 可選 `showIntermediateText`
 - `/clear-session` 同步清空 `stdout.jsonl` + `compactTurns(60)` 合併 turns（保留統計、TTL 60 天）
+- 跨頻道 mention 回應：獨立 bot 被 mention 時可在任意頻道/thread/guild 回覆，stdin tag 自動標記來源頻道（`chat_id` + `home_channel`）
 
 **新增 Bridge**：在 Discord 使用 `/add-bridge label=<name> channel=<id> cwd=<path>`
 

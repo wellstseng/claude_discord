@@ -124,7 +124,7 @@ export class CliBridge {
 
   // ── 送訊息（直送 stdin，不排隊）──────────────────────────────────────────
 
-  send(text: string, source: "discord" | "dashboard", meta?: { user?: string; ts?: string; imageBlocks?: StdinImageBlock[] }): TurnHandle {
+  send(text: string, source: "discord" | "dashboard", meta?: { user?: string; ts?: string; imageBlocks?: StdinImageBlock[]; sourceChannelId?: string }): TurnHandle {
     this._lastUsedAt = Date.now();
     const turnId = randomUUID();
 
@@ -479,24 +479,30 @@ export class CliBridge {
   private wrapWithChannelTag(
     text: string,
     source: "discord" | "dashboard",
-    meta?: { user?: string; ts?: string },
+    meta?: { user?: string; ts?: string; sourceChannelId?: string },
   ): string {
     const ts = meta?.ts ?? new Date().toISOString();
     const escape = (v: string): string => v.replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+    const isCrossChannel = meta?.sourceChannelId && meta.sourceChannelId !== this.channelId;
+    const chatId = isCrossChannel ? meta.sourceChannelId! : this.channelId;
+
     const attrs: string[] = [
       `source="catclaw_cli_bridge"`,
       `bridge_label="${escape(this.label)}"`,
-      `chat_id="${escape(this.channelId)}"`,
+      `chat_id="${escape(chatId)}"`,
       `origin="${source}"`,
       `ts="${ts}"`,
     ];
     if (meta?.user) attrs.push(`user="${escape(meta.user)}"`);
+    if (isCrossChannel) attrs.push(`home_channel="${escape(this.channelId)}"`);
 
-    const hint =
-      "要主動操作 Discord 請用 mcp__catclaw-bridge-discord__* 工具（走 Bridge 自己的 bot token，限定本頻道）。" +
-      "官方 plugin:discord:discord 的 bot 可能無權限存取本頻道，會撞 Missing Access。" +
-      "一般回覆直接用 stdout 即可，CatClaw 會自動轉送到 Discord。";
+    const hint = isCrossChannel
+      ? `這是跨頻道 mention。回覆會自動送到來源頻道 ${chatId}。` +
+        `要操作該頻道請用 mcp__catclaw-bridge-discord__* 工具並指定 channelId="${chatId}"。`
+      : "要主動操作 Discord 請用 mcp__catclaw-bridge-discord__* 工具（走 Bridge 自己的 bot token，限定本頻道）。" +
+        "官方 plugin:discord:discord 的 bot 可能無權限存取本頻道，會撞 Missing Access。" +
+        "一般回覆直接用 stdout 即可，CatClaw 會自動轉送到 Discord。";
 
     return `<channel ${attrs.join(" ")}>\n<!-- ${hint} -->\n${text}\n</channel>`;
   }
