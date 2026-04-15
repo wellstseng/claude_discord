@@ -233,7 +233,7 @@
 
   // ── 記憶系統 ──────────────────────────────────────────────────────
   "memory": {
-    "enabled": false,
+    "enabled": true,
     "root": "",                       // 空字串 = 用 CATCLAW_WORKSPACE
     "vectorDbPath": "~/.catclaw/_vectordb",
     "contextBudget": 3000,
