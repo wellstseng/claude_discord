@@ -10,7 +10,7 @@
  *   - turns.jsonl   — 完整 turn 歷程
  */
 
-import { appendFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
@@ -121,6 +121,61 @@ export class StdoutLogger {
       const idx = this.eventListeners.indexOf(listener);
       if (idx >= 0) this.eventListeners.splice(idx, 1);
     };
+  }
+
+  // ── 清理 / 合併 / TTL ────────────────────────────────────────────────────
+
+  /** 清空 stdout.jsonl（檔案 + 記憶體），/clear-session 呼叫 */
+  truncateStdout(): void {
+    this.recentEvents = [];
+    try {
+      writeFileSync(this.stdoutPath, "", "utf-8");
+      log.info(`[stdout-log:${this.label}] stdout.jsonl 已清空`);
+    } catch (err) {
+      log.warn(`[stdout-log:${this.label}] stdout 清空失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * 合併 turns：content 類欄位替換為 placeholder 只保留統計；
+   * 超過 ttlDays 的整筆移除。重寫檔案 + 重建記憶體。
+   */
+  compactTurns(ttlDays = 60): { merged: number; expired: number } {
+    if (!existsSync(this.turnsPath)) return { merged: 0, expired: 0 };
+    const cutoff = Date.now() - ttlDays * 86400_000;
+    const PLACEHOLDER = "[已合併]";
+    let merged = 0, expired = 0;
+
+    let all: TurnRecord[] = [];
+    try {
+      const lines = readFileSync(this.turnsPath, "utf-8").split("\n").filter(l => l.trim());
+      for (const line of lines) {
+        try { all.push(JSON.parse(line) as TurnRecord); } catch { /* skip */ }
+      }
+    } catch { return { merged: 0, expired: 0 }; }
+
+    const kept: TurnRecord[] = [];
+    for (const t of all) {
+      const ts = Date.parse(t.startedAt);
+      if (!Number.isNaN(ts) && ts < cutoff) { expired++; continue; }
+      // 已合併過的（userInput 已是 placeholder）跳過
+      if (t.userInput !== PLACEHOLDER) {
+        t.userInput = PLACEHOLDER;
+        t.assistantReply = PLACEHOLDER;
+        t.toolCalls = t.toolCalls.map(c => ({ name: c.name, preview: "", durationMs: c.durationMs }));
+        merged++;
+      }
+      kept.push(t);
+    }
+
+    try {
+      writeFileSync(this.turnsPath, kept.map(t => JSON.stringify(t)).join("\n") + (kept.length ? "\n" : ""), "utf-8");
+      this.recentTurns = kept.slice(-this.MAX_RECENT_TURNS);
+      log.info(`[stdout-log:${this.label}] turns 合併：merged=${merged}, expired=${expired}, kept=${kept.length}`);
+    } catch (err) {
+      log.warn(`[stdout-log:${this.label}] turns 合併寫回失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { merged, expired };
   }
 
   // ── 日誌路徑（外部存取用）────────────────────────────────────────────────

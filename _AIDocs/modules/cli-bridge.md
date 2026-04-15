@@ -29,6 +29,7 @@
 - **指數退避自動重啟** — 1s, 2s, 4s, 8s, 16s, 30s
 - **SIGINT 中斷** — 5s 超時 → 重啟 process
 - **與 Agent Loop 完全獨立** — 不共享 Provider / Session / Memory
+- **日誌清理（/clear-session）** — `clearSessionId()` 除了清 sessionId，同步呼叫 `stdoutLogger.truncateStdout()` 清空 `stdout.jsonl`，並 `compactTurns(60)` 把舊 turns 的 userInput / assistantReply / toolCalls.preview 置換為 `[已合併]`（只留 turnId / 時間 / tool 名稱 / durationMs 等統計欄位），超過 60 天 TTL 的整筆移除。stdout.jsonl 純觀測 log、turns.jsonl 歷程統計，**都不注入 CLI context**（context 由 Claude CLI 端 `--resume <sessionId>` 維護）
 - **Session ID 保活** — `persistSessionId()` 寫入 `cli-bridges.json`，重啟後用 `--resume` 恢復對話
 - **`--resume` 取代 `--session-id`** — `--session-id` 會因 `~/.claude/projects/<cwd>/<uuid>.jsonl` 存在報 "already in use"；`--resume` 直接載入既有 session 不做此檢查
 - **Hot-reload sessionId 排除** — `configSnapshotJson()` 比對設定時排除 sessionId，避免 `persistSessionId()` 觸發不必要的 bridge 重建

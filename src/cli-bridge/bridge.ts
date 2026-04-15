@@ -314,6 +314,14 @@ export class CliBridge {
         }
       }
     } catch { /* 靜默 */ }
+    // 同步清理日誌：stdout 全清 + turns 合併（保留統計）+ TTL 60 天
+    try {
+      this.stdoutLogger.truncateStdout();
+      const { merged, expired } = this.stdoutLogger.compactTurns(60);
+      log.info(`[cli-bridge:${this.label}] 日誌清理：stdout 已清空、turns merged=${merged} expired=${expired}`);
+    } catch (err) {
+      log.warn(`[cli-bridge:${this.label}] 日誌清理失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
     log.info(`[cli-bridge:${this.label}] sessionId 已清除（runtime + json）`);
   }
 
