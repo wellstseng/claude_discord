@@ -81,9 +81,12 @@ The setup script handles everything:
 2. Installs dependencies
 3. Creates `.env` with default paths
 4. Initializes directory structure (`~/.catclaw/`)
-5. Prompts for Discord Bot Token (writes to `catclaw.json`)
-6. Prompts for Anthropic API Key (creates `auth-profile.json`)
-7. Compiles TypeScript and starts with PM2
+5. Admin account setup (enter Discord User ID, creates platform-owner account)
+6. Prompts for Discord Bot Token (writes to `catclaw.json`)
+7. Prompts for default Discord channels
+8. Prompts for Anthropic API Key (creates `auth-profile.json`)
+9. Feature toggles (Dashboard / Cron)
+10. Compiles TypeScript and starts with PM2
 
 ### Manual Install
 

@@ -81,9 +81,12 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 2. 安裝依賴
 3. 建立 `.env`（預設路徑）
 4. 初始化目錄結構（`~/.catclaw/`）
-5. 互動設定 Discord Bot Token（寫入 `catclaw.json`）
-6. 互動設定 Anthropic API Key（建立 `auth-profile.json`）
-7. 編譯 TypeScript + PM2 啟動
+5. Admin 帳號設定（輸入 Discord User ID，建立 platform-owner 帳號）
+6. 互動設定 Discord Bot Token（寫入 `catclaw.json`）
+7. 互動設定預設 Discord 頻道
+8. 互動設定 Anthropic API Key（建立 `auth-profile.json`）
+9. 功能開關（Dashboard / 排程）
+10. 編譯 TypeScript + PM2 啟動
 
 ### 手動安裝
 

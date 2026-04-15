@@ -33,7 +33,7 @@ cd catclaw
 bash setup.sh
 ```
 
-`setup.sh` 自動完成：前置檢查（Node.js >= 18、pnpm、PM2）→ 安裝依賴 → 建立 `.env` → 初始化目錄 → 互動設定 Discord Token + API Key → 編譯 + PM2 啟動。
+`setup.sh` 自動完成：前置檢查（Node.js >= 18、pnpm、PM2）→ 安裝依賴 → 建立 `.env` → 初始化目錄 → Admin 帳號設定（Discord User ID → platform-owner）→ 互動設定 Discord Token + 頻道 + API Key → 功能開關 → 編譯 + PM2 啟動。
 
 ### 手動安裝
 
