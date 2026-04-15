@@ -1226,7 +1226,7 @@ function loadConfig(): BridgeConfig {
       dm: { enabled: raw.discord.dm?.enabled ?? true },
       guilds,
     },
-    admin: { allowedUserIds: raw.admin?.allowedUserIds ?? [] },
+    admin: { allowedUserIds: (raw.admin?.allowedUserIds ?? []).map(String) },
     turnTimeoutMs,
     turnTimeoutToolCallMs: raw.turnTimeoutToolCallMs ?? Math.round(turnTimeoutMs * 1.6),
     showToolCalls: parseShowToolCalls(raw.showToolCalls),

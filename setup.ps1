@@ -270,9 +270,9 @@ if ($ExistingAdmins.Count -gt 0 -and $ExistingAdmins[0]) {
 }
 
 if ($AdminIds.Count -gt 0) {
-    # 寫入 catclaw.json admin.allowedUserIds
-    $idsJson = ($AdminIds | ForEach-Object { "`"$_`"" }) -join ","
-    node -e "const fs=require('fs'),p=process.argv[1],ids=JSON.parse(process.argv[2]);const c=JSON.parse(fs.readFileSync(p,'utf-8'));c.admin.allowedUserIds=ids;fs.writeFileSync(p,JSON.stringify(c,null,2),'utf-8')" $CatclawJson "[$idsJson]"
+    # 寫入 catclaw.json admin.allowedUserIds（ID 必須是字串，避免 JS 大數精度遺失）
+    $idsArg = $AdminIds -join ","
+    node -e "const fs=require('fs'),p=process.argv[1],raw=process.argv[2];const ids=raw.split(',').map(s=>s.trim()).filter(s=>/^\d+$/.test(s));const c=JSON.parse(fs.readFileSync(p,'utf-8'));c.admin.allowedUserIds=ids;fs.writeFileSync(p,JSON.stringify(c,null,2),'utf-8')" $CatclawJson $idsArg
     Ok "Admin User IDs 已寫入 catclaw.json"
 
     # 建立帳號目錄與 _registry.json

@@ -29,7 +29,7 @@ export 所有型別定義（包括 cron.ts 使用的 `CronSchedule` / `CronActio
 | `discord.token` | `string` | — | ✓ | Discord Bot Token |
 | `discord.dm.enabled` | `boolean` | `true` | — | 是否啟用 DM 回應 |
 | `discord.guilds` | `Record<string, GuildConfig>` | `{}` | — | per-guild 設定，空物件=全部允許 |
-| `admin.allowedUserIds` | `string[]` | `[]` | — | 管理員 User ID 白名單 |
+| `admin.allowedUserIds` | `string[]` | `[]` | — | 管理員 User ID 白名單（JSON 中若為 number 會自動轉 string） |
 | `turnTimeoutMs` | `number` | `300000` | — | 基礎回應超時毫秒（5 分鐘），頂層欄位 |
 | `turnTimeoutToolCallMs` | `number` | `turnTimeoutMs×1.6` | — | tool_call 延長超時（預設 8 分鐘） |
 | `showToolCalls` | `"all" \| "summary" \| "none"` | `"all"` | — | 工具呼叫顯示模式 |
