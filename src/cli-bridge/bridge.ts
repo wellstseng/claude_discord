@@ -149,9 +149,9 @@ export class CliBridge {
       const prevListener = this.turnListeners.get(prevTurnId);
       if (prevListener && !prevListener.done) {
         prevListener.done = true;
-        const errEvt: CliBridgeEvent = { type: "error", message: "被新訊息插話取消" };
-        if (prevListener.resolve) prevListener.resolve(errEvt);
-        else prevListener.queue.push(errEvt);
+        const abortEvt: CliBridgeEvent = { type: "result", is_error: false, text: "" };
+        if (prevListener.resolve) prevListener.resolve(abortEvt);
+        else prevListener.queue.push(abortEvt);
         log.debug(`[cli-bridge:${this.label}] 插話：abort 前一個 turn=${prevTurnId.slice(0, 8)}`);
       }
       // 清 pending turn record
