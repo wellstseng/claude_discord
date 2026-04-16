@@ -3396,10 +3396,16 @@ async function cbLoadTurns() {
     document.getElementById('cb-turns').innerHTML = '<table class="tbl"><thead><tr><th>時間</th><th>來源</th><th>輸入</th><th>回覆</th><th>工具</th><th>送達</th><th></th></tr></thead><tbody>' +
       turns.slice().reverse().map(t => {
         const time = t.startedAt ? new Date(t.startedAt).toLocaleTimeString() : '-';
-        const input = (t.userInput || '').slice(0, 40) + (t.userInput?.length > 40 ? '…' : '');
+        // 預覽時去除 inbound context / 跨頻道 context 前綴（--- 分隔符之後才是使用者原文）
+        const rawInput = t.userInput || '';
+        const sepIdx = rawInput.indexOf('\\n---\\n');
+        const displayInput = sepIdx >= 0 ? rawInput.slice(sepIdx + 5).trim() : rawInput;
+        const hasCtxPrefix = sepIdx >= 0;
+        const ctxIcon = hasCtxPrefix ? '📨 ' : '';
+        const input = ctxIcon + displayInput.slice(0, 40) + (displayInput.length > 40 ? '…' : '');
         const reply = (t.assistantReply || '').slice(0, 40) + (t.assistantReply?.length > 40 ? '…' : '');
         const resendBtn = t.discordDelivery === 'failed' ? \`<button class="btn btn-sm" onclick="cbResend('\${t.turnId}')">重送</button>\` : '';
-        return \`<tr><td>\${time}</td><td>\${t.source}</td><td title="\${(t.userInput||'').replace(/"/g,'&quot;')}">\${input}</td><td title="\${(t.assistantReply||'').replace(/"/g,'&quot;')}">\${reply}</td><td>\${t.toolCalls?.length || 0}</td><td>\${deliveryIcon(t.discordDelivery)}</td><td>\${resendBtn}</td></tr>\`;
+        return \`<tr><td>\${time}</td><td>\${t.source}</td><td title="\${rawInput.replace(/"/g,'&quot;')}">\${input}</td><td title="\${(t.assistantReply||'').replace(/"/g,'&quot;')}">\${reply}</td><td>\${t.toolCalls?.length || 0}</td><td>\${deliveryIcon(t.discordDelivery)}</td><td>\${resendBtn}</td></tr>\`;
       }).join('') +
       '</tbody></table>';
   } catch (err) {
