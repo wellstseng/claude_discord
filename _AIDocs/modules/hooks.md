@@ -37,6 +37,8 @@ agents/{id}/hooks/*.ts                  ← Agent 專屬 hook
 每支腳本用 `defineHook` 自描述 metadata，scanner 啟動時掃資料夾自動註冊。
 fs.watch 監聽變更熱重載。
 
+**注意**：新增 HookEvent 時必須同步更新 `metadata-parser.ts` 的 `VALID_EVENTS` 白名單，否則 scanner 會跳過該 event 的腳本。
+
 **次要：config 覆蓋層**
 
 `catclaw.json.hooks[]` / `agentConfig.hooks[]` 用來：

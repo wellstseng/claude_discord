@@ -23,7 +23,7 @@ export const tool: Tool = {
   parameters: {
     type: "object",
     properties: {
-      event:    { type: "string", description: "HookEvent（如 PreToolUse / PostTurn / MemoryRecall）" },
+      event:    { type: "string", description: "HookEvent（如 PreToolUse / PostTurn / MemoryRecall / FileChanged / FileDeleted）" },
       name:     { type: "string", description: "hook 名稱（kebab-case）" },
       content:  { type: "string", description: "腳本完整內容" },
       runtime:  { type: "string", description: "ts / js / mjs / sh / bat / ps1（預設 ts）" },

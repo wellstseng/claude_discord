@@ -1352,6 +1352,7 @@ function loadConfig(): BridgeConfig {
       wisdomEngine:   raw.workflow.wisdomEngine   ?? { enabled: true },
       aidocs:         raw.workflow.aidocs         ?? { enabled: true, contentGate: true },
     } : undefined,
+    fileWatcher: raw.fileWatcher,
     accounts: {
       registrationMode:    (raw.accounts?.registrationMode ?? "invite") as AccountsConfig["registrationMode"],
       defaultRole:         raw.accounts?.defaultRole ?? "member",

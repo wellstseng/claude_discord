@@ -30,6 +30,7 @@ const VALID_EVENTS: ReadonlySet<string> = new Set([
   "CliBridgeSpawn", "CliBridgeSuspend", "CliBridgeTurn",
   "PreFileWrite", "PreFileEdit", "PreCommandExec",
   "SafetyViolation", "AgentError",
+  "FileChanged", "FileDeleted",
   "ConfigReload", "ProviderSwitch",
 ]);
 

@@ -203,3 +203,14 @@ const ch = await client.channels.fetch(channelId);
 **原因**：`runJob` 的 catch 區塊只記錄 lastError，不送 Discord。
 
 **解法**：catch 區塊加入 Discord 錯誤訊息發送（`⚠️ 排程 **{name}** 執行失敗：{message}`），只在有 channelId 且非 silent 時觸發，發送失敗不影響重試流程。
+
+## 22. 新增 HookEvent 後 hook 腳本不被載入
+
+**現象**：hook 腳本檔名格式正確（如 `FileChanged.xxx.ts`），`hook_list` 回傳 0。
+
+**原因**：`metadata-parser.ts` 有 `VALID_EVENTS` 白名單，新 event 未加入 → scanner 跳過。
+
+**解法**：新增 HookEvent 時**三處必須同步更新**：
+1. `types.ts` — HookEvent union + Input interface
+2. `metadata-parser.ts` — `VALID_EVENTS` Set
+3. tool description — `hook_register` event 參數範例 + 相關 tool description

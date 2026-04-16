@@ -8,7 +8,8 @@ import type { Tool } from "../types.js";
 export const tool: Tool = {
   name: "filewatch",
   description:
-    "管理檔案監聽目錄。list: 列出所有監聽點及狀態；add: 動態新增監聽（runtime only，不改 catclaw.json）；" +
+    "管理檔案監聽目錄（觸發 FileChanged / FileDeleted hook event）。" +
+    "list: 列出所有監聽點及狀態；add: 動態新增監聽（runtime only，不改 catclaw.json）；" +
     "remove: 停止並移除某 label 的監聽。",
   tier: "elevated",
   parameters: {
