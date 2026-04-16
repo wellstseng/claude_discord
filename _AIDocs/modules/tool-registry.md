@@ -1,7 +1,7 @@
 # modules/tool-registry — Tool 註冊 + Builtin Tools
 
 > 檔案：`src/tools/registry.ts` + `src/tools/builtin/`
-> 更新日期：2026-04-14
+> 更新日期：2026-04-16
 
 ## 職責
 
@@ -50,7 +50,7 @@ interface ToolContext {
 }
 ```
 
-## 24 Builtin Tools
+## 25 Builtin Tools
 
 ### 檔案操作（elevated）
 
@@ -131,6 +131,12 @@ interface ToolContext {
 | `hook_register` | elevated | 寫入新 hook 腳本至 `workspace/hooks/` 或 `agents/{id}/hooks/`（fs.watch 自動 reload） |
 | `hook_list` | standard | 列出已註冊 hooks（可依 event / scope 篩選） |
 | `hook_remove` | elevated | 刪除或停用（rename to `*.disabled.*`）指定 hook |
+
+### File Watcher（elevated）
+
+| Tool | 說明 |
+|------|------|
+| `filewatch` | 管理檔案監聽目錄（list/add/remove）— 動態新增或移除外部檔案監聽 |
 
 ### Meta（public）
 

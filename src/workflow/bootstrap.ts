@@ -18,6 +18,7 @@ import { initAidocsManager } from "./aidocs-manager.js";
 import { initMemoryExtractor } from "./memory-extractor.js";
 import { scheduleConsolidate } from "./consolidate-scheduler.js";
 import { initMemoryVectorSync } from "./memory-vector-sync.js";
+import type { FileWatcherConfig } from "../core/config.js";
 
 export interface WorkflowConfig {
   enabled?: boolean;
@@ -42,6 +43,7 @@ export function initWorkflow(
   memoryDir: string,
   projectRoot?: string,
   agentsDir?: string,
+  fileWatcherConfig?: FileWatcherConfig,
 ): void {
   if (config?.enabled === false) {
     log.info("[workflow] 已停用（config.workflow.enabled=false）");
@@ -89,6 +91,17 @@ export function initWorkflow(
     // ── 10. Memory Vector Sync（file:modified → 自動向量 upsert）
     if (agentsDir) {
       initMemoryVectorSync(eventBus, memoryDir, agentsDir);
+    }
+
+    // ── 11. File Watcher（外部檔案監聽 → FileChanged / FileDeleted hook event）
+    if (fileWatcherConfig?.enabled !== false && fileWatcherConfig?.watches?.length) {
+      import("../hooks/file-watcher.js").then(({ FileWatcher, setFileWatcher }) => {
+        const fw = new FileWatcher(fileWatcherConfig.watches, fileWatcherConfig);
+        setFileWatcher(fw);
+        fw.start();
+      }).catch((err) => {
+        log.warn(`[workflow] FileWatcher 啟動失敗: ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
 
     log.info("[workflow] 工作流引擎初始化完成");

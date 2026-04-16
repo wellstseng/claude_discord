@@ -14,7 +14,7 @@
  * - 純字串 command → shell
  */
 
-// ── Hook Event 類型（共 32 事件）──────────────────────────────────────────────
+// ── Hook Event 類型（共 34 事件）──────────────────────────────────────────────
 
 export type HookEvent =
   // Lifecycle (4)
@@ -39,6 +39,8 @@ export type HookEvent =
   | "CliBridgeSpawn" | "CliBridgeSuspend" | "CliBridgeTurn"
   // File System / Command (3)
   | "PreFileWrite" | "PreFileEdit" | "PreCommandExec"
+  // File Watcher (2)
+  | "FileChanged" | "FileDeleted"
   // Error / Safety (2)
   | "SafetyViolation" | "AgentError"
   // Platform (2)
@@ -292,6 +294,26 @@ export interface AgentErrorInput extends BaseInput {
   phase: "tool" | "llm" | "memory" | "platform" | "other";
 }
 
+// File Watcher ────────────────────────────────────────────────────────────────
+
+export interface FileChangedInput extends BaseInput {
+  event: "FileChanged";
+  /** 變更的檔案絕對路徑 */
+  filePath: string;
+  /** config 中的 label（e.g. "obsidian"） */
+  watchLabel: string;
+  /** 變更類型 */
+  changeType: "create" | "modify";
+}
+
+export interface FileDeletedInput extends BaseInput {
+  event: "FileDeleted";
+  /** 刪除的檔案絕對路徑 */
+  filePath: string;
+  /** config 中的 label */
+  watchLabel: string;
+}
+
 // Platform ────────────────────────────────────────────────────────────────────
 
 export interface ConfigReloadInput extends BaseInput {
@@ -319,6 +341,7 @@ export type HookInput =
   | PreCompactionInput | PostCompactionInput | ContextOverflowInput
   | CliBridgeSpawnInput | CliBridgeSuspendInput | CliBridgeTurnInput
   | PreFileWriteInput | PreFileEditInput | PreCommandExecInput
+  | FileChangedInput | FileDeletedInput
   | SafetyViolationInput | AgentErrorInput
   | ConfigReloadInput | ProviderSwitchInput;
 
@@ -354,6 +377,8 @@ export type HookInputMap = {
   PreFileWrite: PreFileWriteInput;
   PreFileEdit: PreFileEditInput;
   PreCommandExec: PreCommandExecInput;
+  FileChanged: FileChangedInput;
+  FileDeleted: FileDeletedInput;
   SafetyViolation: SafetyViolationInput;
   AgentError: AgentErrorInput;
   ConfigReload: ConfigReloadInput;

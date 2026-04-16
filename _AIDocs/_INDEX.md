@@ -5,8 +5,8 @@
 ## 專案簡介
 
 CatClaw = Codex 版 Claude Code CLI + 多人 AI 開發平台。
-以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、24 builtin tools、
-28 builtin skills（25 TS + 3 prompt）、32-event hook 系統、多 provider failover、四層記憶引擎、Context Engineering、
+以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、25 builtin tools、
+28 builtin skills（25 TS + 3 prompt）、34-event hook 系統、多 provider failover、四層記憶引擎、Context Engineering、
 subagent 編排、帳號/角色/權限系統、Web Dashboard + Trace 追蹤。
 
 ## 架構一句話摘要
@@ -32,9 +32,9 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Memory Context | `src/memory/context-builder.ts` | ACT-R 衰減 + budget + staleness check |
 | Accounts | `src/accounts/` | 帳號 + 角色 + 權限 + identity linking |
 | Providers | `src/providers/` | LLM Provider 抽象：claude-api / codex-oauth / cli-claude / cli-gemini / cli-codex / ollama / openai-compat + failover + circuit-breaker |
-| Tools | `src/tools/` | Tool 註冊 + 24 builtin tools（read/write/edit/glob/grep/run/web/memory/subagent/task/atom_write/atom_delete/hook_register/hook_list/hook_remove...） |
+| Tools | `src/tools/` | Tool 註冊 + 25 builtin tools（read/write/edit/glob/grep/run/web/memory/subagent/task/atom_write/atom_delete/hook_register/hook_list/hook_remove...） |
 | Skills | `src/skills/` | Skill registry + 28 builtin skills（25 TS + 3 prompt） |
-| Hooks | `src/hooks/` | Hook 系統：32 events + scanner + runner + defineHook SDK + folder-convention 掛載 + fs.watch 熱重載 |
+| Hooks | `src/hooks/` | Hook 系統：34 events + scanner + runner + defineHook SDK + folder-convention 掛載 + fs.watch 熱重載 |
 | Safety | `src/safety/` | 安全攔截：guard + collab-conflict |
 | Workflow | `src/workflow/` | 工作流引擎：rut/oscillation/fix-escalation/sync/wisdom/failure-detector |
 | Cron | `src/cron.ts` | 排程服務（cron/every/at），croner 驅動 |
@@ -73,7 +73,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | [modules/prompt-assembler.md](modules/prompt-assembler.md) | `src/core/prompt-assembler.ts` | 模組化 system prompt 組裝 | 2026-04-05 |
 | [modules/dashboard.md](modules/dashboard.md) | `src/core/dashboard.ts` | Web dashboard + REST API | 2026-04-13 |
 | [modules/memory-engine.md](modules/memory-engine.md) | `src/memory/` | 四層記憶引擎 + episodic + session-memory | 2026-04-13 |
-| [modules/tool-registry.md](modules/tool-registry.md) | `src/tools/` | Tool 註冊 + 24 builtin tools | 2026-04-15 |
+| [modules/tool-registry.md](modules/tool-registry.md) | `src/tools/` | Tool 註冊 + 25 builtin tools | 2026-04-15 |
 | [modules/message-trace.md](modules/message-trace.md) | `src/core/message-trace.ts` | 7 階段訊息追蹤 + TraceStore + ContextStore | 2026-04-06 |
 | [modules/config.md](modules/config.md) | `src/core/config.ts` | JSON 設定載入 | 2026-04-05 |
 | [modules/discord.md](modules/discord.md) | `src/discord.ts` + `src/discord/` | Discord 入口 + Bot Circuit Breaker | 2026-04-13 |
@@ -83,7 +83,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | [modules/reply.md](modules/reply.md) | `src/core/reply-handler.ts` | Streaming 回覆 | 2026-04-05 |
 | [modules/accounts.md](modules/accounts.md) | `src/accounts/` | 帳號 + 角色 + 權限 + Identity Linking | 2026-04-05 |
 | [modules/event-bus.md](modules/event-bus.md) | `src/core/event-bus.ts` | 強型別事件匯流排 | 2026-04-05 |
-| [modules/hooks.md](modules/hooks.md) | `src/hooks/` | Hook 系統（32 events + defineHook SDK + folder-convention） | 2026-04-15 |
+| [modules/hooks.md](modules/hooks.md) | `src/hooks/` | Hook 系統（34 events + defineHook SDK + folder-convention） | 2026-04-15 |
 | [modules/safety.md](modules/safety.md) | `src/safety/` | 安全攔截 | 2026-04-05 |
 | [modules/workflow.md](modules/workflow.md) | `src/workflow/` | 工作流引擎 | 2026-04-05 |
 | [modules/acp.md](modules/acp.md) | `src/acp.ts` | Claude CLI spawn（Legacy，僅 cron.ts 使用） | 2026-04-13 |

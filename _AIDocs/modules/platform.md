@@ -1,7 +1,7 @@
 # modules/platform — 子系統初始化工廠
 
 > 檔案：`src/core/platform.ts`
-> 更新日期：2026-04-13
+> 更新日期：2026-04-16
 
 ## 職責
 
@@ -39,7 +39,7 @@ initPlatform(config, catclawDir, distDir, workspaceDir)
   ├── 9.66 CollabConflictDetector  — 多人衝突偵測
   ├── 9.7 Stores                   — ToolLogStore + InboundHistoryStore + SessionSnapshotStore + TraceStore
   ├── 9.8 Dashboard                — Web UI（可選）
-  ├── 10.  Workflow Engine           — rut/oscillation/sync/wisdom
+  ├── 10.  Workflow Engine           — rut/oscillation/sync/wisdom + FileWatcher（step 11）
   ├── 10b. Failure Recall Cache     — 非同步預載 failure recall 快取
   ├── 11.  MCP Servers              — 外部 MCP 連線
   ├── 12.  Hook Registry            — 工具前後 hook

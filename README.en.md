@@ -2,16 +2,16 @@
 
 **English** | [繁體中文](README.md)
 
-Discord-based AI Agent platform with full development capabilities — multi-turn agent loop, 24 builtin tools, 28 builtin skills, 32-event hook system, multi-provider failover, four-layer memory engine, and web dashboard.
+Discord-based AI Agent platform with full development capabilities — multi-turn agent loop, 25 builtin tools, 28 builtin skills, 34-event hook system, multi-provider failover, four-layer memory engine, and web dashboard.
 
 ## Features
 
 | Category | Capabilities |
 |----------|-------------|
 | **Agent Loop** | Multi-turn reasoning loop, tool execution, output token recovery, auto-compact |
-| **Tools** | 24 builtin tools — file read/write/edit, glob, grep, bash exec, web fetch/search, memory, subagent, task management, skill execution, hook management |
+| **Tools** | 25 builtin tools — file read/write/edit, glob, grep, bash exec, web fetch/search, memory, subagent, task management, skill execution, hook management, filewatch |
 | **Skills** | 28 builtin skills (25 TypeScript + 3 prompt-type) — config, session, account, status, restart, plan, remind, hook, and more |
-| **Hook System** | 32 events (9 categories: Lifecycle / Turn / Memory / Subagent / Context / CLI Bridge / File+Command / Error / Platform) + folder-convention mount + fs.watch hot-reload + TS/JS/sh/ps1 runtimes + defineHook SDK |
+| **Hook System** | 34 events (10 categories: Lifecycle / Turn / Memory / Subagent / Context / CLI Bridge / File+Command / File Watcher / Error / Platform) + folder-convention mount + fs.watch hot-reload + TS/JS/sh/ps1 runtimes + defineHook SDK |
 | **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / cli-* + circuit-breaker failover |
 | **Memory** | Four-layer engine (Global / Project / Account / Agent) — vector recall + keyword search + auto-extraction + consolidation |
 | **Context Engine** | Compaction / budget-guard / sliding-window / overflow-hard-stop strategies |
@@ -37,7 +37,7 @@ agent-loop.ts ─── Multi-turn Reasoning Loop (LLM <-> Tool Execution)
     |                         |
     v                         v
 providers/ ───────── tools/ + skills/
-LLM Abstraction      24 Tools + 28 Skills + 32 Hook Events
+LLM Abstraction      25 Tools + 28 Skills + 34 Hook Events
 + Failover
     |
     v
@@ -259,9 +259,9 @@ src/
                   Prompt Assembler, Reply Handler, Event Bus, Message Pipeline
   memory/         Four-layer memory engine (engine, recall, extract, consolidate)
   providers/      LLM Provider abstraction (claude-api, ollama, openai-compat, cli-*)
-  tools/          Tool Registry + 24 builtin tools
+  tools/          Tool Registry + 25 builtin tools
   skills/         Skill Registry + 28 builtin skills (25 TS + 3 prompt)
-  hooks/          Hook system — 32 events + folder-convention + fs.watch + defineHook SDK
+  hooks/          Hook system — 34 events + folder-convention + fs.watch + defineHook SDK + FileWatcher
   hooks/          Hook system (pre/post tool execution)
   safety/         Safety interception (guard, collab-conflict)
   workflow/       Workflow engine (rut, oscillation, fix-escalation, sync)

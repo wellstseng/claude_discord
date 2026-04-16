@@ -24,6 +24,7 @@ import type {
   PreCompactionInput, PostCompactionInput, ContextOverflowInput,
   CliBridgeSpawnInput, CliBridgeSuspendInput, CliBridgeTurnInput,
   PreFileWriteInput, PreFileEditInput, PreCommandExecInput,
+  FileChangedInput, FileDeletedInput,
   SafetyViolationInput, AgentErrorInput,
   ConfigReloadInput, ProviderSwitchInput,
   UserMessageReceivedInput, UserPromptSubmitInput,
@@ -349,6 +350,29 @@ export class HookRegistry {
   }
   async runAgentError(input: AgentErrorInput): Promise<void> {
     return this._runObserver(this._resolve("AgentError", input.agentId, "global-first"), input);
+  }
+
+  // ── File Watcher ────────────────────────────────────────────────────────
+
+  async runFileChanged(input: FileChangedInput): Promise<void> {
+    const { getFileWatcher } = await import("./file-watcher.js");
+    const fw = getFileWatcher();
+    fw?.enterHookContext();
+    try {
+      return this._runObserver(this._resolve("FileChanged", input.agentId, "global-first"), input);
+    } finally {
+      fw?.leaveHookContext();
+    }
+  }
+  async runFileDeleted(input: FileDeletedInput): Promise<void> {
+    const { getFileWatcher } = await import("./file-watcher.js");
+    const fw = getFileWatcher();
+    fw?.enterHookContext();
+    try {
+      return this._runObserver(this._resolve("FileDeleted", input.agentId, "global-first"), input);
+    } finally {
+      fw?.leaveHookContext();
+    }
   }
 
   // ── Platform ────────────────────────────────────────────────────────────

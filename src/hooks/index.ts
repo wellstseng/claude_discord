@@ -17,6 +17,7 @@ export type {
   PreCompactionInput, PostCompactionInput, ContextOverflowInput,
   CliBridgeSpawnInput, CliBridgeSuspendInput, CliBridgeTurnInput,
   PreFileWriteInput, PreFileEditInput, PreCommandExecInput,
+  FileChangedInput, FileDeletedInput,
   SafetyViolationInput, AgentErrorInput,
   ConfigReloadInput, ProviderSwitchInput,
 } from "./types.js";

@@ -1,7 +1,7 @@
 # modules/workflow — 工作流引擎
 
 > 檔案：`src/workflow/bootstrap.ts` + `src/workflow/`
-> 更新日期：2026-04-14
+> 更新日期：2026-04-16
 
 ## 職責
 
@@ -22,13 +22,14 @@
 | `memory-extractor.ts` | 自動記憶萃取 | `turn:after` |
 | `memory-vector-sync.ts` | 記憶檔案自動向量同步 | `file:modified` |
 | `consolidate-scheduler.ts` | 定期整合排程 | timer |
+| `../hooks/file-watcher.ts` | 外部檔案監聽（step 11，由 bootstrap 動態 import）| fs.watch |
 | `fix-escalation.ts` | 精確修正升級 | 手動觸發 |
 | `types.ts` | 共用型別 | — |
 
 ## 初始化
 
 ```typescript
-initWorkflow(config, dataDir, memoryDir, projectRoot, agentsDir?): void
+initWorkflow(config, dataDir, memoryDir, projectRoot, agentsDir?, fileWatcherConfig?): void
 ```
 
 由 `platform.ts` 步驟 10 呼叫。`config.workflow.enabled = false` 可完全停用。

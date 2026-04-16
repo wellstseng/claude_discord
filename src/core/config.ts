@@ -442,6 +442,34 @@ export interface WorkflowConfig {
   aidocs: { enabled: boolean; contentGate: boolean };
 }
 
+/** File Watcher 單一監聽項 */
+export interface FileWatchEntry {
+  /** 識別名（e.g. "obsidian"） */
+  label: string;
+  /** 監聽路徑（支援 ~ 展開） */
+  path: string;
+  /** 忽略的目錄名（預設 [".obsidian", ".trash", ".git"]） */
+  ignoreDirs?: string[];
+  /** 忽略的 glob pattern（e.g. "*.sync-conflict*"） */
+  ignorePatterns?: string[];
+  /** Debounce 毫秒（預設 1500） */
+  debounceMs?: number;
+  /** 遞迴監聽（預設 true） */
+  recursive?: boolean;
+  /** Per-path 冷卻期毫秒（預設 10000） */
+  cooldownMs?: number;
+}
+
+/** File Watcher 設定 */
+export interface FileWatcherConfig {
+  enabled?: boolean;
+  watches: FileWatchEntry[];
+  /** 全域速率限制：每 eventWindowMs 最多 maxEventsPerWindow 個事件 */
+  maxEventsPerWindow?: number;
+  /** 速率限制視窗毫秒（預設 60000） */
+  eventWindowMs?: number;
+}
+
 /** 帳號管理設定 */
 export interface AccountsConfig {
   registrationMode: "open" | "invite" | "closed";
@@ -651,6 +679,8 @@ export interface BridgeConfig {
   safety?: SafetyConfig;
   /** 工作流設定 */
   workflow?: WorkflowConfig;
+  /** File Watcher 設定 */
+  fileWatcher?: FileWatcherConfig;
   /** 帳號管理設定 */
   accounts: AccountsConfig;
   /** 速率限制 */
@@ -798,6 +828,7 @@ interface RawConfig {
   ollama?: Partial<OllamaConfig> & { primary?: Partial<OllamaConfig["primary"]> };
   safety?: Partial<SafetyConfig>;
   workflow?: Partial<WorkflowConfig>;
+  fileWatcher?: FileWatcherConfig;
   accounts?: Partial<AccountsConfig>;
   rateLimit?: RateLimitConfig;
   /** @deprecated 已移除，保留供 JSON 相容 */

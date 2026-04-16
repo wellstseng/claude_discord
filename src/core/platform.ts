@@ -281,6 +281,7 @@ export async function initPlatform(
     memoryDir,
     process.cwd(),
     agentsDir,
+    config.fileWatcher,
   );
 
   // ── 10b. Failure Recall Cache（非同步，不阻塞啟動）────────────────────────
