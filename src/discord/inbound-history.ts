@@ -125,9 +125,10 @@ export class InboundHistoryStore {
       // Bucket C：age > decayWindowMs → 丟棄
     }
 
-    // Bucket A：全量帶入
+    // Bucket A：全量帶入（精簡格式：只留 HH:MM）
+    const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("zh-TW", { timeZone: "Asia/Taipei", hour12: false, hour: "2-digit", minute: "2-digit" });
     const bucketAText = bucketA.length > 0
-      ? bucketA.map(e => `[${new Date(e.ts).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false })}] ${e.authorName}: ${e.content}`).join("\n")
+      ? bucketA.map(e => `${fmtTime(e.ts)} ${e.authorName}: ${e.content}`).join("\n")
       : "";
 
     // Bucket B：LLM 壓縮
@@ -143,14 +144,14 @@ export class InboundHistoryStore {
     // 消費完成：清空 JSONL
     this._clearFile(channelId, scope);
 
-    // 組裝 context string
+    // 組裝 context string（精簡 header）
     const parts: string[] = [];
-    if (bucketBText) parts.push(`[較早訊息摘要]\n${bucketBText}`);
-    if (bucketAText) parts.push(`[最近 ${cfg.fullWindowHours}h 訊息]\n${bucketAText}`);
+    if (bucketBText) parts.push(`[摘要]\n${bucketBText}`);
+    if (bucketAText) parts.push(bucketAText);
 
     if (parts.length === 0) return null;
 
-    const text = `=== 頻道脈絡（未被處理的訊息） ===\n${parts.join("\n\n")}`;
+    const text = `[頻道脈絡]\n${parts.join("\n")}`;
     log.debug(`[inbound-history] inject channel=${channelId} bucketA=${bucketA.length} bucketB=${bucketB.length}`);
     return { text, entriesCount: entries.length, bucketA: bucketA.length, bucketB: bucketB.length };
   }
@@ -258,8 +259,9 @@ export class InboundHistoryStore {
     cfg: InboundHistoryCfg,
     ceProvider: LLMProvider,
   ): Promise<string> {
+    const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("zh-TW", { timeZone: "Asia/Taipei", hour12: false, hour: "2-digit", minute: "2-digit" });
     const raw = entries.map(e =>
-      `[${new Date(e.ts).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false })}] ${e.authorName}: ${e.content}`
+      `${fmtTime(e.ts)} ${e.authorName}: ${e.content}`
     ).join("\n");
 
     try {

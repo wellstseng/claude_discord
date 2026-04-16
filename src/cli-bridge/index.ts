@@ -271,13 +271,14 @@ function handleIndependentBotMessage(bridge: CliBridge, msg: Message): void {
           const ch = msg.channel;
           if (ch.isTextBased() && "messages" in ch) {
             const recent = await ch.messages.fetch({ limit: 20, before: msg.id });
+            const fmtTime = (d: Date) => d.toLocaleTimeString("zh-TW", { timeZone: "Asia/Taipei", hour12: false, hour: "2-digit", minute: "2-digit" });
             const lines = [...recent.values()]
               .reverse()
-              .map(m => `[${m.author.displayName}] ${m.content.slice(0, 300)}`)
+              .map(m => `${fmtTime(m.createdAt)} ${m.author.displayName}: ${m.content.slice(0, 300)}`)
               .filter(l => l.length > 0);
             if (lines.length > 0) {
               const channelName = "name" in ch ? (ch as { name: string }).name : msg.channelId;
-              fullText = `=== 跨頻道上下文（#${channelName} 最近對話） ===\n${lines.join("\n")}\n\n---\n${fullText}`;
+              fullText = `[#${channelName} 近況]\n${lines.join("\n")}\n---\n${fullText}`;
               log.info(`[cli-bridge] ${bridge.label} 跨頻道 context inject: ${lines.length} msgs from #${channelName}`);
             }
           }
