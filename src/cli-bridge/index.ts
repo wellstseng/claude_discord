@@ -265,7 +265,28 @@ function handleIndependentBotMessage(bridge: CliBridge, msg: Message): void {
       let fullText = msg.content + attachmentText;
       const bridgeConfig = bridge.getBridgeConfig();
 
-      // 消費 inbound history，拼在訊息前
+      // 跨頻道 mention → 抓來源頻道最近訊息作為上下文
+      if (!isHomeChannel) {
+        try {
+          const ch = msg.channel;
+          if (ch.isTextBased() && "messages" in ch) {
+            const recent = await ch.messages.fetch({ limit: 20, before: msg.id });
+            const lines = [...recent.values()]
+              .reverse()
+              .map(m => `[${m.author.displayName}] ${m.content.slice(0, 300)}`)
+              .filter(l => l.length > 0);
+            if (lines.length > 0) {
+              const channelName = "name" in ch ? (ch as { name: string }).name : msg.channelId;
+              fullText = `=== 跨頻道上下文（#${channelName} 最近對話） ===\n${lines.join("\n")}\n\n---\n${fullText}`;
+              log.info(`[cli-bridge] ${bridge.label} 跨頻道 context inject: ${lines.length} msgs from #${channelName}`);
+            }
+          }
+        } catch (err) {
+          log.warn(`[cli-bridge] 跨頻道 context fetch 失敗：${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // 消費 inbound history，拼在訊息前（home channel scope）
       const inboundCtx = await consumeBridgeInboundHistory(bridge);
       if (inboundCtx) {
         fullText = inboundCtx + "\n\n---\n" + fullText;
