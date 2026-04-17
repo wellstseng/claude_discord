@@ -905,6 +905,16 @@ export async function* agentLoop(
     }
   }
 
+  // ── 4b-2. 外部化索引注入（AI 查閱被壓訊息的目錄）────────────────────────────
+  {
+    const { buildExternalizedIndex } = await import("./context-engine.js");
+    const extIndex = buildExternalizedIndex(processedHistory);
+    if (extIndex) {
+      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${extIndex}` : extIndex;
+      log.debug(`[agent-loop] externalized-index 已注入`);
+    }
+  }
+
   // Trace: agent-loop 追加的 system prompt 區塊
   const _agentLoopBlocks: string[] = [];
   if (memoryContextBlock) _agentLoopBlocks.push("memory-context");
@@ -917,6 +927,7 @@ export async function* agentLoop(
       : 0;
     if (ratio >= 0.60) _agentLoopBlocks.push("token-nudge");
   }
+  if (systemPrompt.includes("[外部化索引]")) _agentLoopBlocks.push("externalized-index");
   if (trace) trace.appendAgentLoopBlocks(_agentLoopBlocks);
 
   // ── 4c. Session Note 注入（參考 Claude Code SessionMemory）───────────────────

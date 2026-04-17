@@ -226,16 +226,29 @@ function truncateBlocks(blocks: ContentBlock[], maxTokens: number): ContentBlock
   return result;
 }
 
+/** 從 message 提取主題摘要（前 80 chars，零 LLM 成本） */
+function extractTopicHint(m: Message): string {
+  const raw = typeof m.content === "string" ? m.content : getMessageText(m);
+  // 跳過已是標記的內容
+  if (raw.startsWith("[")) return "";
+  const clean = raw.replace(/\n+/g, " ").trim();
+  if (clean.length <= 80) return clean;
+  return clean.slice(0, 80) + "...";
+}
+
 function stubMessage(m: Message): Message {
   const role = m.role;
   const turnLabel = m.turnIndex != null ? ` turn ${m.turnIndex}` : "";
+  const topic = extractTopicHint(m);
+  const topicPart = topic ? `｜主題：${topic}` : "";
   if (typeof m.content === "string") {
-    return { ...m, content: `[已壓縮 ${role}${turnLabel}｜內容不可恢復，勿引用]`, compressionLevel: 3, originalTokens: m.originalTokens ?? m.tokens };
+    return { ...m, content: `[已壓縮 ${role}${turnLabel}${topicPart}｜內容不可恢復，勿引用]`, compressionLevel: 3, originalTokens: m.originalTokens ?? m.tokens };
   }
+  const stubText = `[已壓縮 ${role}${turnLabel}${topicPart}｜內容不可恢復，勿引用]`;
   const stubBlocks: ContentBlock[] = m.content.map(b => {
     if (b.type === "tool_use") return { ...b, input: {} };
     if (b.type === "tool_result") return { ...b, content: "[stub]" };
-    if (b.type === "text") return { ...b, text: `[已壓縮 ${role}${turnLabel}｜內容不可恢復，勿引用]` };
+    if (b.type === "text") return { ...b, text: stubText };
     return b;
   });
   return { ...m, content: stubBlocks, compressionLevel: 3, originalTokens: m.originalTokens ?? m.tokens };
@@ -243,7 +256,7 @@ function stubMessage(m: Message): Message {
 
 // ── Externalization helpers ──────────────────────────────────────────────────
 
-function getMessageText(m: Message): string {
+export function getMessageText(m: Message): string {
   if (typeof m.content === "string") return m.content;
   return m.content
     .map(b => {
@@ -291,7 +304,9 @@ function externalizeMessage(
 /** 建立外部化摘要指標訊息（不含原文截斷，只標記外部化路徑） */
 function createExternalizedStub(m: Message, relativePath: string, targetLevel: number): Message {
   const origTokens = m.originalTokens ?? m.tokens ?? estimateTokens([m]);
-  const stub = `[📄 外部化] ${m.role} turn ${m.turnIndex ?? "?"}（原始 ${origTokens} tokens 已存至檔案）\n→ ${relativePath}\n⚠️ 如需原文請用 read_file 讀取該路徑（相對於 CATCLAW_WORKSPACE/data）。若無法讀取則告知使用者，勿腦補。`;
+  const topic = extractTopicHint(m);
+  const topicLine = topic ? `\n主題：${topic}` : "";
+  const stub = `[📄 外部化] ${m.role} turn ${m.turnIndex ?? "?"}（原始 ${origTokens} tokens 已存至檔案）${topicLine}\n→ ${relativePath}\n⚠️ 如需原文請用 read_file 讀取該路徑（相對於 CATCLAW_WORKSPACE/data）。若無法讀取則告知使用者，勿腦補。`;
   return {
     ...m,
     content: stub,
@@ -875,6 +890,45 @@ export class ContextEngine {
   estimateTokens(messages: Message[]): number {
     return estimateTokens(messages);
   }
+}
+
+// ── 外部化索引（供 agent-loop turn 開始前注入）─────────────────────────────────
+
+/**
+ * 掃描 messages 中的外部化/截斷標記，產生簡潔索引字串。
+ * 回傳空字串表示無外部化訊息。
+ */
+export function buildExternalizedIndex(messages: Message[]): string {
+  const entries: string[] = [];
+  for (const m of messages) {
+    const text = typeof m.content === "string" ? m.content : getMessageText(m);
+    // 匹配外部化 stub
+    if (text.includes("[📄 外部化]")) {
+      const pathMatch = text.match(/→\s*(externalized\/\S+)/);
+      const topicMatch = text.match(/主題：(.+?)(?:\n|$)/);
+      const turnMatch = text.match(/turn\s+(\d+)/);
+      if (pathMatch) {
+        const turn = turnMatch ? `turn ${turnMatch[1]}` : "?";
+        const topic = topicMatch ? topicMatch[1].trim() : "";
+        const role = m.role;
+        entries.push(`- ${turn} ${role}${topic ? `：${topic}` : ""} → ${pathMatch[1]}`);
+      }
+    }
+    // 匹配截斷 + 路徑
+    else if (text.includes("→ 完整原文：externalized/")) {
+      const pathMatch = text.match(/→ 完整原文：(externalized\/\S+)/);
+      const turnLabel = m.turnIndex != null ? `turn ${m.turnIndex}` : "?";
+      if (pathMatch) {
+        const preview = text.replace(/\n.*/s, "").slice(0, 60).trim();
+        entries.push(`- ${turnLabel} ${m.role}：${preview} → ${pathMatch[1]}`);
+      }
+    }
+  }
+  if (entries.length === 0) return "";
+  return [
+    "[外部化索引] 以下訊息原文已存檔，與問題相關時用 read_file 讀取（路徑相對於 data/）：",
+    ...entries,
+  ].join("\n");
 }
 
 // ── 全域單例 ──────────────────────────────────────────────────────────────────
