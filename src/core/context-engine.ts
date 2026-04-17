@@ -183,7 +183,8 @@ function continuousLevel(age: number, baseDecay: number, tempoMultiplier: number
 function truncateContent(content: string, maxTokens: number): string {
   const maxChars = maxTokens * 4;
   if (content.length <= maxChars) return content;
-  return content.slice(0, maxChars) + "\n…[truncated]";
+  const origLen = content.length;
+  return content.slice(0, maxChars) + `\n…[⚠️ CE 已截斷：原文 ${origLen} chars，僅保留前 ${maxChars} chars。後續內容已丟失，勿假設完整性]`;
 }
 
 function truncateBlocks(blocks: ContentBlock[], maxTokens: number): ContentBlock[] {
@@ -195,9 +196,10 @@ function truncateBlocks(blocks: ContentBlock[], maxTokens: number): ContentBlock
     if (b.type === "tool_result") {
       const remaining = Math.max(0, maxChars - totalChars);
       if (remaining <= 0) {
-        result.push({ ...b, content: "[truncated]" });
+        result.push({ ...b, content: `[⚠️ CE 已截斷：此 tool_result 原文 ${b.content.length} chars，已全部丟失，勿假設完整性]` });
       } else if (b.content.length > remaining) {
-        result.push({ ...b, content: b.content.slice(0, remaining) + "\n…[truncated]" });
+        const origLen = b.content.length;
+        result.push({ ...b, content: b.content.slice(0, remaining) + `\n…[⚠️ CE 已截斷：原文 ${origLen} chars，僅保留前 ${remaining} chars。後續內容已丟失，勿假設完整性]` });
         totalChars += remaining;
       } else {
         result.push(b);
@@ -210,7 +212,8 @@ function truncateBlocks(blocks: ContentBlock[], maxTokens: number): ContentBlock
     } else if (b.type === "text") {
       const remaining = Math.max(0, maxChars - totalChars);
       if (b.text.length > remaining) {
-        result.push({ ...b, text: b.text.slice(0, remaining) + "\n…[truncated]" });
+        const origLen = b.text.length;
+        result.push({ ...b, text: b.text.slice(0, remaining) + `\n…[⚠️ CE 已截斷：原文 ${origLen} chars，僅保留前 ${remaining} chars。後續內容已丟失，勿假設完整性]` });
         totalChars += remaining;
       } else {
         result.push(b);
