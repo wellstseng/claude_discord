@@ -34,7 +34,7 @@ initPlatform(config, catclawDir, distDir, workspaceDir)
   ├── 8.5 OllamaClient             — embedding 用（可選）
   ├── 9.  MemoryEngine             — 四層記憶（recall + extract + consolidate）
   ├── 9.5 RateLimiter              — 角色分級限速
-  ├── 9.6 ContextEngine            — CE 策略（compaction + budget-guard + sliding-window + overflow）
+  ├── 9.6 ContextEngine            — CE 策略（decay + compaction + overflow-hard-stop）
   ├── 9.65 SubagentRegistry        — 子 agent 管理
   ├── 9.66 CollabConflictDetector  — 多人衝突偵測
   ├── 9.7 Stores                   — ToolLogStore + InboundHistoryStore + SessionSnapshotStore + TraceStore

@@ -106,7 +106,7 @@ Discord 訊息
 | **Agent Loop** | 一軌制：CatClaw 控制所有 tool，LLM 只負責思考 |
 | **Provider** | Claude API / Ollama / OpenAI-compat / ACP CLI，failover + circuit-breaker |
 | **Memory** | 四層記憶引擎（Global / Project / Account / Agent）+ LanceDB 向量搜尋 |
-| **Context Engine** | 4 策略壓縮：compaction / budget-guard / sliding-window / overflow-hard-stop |
+| **Context Engine** | 3 策略：decay（漸進衰減+外部化）→ compaction（結構化摘要+意圖錨點）→ overflow-hard-stop |
 | **Session** | Per-channel 串行佇列 + 磁碟持久化 + TTL |
 | **Accounts** | 5 級角色（guest → platform-owner）+ Tool Tier 物理移除 |
 | **Tools** | 25 builtin tools + MCP tool 自動整合 |
@@ -272,16 +272,15 @@ LLM 也可透過 `skill` tool 主動執行 builtin skill（不需引導使用者
 
 ### 4.5 Context Engineering（壓縮策略）
 
-Strategy Pattern 架構，4 策略依序執行：
+Strategy Pattern 架構，3 策略依序執行：
 
 | 策略 | 觸發條件 | 行為 |
 |------|---------|------|
-| `compaction` | tokens > 4000 | LLM 摘要壓縮舊訊息 |
-| `budget-guard` | tokens > window x 0.8 | 從最舊 message 刪除 |
-| `sliding-window` | messages > maxTurns x 2 | 保留最近 N 輪 |
+| `decay` | 每次 build | 依 turn age 漸進衰減 L1→L4；長訊息（≥300 tokens）外部化存檔，context 只留路徑指標 |
+| `compaction` | tokens > 20000 | LLM 六段結構化摘要（使用者意圖 / 已決策 / 待辦 / 未解決 / 工具重點 / 重要事實） + 附加使用者最近一則原文作意圖錨點 |
 | `overflow-hard-stop` | tokens > window x 0.95 | 緊急截斷至 4 條 |
 
-> 詳見：[modules/context-engine.md](modules/context-engine.md)
+> 詳見：[modules/context-engine.md](modules/context-engine.md) / [wiki/Context-Engine.md](../wiki/Context-Engine.md)
 
 ### 4.6 Provider 系統（多 LLM 支援 + failover）
 

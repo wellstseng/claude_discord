@@ -186,7 +186,7 @@ providers/
 | **Role** | 5 級角色：guest → member → developer → admin → platform-owner |
 | **Skill** | 使用者觸發的 `/` 前綴指令（/configure、/use、/session 等），不經 agent loop |
 | **Tool** | LLM 可呼叫的函式（config_get、memory_recall、run_command 等），由 agent loop 執行 |
-| **ContextEngine** | Strategy Pattern 架構，管線式套用壓縮策略（Compaction / BudgetGuard / SlidingWindow） |
+| **ContextEngine** | Strategy Pattern 架構，管線式套用三段策略（Decay 漸進衰減+外部化 → Compaction 結構化摘要+意圖錨點 → OverflowHardStop 緊急截斷） |
 | **MessageTrace** | 7 階段訊息生命週期追蹤：Inbound → Context → LLM Loop → CE → Abort → PostProcess → Response |
 | **TraceStore** | 統一追蹤系統，持久化所有 MessageTrace 記錄 |
 | **Session** | per-channel 對話上下文（guild 頻道共享），per-user for DM |

@@ -13,7 +13,7 @@ CatClaw = **Codex 版 Claude Code CLI + 多人 AI 開發平台**。
 - **28 builtin skills**：Discord 指令層（/think、/mode、/use、/stop、/plan、/remind、/hook 等）
 - **34-event hook 系統**：folder-convention 掛載（global + per-agent）+ fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK
 - **四層記憶引擎**：recall（vector + keyword）、extract、consolidate
-- **Context Engineering**：compaction / budget-guard / sliding-window / overflow-hard-stop
+- **Context Engineering**：decay（漸進衰減+外部化）/ compaction（結構化摘要+意圖錨點）/ overflow-hard-stop
 - **帳號/角色/權限**：identity linking、role-based tool sets、rate limit
 - **Web Dashboard**：Trace 視覺化 + Web Chat + REST API
 - **串流回覆**：live-edit streaming + chunk fallback + code fence 平衡
@@ -62,7 +62,7 @@ Discord Gateway
       │  LLM Provider HTTP API 呼叫（streaming）
       │  tool_use → 執行 tool → 結果回填 → 迴圈至 end_turn
       │  Output Token Recovery（max_tokens 截斷自動續接 ×3）
-      │  Auto-compact（sliding-window / LLM compaction）
+      │  Auto-compact（decay / LLM compaction / overflow）
       │  萃取 + 事件通知
       ▼
 AgentLoopEvent stream (AsyncGenerator)
@@ -121,7 +121,7 @@ src/
 │   ├── prompt-assembler.ts  (模組化 system prompt 組裝)
 │   ├── reply-handler.ts     (AgentLoopEvent → Discord streaming 回覆)
 │   ├── session.ts           (SessionManager：per-channel 佇列 + 持久化)
-│   ├── context-engine.ts    (compaction / budget-guard / sliding-window)
+│   ├── context-engine.ts    (decay / compaction / overflow-hard-stop)
 │   ├── message-trace.ts     (7 階段全鏈路追蹤 + TraceStore)
 │   ├── dashboard.ts         (Web Dashboard + REST API + Web Chat)
 │   ├── event-bus.ts         (強型別事件匯流排)
