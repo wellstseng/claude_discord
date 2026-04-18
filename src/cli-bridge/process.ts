@@ -225,6 +225,9 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
             args: [serverPath],
             env: {
               DISCORD_TOKEN: this.config.botToken,
+              // request_permission tool 需要知道要在哪個頻道發審批按鈕
+              DISCORD_CHANNEL_ID: this.config.channelId,
+              CATCLAW_BRIDGE_LABEL: this.config.label,
             },
           },
         },
