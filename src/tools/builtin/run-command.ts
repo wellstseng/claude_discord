@@ -14,7 +14,7 @@ import { log } from "../../logger.js";
 import type { Tool } from "../types.js";
 
 const STDOUT_CAP = 100_000; // 100KB
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 0; // 0 = 無逾時限制
 
 // ── Git Safety Protocol ─────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ export const tool: Tool = {
     properties: {
       command:    { type: "string", description: "要執行的 shell 指令" },
       cwd:        { type: "string", description: "工作目錄（省略為預設）" },
-      timeoutMs:  { type: "number", description: "逾時毫秒（預設 30000）" },
+      timeoutMs:  { type: "number", description: "逾時毫秒（預設 0 = 無限制）" },
     },
     required: ["command"],
   },
@@ -161,19 +161,21 @@ export const tool: Tool = {
       proc.stdout?.on("data", onData);
       proc.stderr?.on("data", onData);
 
-      const timer = setTimeout(() => {
-        proc.kill();
-        resolve({ error: `指令逾時（${timeoutMs}ms）：${command}` });
-      }, timeoutMs);
+      const timer = timeoutMs > 0
+        ? setTimeout(() => {
+            proc.kill();
+            resolve({ error: `指令逾時（${timeoutMs}ms）：${command}` });
+          }, timeoutMs)
+        : null;
 
       proc.on("close", (code) => {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         const suffix = truncated ? "\n...[輸出超過 100KB，已截斷]" : "";
         resolve({ result: { exitCode: code, output: output + suffix } });
       });
 
       proc.on("error", (err) => {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         resolve({ error: `執行失敗：${err.message}` });
       });
     });
