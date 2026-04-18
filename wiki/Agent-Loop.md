@@ -16,7 +16,7 @@ flowchart TD
     PARSE -->|end_turn| DONE[結束]
     PARSE -->|max_tokens| RECOVER[Output Token Recovery]
     TOOL --> HOOK_PRE[Before Hook<br/>權限/安全/read-before-write/loop 偵測]
-    HOOK_PRE --> EXEC[toolRegistry.execute<br/>timeout 30s]
+    HOOK_PRE --> EXEC[toolRegistry.execute<br/>timeout 0（無逾時）]
     EXEC --> TRUNC[truncateToolResult<br/>per-tool 策略<br/>error 不截斷]
     TRUNC --> HOOK_POST[Post Hook<br/>audit/logging]
     HOOK_POST --> STREAM
@@ -31,7 +31,7 @@ flowchart TD
 每個 session 有獨立的 FIFO 佇列，確保同一 channel 的訊息串行處理：
 
 - 最大深度：5（超過直接拒絕）
-- 單 turn 超時：120s（或 config `turnTimeoutMs`）
+- 單 turn 超時：300s（或 config `turnTimeoutMs`，最低 120s）
 - 透過 `SessionManager.enqueueTurn()` 排入
 
 ### LLM Stream Loop

@@ -151,7 +151,7 @@ recall(query)
   1. Cache 檢查（Jaccard ≥ 0.7, 60s TTL）
   2. Keyword 快篩（MEMORY.md trigger match）→ 微調加分用
   3. Embed query → vector（失敗 → keyword fallback）
-  4. Vector search（各層並行，LanceDB topK=8, minScore=0.55）（失敗 → keyword fallback）
+  4. Vector search（各層並行，code defaults topK=8 / minScore=0.55，config defaults topK=10 / minScore=0.65 覆寫）（失敗 → keyword fallback）
   5. Merge + dedup + keyword 微調 + touchAtom + cache + return
 ```
 
@@ -178,7 +178,7 @@ Step 3 embed 或 Step 4 vector search 失敗時，自動退化為純 keyword 路
 
 ## Context Builder
 
-- **Budget**：全域 token 預算 3000（無層級分配）
+- **Budget**：函式預設 `budget = 2000`，config 預設 `contextBudget = 3000`（呼叫端由 config 傳入覆寫）。無層級分配（`contextBudgetRatio` 已定義但 context-builder 內未使用）
 - 按 vector score 排序，超出 budget 截斷
 - **Atom 過肥偵測**：若單顆 atom 本身就超過 budget（首顆且 blockTokens > budget），發 `log.warn` 建議拆分為多個較小的原子單元
 

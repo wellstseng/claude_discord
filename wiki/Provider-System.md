@@ -34,7 +34,7 @@ interface LLMProvider {
 
 | Provider | 說明 |
 | -------- | ---- |
-| `claude` | Anthropic Claude API（直接 HTTP） |
+| `claude` / `claude-oauth` | Anthropic Claude API（V2 使用 `claude-oauth` + OAuth token） |
 | `openai-compat` | OpenAI-compatible API（任何相容端點） |
 | `ollama` | 本地 Ollama 推理 |
 | `codex-oauth` | OAuth-based Codex |
@@ -86,3 +86,11 @@ channels[channelId] → projects[projectId] → roles[role] → defaultId
 | `cooldownMs` | 30,000 ms | open 後冷卻時間 |
 
 **Half-Open** 狀態只允許一次試探請求：成功 → 回到 closed，失敗 → 回到 open。
+
+## 輔助模組
+
+| 模組 | 檔案 | 說明 |
+| ---- | ---- | ---- |
+| AuthProfileStore | `auth-profile-store.ts` | 多憑證管理（API key / token / OAuth），Round-Robin 選取 + Cooldown 追蹤 + 持久化 |
+| ModelRef | `model-ref.ts` | Model alias 解析，支援 `"provider/model"` 格式與短別名（如 `"sonnet"` → `anthropic/claude-sonnet-4-6`） |
+| ModelsConfig | `models-config.ts` | V2 多模型設定，管理 `models.json` 產生與載入（內建目錄 + catclaw.json 自訂覆寫） |

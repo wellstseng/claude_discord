@@ -86,6 +86,29 @@ Discord 訊息上限 2000 字元。超過時：
 - Subagent 執行結果在 thread 內回覆
 - Parent agent 可透過 runId 監控 / 中止
 
+## Bot Circuit Breaker
+
+`bot-circuit-breaker.ts` — Bot-to-Bot 對話防呆機制。偵測同頻道 bot 互相回覆過度活躍，超過閾值暫停等人介入：
+
+| 參數 | 預設 |
+| ---- | ---- |
+| `maxRounds` | 10 輪 |
+| `maxDurationMs` | 180,000 ms（3 分鐘） |
+
+## Inbound History Store
+
+`inbound-history.ts` — 記錄未進入 agent loop 的 Discord 訊息，提供對話脈絡。三 Bucket 處理：
+
+- **Bucket A**（近期）→ 全量帶入
+- **Bucket B**（中期）→ LLM 壓縮，受 token 上限限制
+- **Bucket C**（遠期）→ 直接清除
+
+消費後刪除（append-only JSONL 格式）。
+
+## Pairing Code 機制
+
+陌生人 DM bot 時，bot 回覆 6 碼配對碼，owner 透過 `/account approve <code>` 核准。配對碼 5 分鐘過期、single-use，錯誤 3 次鎖定 15 分鐘。詳見 [[Accounts-and-Permissions]]。
+
 ## Crash Recovery
 
 - PM2 監控 process 狀態

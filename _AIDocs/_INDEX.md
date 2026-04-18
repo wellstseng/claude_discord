@@ -1,12 +1,12 @@
 # CatClaw _AIDocs 知識庫索引
 
-> 建立日期：2026-03-18 | 最近更新：2026-04-15 | 專案：catclaw
+> 建立日期：2026-03-18 | 最近更新：2026-04-18 | 專案：catclaw
 
 ## 專案簡介
 
 CatClaw = Codex 版 Claude Code CLI + 多人 AI 開發平台。
 以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、25 builtin tools、
-28 builtin skills（25 TS + 3 prompt）、34-event hook 系統、多 provider failover、四層記憶引擎、Context Engineering、
+31 builtin skills（25 檔 + 3 prompt）、36-event hook 系統、多 provider failover、四層記憶引擎、Context Engineering、
 subagent 編排、帳號/角色/權限系統、Web Dashboard + Trace 追蹤。
 
 ## 架構一句話摘要
@@ -20,7 +20,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Agent Loop | `src/core/agent-loop.ts` | 主推理迴圈：multi-turn、tool 執行、output token recovery、auto-compact |
 | Platform | `src/core/platform.ts` | 子系統初始化工廠（provider / memory / tools / hooks / workflow） |
 | Prompt Assembler | `src/core/prompt-assembler.ts` | 模組化 system prompt 組裝 + context-aware intent detection |
-| Context Engine | `src/core/context-engine.ts` | Strategy Pattern：compaction / budget-guard / sliding-window / overflow-hard-stop |
+| Context Engine | `src/core/context-engine.ts` | Strategy Pattern：decay / dedup / turn-summary / compaction / overflow-hard-stop |
 | Message Trace | `src/core/message-trace.ts` | 7 階段訊息全鏈路追蹤 + TraceStore 持久化 |
 | Message Pipeline | `src/core/message-pipeline.ts` | 統一訊息管線：Memory Recall / Intent / Assembler / Trace / Inbound / SessionMemory |
 | Dashboard | `src/core/dashboard.ts` | Web dashboard + REST API + trace 視覺化 + Web Chat（跨平台 session 共用） |
@@ -33,8 +33,8 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Accounts | `src/accounts/` | 帳號 + 角色 + 權限 + identity linking |
 | Providers | `src/providers/` | LLM Provider 抽象：claude-api / codex-oauth / cli-claude / cli-gemini / cli-codex / ollama / openai-compat + failover + circuit-breaker |
 | Tools | `src/tools/` | Tool 註冊 + 25 builtin tools（read/write/edit/glob/grep/run/web/memory/subagent/task/atom_write/atom_delete/hook_register/hook_list/hook_remove...） |
-| Skills | `src/skills/` | Skill registry + 28 builtin skills（25 TS + 3 prompt） |
-| Hooks | `src/hooks/` | Hook 系統：34 events + scanner + runner + defineHook SDK + folder-convention 掛載 + fs.watch 熱重載 |
+| Skills | `src/skills/` | Skill registry + 31 builtin skills（25 檔 + 3 prompt） |
+| Hooks | `src/hooks/` | Hook 系統：36 events + scanner + runner + defineHook SDK + folder-convention 掛載 + fs.watch 熱重載 |
 | Safety | `src/safety/` | 安全攔截：guard + collab-conflict |
 | Workflow | `src/workflow/` | 工作流引擎：rut/oscillation/fix-escalation/sync/wisdom/failure-detector |
 | Cron | `src/cron.ts` | 排程服務（cron/every/at），croner 驅動 |
@@ -53,14 +53,10 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | [WIKI.md](WIKI.md) | 使用者導向綜合指南：快速入門、架構、設定、功能、部署、陷阱、模組索引 | 2026-04-07 |
 | [00-OVERVIEW.md](00-OVERVIEW.md) | 架構全貌：資料流圖、模組關係、常數速查、config 欄位一覽 | 2026-03-22 |
 | [01-ARCHITECTURE.md](01-ARCHITECTURE.md) | 整體架構 + 資料流 + 專案結構（含 Sprint 1-4 新子系統） | 2026-04-05 |
-| [02-CONFIG-REFERENCE.md](02-CONFIG-REFERENCE.md) | config.json + cron-jobs.json 完整範例 + 環境變數 | 2026-03-21 |
+| [02-CONFIG-REFERENCE.md](02-CONFIG-REFERENCE.md) | catclaw.json 完整設定參考 + V2 三層分離 + 環境變數 | 2026-04-18 |
 | [04-DEPLOY.md](04-DEPLOY.md) | 部署流程、PM2 管理、hot-reload、健康檢查 | 2026-03-22 |
 | [08-CLAUDE-CLI.md](08-CLAUDE-CLI.md) | Claude CLI 指令格式 + stream-json event 規格（舊版，acp.ts 參考用） | 2026-03-19 |
-| [09-PITFALLS.md](09-PITFALLS.md) | 21 項陷阱速查 + 錯誤訊息對照表 | 2026-03-22 |
-| [PLAN.md](PLAN.md) | 初始實作計畫（已完成） | 2026-03-18 |
-| [PLAN-V3.md](PLAN-V3.md) | V3 計畫書：Subagent 編排 | 2026-03-27 |
-| [PLAN-V4.md](PLAN-V4.md) | V4 計畫書：Agent 能力強化 | 2026-03-27 |
-| [PLAN-V5.md](PLAN-V5.md) | V5 計畫書：CatClaw = Codex 版 Claude Code CLI | 2026-04-04 |
+| [09-PITFALLS.md](09-PITFALLS.md) | 22 項陷阱速查 + 錯誤訊息對照表 | 2026-04-18 |
 | [_CHANGELOG.md](_CHANGELOG.md) | 知識庫變更紀錄 | rolling |
 
 ### modules/ — 模組詳細說明

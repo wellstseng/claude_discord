@@ -7,8 +7,9 @@
 每個 Discord channel（或 API/cron 來源）對應一個獨立 session：
 
 ```text
-Session Key 格式：{platform}:ch:{channelId}
-範例：discord:ch:1234567890
+群組頻道：{platform}:ch:{channelId}
+DM 頻道：{platform}:dm:{accountId}:{channelId}
+範例：discord:ch:1234567890 / discord:dm:wells:9876543210
 ```
 
 每個 session 包含：
@@ -24,7 +25,7 @@ Session Key 格式：{platform}:ch:{channelId}
 | 參數 | 值 |
 | ---- | -- |
 | 最大佇列深度 | 5（超過直接拒絕） |
-| 單 turn 超時 | 120s（或 config `turnTimeoutMs`） |
+| 單 turn 超時 | 300s（或 config `turnTimeoutMs`，最低 120s） |
 
 ```text
 User A 發訊息 → 排入佇列 → 立即執行
@@ -38,6 +39,7 @@ User C 發訊息 → 排入佇列 → 等待 B 完成
 
 - 路徑：`{persistPath}/{sessionKey}.json`
 - **Atomic Write**：先寫 `.tmp` 檔，成功後 rename → 確保 crash-safe
+- **Checksum**：寫入時附加 `_checksum` 欄位（SHA-256），載入時驗證完整性，驗證失敗自動備份
 - CE（Context Engine）壓縮後備份：`_ce_backups/{key}_{timestamp}.json`，保留最近 3 份
 
 ### 載入策略

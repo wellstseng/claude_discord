@@ -40,11 +40,26 @@ PipelineResult {
 
 `assembleSystemPrompt()` 將 system prompt 從多個**模組**組裝：
 
-- **Role Module** — 角色定義（CATCLAW.md）
-- **Mode Module** — 模式設定（plan mode / code mode / ...）
-- **Memory Module** — recall 結果注入
-- **Tool Module** — 可用工具清單
-- **Extra Modules** — mode-specific 額外 prompt files
+13 個 builtin modules：
+
+| # | 模組名 | 說明 |
+|---|--------|------|
+| 1 | `date-time` | 當前時間（Asia/Taipei） |
+| 2 | `identity` | Agent 身份定義 |
+| 3 | `context-integrity` | Context 完整性規則 |
+| 4 | `catclaw-md` | CATCLAW.md 角色設定載入 |
+| 5 | `tools-usage` | 可用工具清單與使用規則 |
+| 6 | `coding-rules` | 程式碼撰寫規則 |
+| 7 | `git-rules` | Git 操作規則 |
+| 8 | `output-format` | 輸出格式規則 |
+| 9 | `discord-reply` | Discord 回覆行為規則 |
+| 10 | `tool-summary` | Tool 使用摘要 |
+| 11 | `skill-summary` | Skill 清單摘要 |
+| 12 | `memory-rules` | 記憶系統規則 |
+| 13 | `failure-recall` | 失敗記憶回溯（快取同步讀取） |
+
+另支援 `registerPromptModule()` 註冊自訂模組。
+
 - **Module Filter** — 依 intent 過濾不需要的模組
 
 ## Memory Recall 注入

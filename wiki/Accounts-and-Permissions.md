@@ -11,14 +11,14 @@ interface Account {
   role: Role                  // 5 級角色
   identities: Identity[]      // 跨平台身份綁定
   projects: string[]
-  preferences: AccountPreferences
+  preferences: AccountPreferences  // language / style / provider
   disabled?: boolean
   createdAt: string           // ISO 8601
   lastActiveAt: string
 }
 
 interface Identity {
-  platform: string            // "discord" | "api" | ...
+  platform: Platform           // "discord" | "line" | "telegram" | "slack" | "web"
   platformId: string          // 平台端的使用者 ID
   linkedAt: string
 }
@@ -100,6 +100,20 @@ Discord userId 進入
 | `open` | 任何人可自助註冊 |
 | `invite` | 需要邀請碼 |
 | `closed` | 僅管理員可建立帳號 |
+
+### Pairing Code 機制
+
+三種註冊流程之一。陌生人 DM bot 時自動觸發：
+
+1. Bot 產生 6 碼配對碼回覆給使用者
+2. Owner 執行 `/account approve <code> --name <id>` 核准
+3. 核准後自動建立帳號並綁定 identity
+
+安全限制：
+- 配對碼 5 分鐘過期，single-use
+- 同一 platformId 錯誤 3 次 → 鎖定 15 分鐘
+- Rate limit：每 platformId 每 10 分鐘最多 3 次請求
+- 全局待處理配對碼上限 10 筆
 
 ## Rate Limiter
 

@@ -1,6 +1,6 @@
 # 00 — CatClaw 全貌
 
-> 版本：v2.0.0 | 最近更新：2026-04-07
+> 版本：v2.0.0 | 最近更新：2026-04-18
 
 ## 是什麼
 
@@ -143,14 +143,19 @@ src/
 │   ├── ollama.ts            (Ollama 本地 LLM)
 │   ├── openai-compat.ts     (OpenAI 相容 API)
 │   ├── acp-cli.ts           (Claude CLI spawn wrapper)
-│   └── failover-provider.ts (自動 failover)
+│   ├── failover-provider.ts (自動 failover)
+│   ├── model-ref.ts         (模型參照解析：alias / "provider/model" 格式)
+│   ├── models-config.ts     (models.json 產生與載入 — 模型目錄管理)
+│   ├── auth-profile-store.ts (Auth Profile 多憑證 Round-Robin + Cooldown)
+│   ├── circuit-breaker.ts   (Provider 層級 circuit breaker)
+│   └── codex-oauth.ts       (OpenAI Codex OAuth provider)
 ├── tools/                   (25 builtin tools)
 │   ├── registry.ts          (Tool 註冊表)
 │   └── builtin/             (file read/write/edit、run_command、search、hook 管理等)
 ├── skills/                  (28 builtin skills)
 │   ├── registry.ts          (Skill 註冊 + trigger match)
 │   ├── builtin/             (25 TS skills)
-│   └── builtin-prompt/      (3 prompt skills)
+│   └── builtin-prompt/      (3 prompt skill 子目錄：commit/ discord/ pr/，各含 SKILL.md)
 ├── memory/                  (四層記憶引擎)
 │   ├── engine.ts            (recall + extract + consolidate 統合)
 │   ├── recall.ts / extract.ts / consolidate.ts
@@ -162,7 +167,9 @@ src/
 ├── safety/                  (安全守衛)
 │   ├── guard.ts / collab-conflict.ts
 ├── hooks/                   (Hook 系統)
-│   ├── hook-registry.ts / hook-runner.ts / types.ts
+│   ├── hook-registry.ts / hook-runner.ts / hook-runtime.ts / hook-scanner.ts / types.ts
+│   ├── metadata-parser.ts / sdk.ts / index.ts
+│   └── file-watcher.ts     (檔案變更監控 → hook 觸發)
 ├── vector/                  (向量搜尋)
 │   ├── embedding.ts / lancedb.ts
 ├── ollama/                  (Ollama client)
@@ -171,7 +178,8 @@ src/
 │   ├── memory-extractor.ts / sync-reminder.ts / fix-escalation.ts
 │   └── wisdom-engine.ts / rut-detector.ts / oscillation-detector.ts 等
 ├── discord/                 (Discord 擴充)
-│   └── inbound-history.ts
+│   ├── inbound-history.ts
+│   └── bot-circuit-breaker.ts (Bot-to-Bot 對話防呆 circuit breaker)
 ├── mcp/                     (MCP 整合)
 │   ├── client.ts / discord-server.ts
 └── projects/                (專案管理)
@@ -283,12 +291,47 @@ src/
 | `accounts.defaultRole` | string | `"member"` | — | 新帳號預設角色 |
 | `accounts.pairingEnabled` | boolean | `true` | — | 是否允許配對 |
 | `accounts.pairingExpireMinutes` | number | `10` | — | 配對邀請過期分鐘 |
+| **admin** | | | | |
+| `admin.allowedUserIds` | string[] | `[]` | — | 管理員 Discord User ID 清單 |
+| **agentDefaults** | | | | |
+| `agentDefaults.model.primary` | string | — | — | 主要模型（alias 或 "provider/model" 格式） |
+| `agentDefaults.model.fallbacks` | string[] | — | — | 備援模型清單 |
+| `agentDefaults.models` | Record | — | — | 模型對照表（"provider/model" → alias） |
+| **modelsConfig** | | | | |
+| `modelsConfig.mode` | "merge"/"replace" | `"merge"` | — | 內建+自訂合併（merge）或僅用自訂（replace） |
+| `modelsConfig.providers` | Record | — | — | 自訂 Provider 定義（baseUrl + api + models） |
+| **authConfig** | | | | |
+| `authConfig.profiles` | Record | — | — | 憑證 profile（provider + mode，不含 credential） |
+| `authConfig.order` | Record | — | — | 輪替順序覆寫 |
+| `authConfig.cooldowns` | object | — | — | Cooldown 設定覆寫（billingBackoffHours 等） |
+| **memoryPipeline** | | | | |
+| `memoryPipeline.embedding` | object | — | — | Embedding provider 設定（provider / model / host / apiKey） |
+| `memoryPipeline.extraction` | object | — | — | Extraction provider 設定 |
+| `memoryPipeline.reranker` | object | — | — | Reranker provider 設定 |
 | **dashboard** | | | | |
 | `dashboard.enabled` | boolean | `false` | — | Web Dashboard 開關 |
-| `dashboard.port` | number | `3000` | — | Dashboard 監聽 port |
+| `dashboard.port` | number | `8088` | — | Dashboard 監聽 port |
 | `dashboard.token` | string | — | — | Dashboard 認證 token |
+| **defaultAgent** | | | | |
+| `defaultAgent` | string | `"default"` | — | 無 --agent 參數時的預設 boot agent ID |
 | **agents** | | | | |
 | `agents` | Record | — | — | 多 Agent 入口設定（`agents.<id>` 為 BridgeConfig 子集） |
+| **subagents** | | | | |
+| `subagents.maxConcurrent` | number | `3` | — | 同一 parent session 最多同時執行子 agent 數 |
+| `subagents.defaultTimeoutMs` | number | `120000` | — | Subagent 預設逾時毫秒 |
+| `subagents.defaultKeepSession` | boolean | `false` | — | 完成後是否預設保留 session |
+| **botCircuitBreaker** | | | | |
+| `botCircuitBreaker.enabled` | boolean | `true` | — | Bot-to-Bot 對話防呆開關 |
+| `botCircuitBreaker.maxRounds` | number | `10` | — | 連續 bot 互動最大來回輪數 |
+| `botCircuitBreaker.maxDurationMs` | number | `180000` | — | 連續 bot 互動最大持續時間 ms（3 分鐘） |
+| **fileWatcher** | | | | |
+| `fileWatcher.enabled` | boolean | — | — | File Watcher 開關 |
+| `fileWatcher.watches` | array | — | — | 監看項目清單（FileWatchEntry[]） |
+| `fileWatcher.maxEventsPerWindow` | number | — | — | 速率限制：每視窗最多事件數 |
+| `fileWatcher.eventWindowMs` | number | `60000` | — | 速率限制視窗毫秒 |
+| **homeClaudeCode** | | | | |
+| `homeClaudeCode.enabled` | boolean | `false` | — | 啟用與 Claude Code 共用全域記憶（~/.claude/memory/global）（已棄用） |
+| `homeClaudeCode.path` | string | `"~/.claude/memory/global"` | — | 自訂 Claude Code 記憶路徑 |
 | **modes** | | | | |
 | `modes.defaultMode` | string | `"normal"` | — | 預設模式名稱 |
 | `modes.presets` | Record | — | — | 模式定義表（thinking / compaction / systemPromptExtras） |
@@ -312,6 +355,10 @@ src/
 | **contextEngineering** | | | | |
 | `contextEngineering.enabled` | boolean | `false` | — | Context Engineering 開關 |
 | `contextEngineering.strategies` | object | — | — | Compaction 策略（model / maxTokens） |
+| `contextEngineering.toolBudget.resultTokenCap` | number | `0` | — | 單一工具結果 token 上限（0=無限制） |
+| `contextEngineering.toolBudget.perTurnTotalCap` | number | `0` | — | 每 turn 所有工具結果合計 token 上限 |
+| `contextEngineering.toolBudget.toolTimeoutMs` | number | `30000` | — | 單一 tool 執行超時毫秒（0=無限制） |
+| `contextEngineering.toolBudget.maxWriteFileBytes` | number | `512000` | — | write/edit_file 單次寫入上限 bytes（500KB） |
 
 > **注意**：config.json（catclaw.json）支援 JSONC（`//` 行尾 / 整行註解）。`claude.cwd` / `claude.command` 已移除，改由環境變數 `CATCLAW_CONFIG_DIR` / `CATCLAW_WORKSPACE` / `CATCLAW_CLAUDE_BIN` 控制。
 

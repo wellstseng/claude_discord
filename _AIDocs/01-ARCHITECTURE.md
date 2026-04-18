@@ -1,6 +1,6 @@
 # 01 — 架構概覽
 
-> 最近更新：2026-04-04
+> 最近更新：2026-04-18
 
 ## 專案目標
 
@@ -9,12 +9,12 @@
 - **Agent Loop（一軌制）**：CatClaw 自有 agent loop 控制所有 tool，LLM 只負責思考
 - **HTTP API 直連**：透過 pi-ai `streamSimpleAnthropic` 直接呼叫 Claude API，不 spawn CLI
 - **Provider 抽象**：claude-api / ollama / openai-compat / codex-oauth，hot-swap via registry
-- **models-config.json**：model 設定唯一真相來源（primary / fallbacks / aliases / routing）
+- **models.json**：model 設定唯一真相來源（per-agent，位於 agents/{agentId}/models.json）
 - **四層記憶**：Global + Project + Account + Agent（atom memory + LanceDB vector search）
 - **權限系統**：5 級角色（guest → platform-owner）+ Tool Tier 物理移除
 - **Message Trace**：7 階段訊息生命週期追蹤
 - **Web Dashboard**：設定、traces、sessions、auth profiles、model switching
-- **熱重載**：catclaw.json + models-config.json 編輯存檔即生效
+- **熱重載**：catclaw.json + models.json 編輯存檔即生效
 
 ## 依賴
 
@@ -153,7 +153,7 @@ index.ts                          ← 進入點：Discord login + 事件綁定
 providers/
   ├── base.ts              LLMProvider 介面 + Message 格式（遵循 Anthropic Messages API）
   ├── registry.ts          ProviderRegistry — 初始化、路由、解析
-  ├── models-config.ts     models-config.json 載入（唯一 model 真相來源）
+  ├── models-config.ts     models.json 產生與載入（唯一 model 真相來源）
   ├── model-ref.ts         ModelRef 解析（provider:model 格式）
   ├── auth-profile-store.ts  OAuth profile 持久化
   ├── claude-api.ts        Anthropic Claude API（pi-ai streamSimpleAnthropic）
@@ -177,7 +177,7 @@ providers/
 | **Agent Loop** | CatClaw 自有的 LLM 對話迴圈（一軌制），控制 tool 執行，LLM 只負責思考。MAX_LOOPS=20 |
 | **Provider** | LLM 供應商抽象（claude-api / ollama / openai-compat / codex-oauth），實作 LLMProvider 介面 |
 | **ProviderRegistry** | Provider 註冊表，依路由規則解析出當前 channel/project/role 應使用的 provider |
-| **models-config.json** | Model 設定唯一真相來源：primary / fallback / aliases / routing |
+| **models.json** | Model 設定唯一真相來源（V2 per-agent）：primary / fallback / aliases / routing |
 | **ModelRef** | `provider:model` 格式字串，用於跨 provider 引用 model |
 | **FailoverProvider** | 包裝層，primary 失敗自動切換 fallback chain |
 | **CircuitBreaker** | 熔斷器，連續失敗暫停呼叫，防止雪崩 |
@@ -191,7 +191,7 @@ providers/
 | **TraceStore** | 統一追蹤系統，持久化所有 MessageTrace 記錄 |
 | **Session** | per-channel 對話上下文（guild 頻道共享），per-user for DM |
 | **SessionManager** | Session 快取 + 磁碟持久化 + TTL + per-channel queue |
-| **MemoryEngine** | 四層記憶引擎（Global + Project + Personal），atom + LanceDB vector search |
+| **MemoryEngine** | 四層記憶引擎（Global + Project + Account + Agent），atom + LanceDB vector search |
 | **Atom Memory** | 原子記憶系統：知識以 atom 為最小單位，分 [固]/[觀]/[臨] 三級 |
 | **LanceDB** | 向量資料庫，用於記憶 recall 時的語義搜尋 |
 | **Dashboard** | Web 監控面板：概覽 / Sessions / 日誌 / 操作 / Config |
@@ -204,7 +204,7 @@ providers/
 | **TTL** | Session 閒置超時（sessionTtlHours，預設 168h=7天），超過開新 session |
 | **fileMode** | 回覆超過 fileUploadThreshold 後切換，等完成時上傳 response.md |
 | **MEDIA token** | LLM 回覆中 `MEDIA: /path` 語法，reply-handler 解析後上傳為 Discord 附件 |
-| **hot-reload** | catclaw.json / models-config.json 變更後無需重啟自動生效 |
+| **hot-reload** | catclaw.json / models.json 變更後無需重啟自動生效 |
 | **signal file** | `signal/RESTART` 檔案，PM2 監聽此目錄變更觸發重啟 |
 | **原子寫入** | 先寫 .tmp 再 rename 覆蓋，防止 crash 導致 JSON 損壞 |
 | **SafetyGuard** | 安全防護層，輸入/輸出檢查 |
@@ -263,7 +263,7 @@ providers/
 │   ├── providers/              ★ LLM Provider 抽象層
 │   │   ├── base.ts                LLMProvider 介面 + Message 格式
 │   │   ├── registry.ts            Provider 註冊 + 路由解析
-│   │   ├── models-config.ts       models-config.json 載入
+│   │   ├── models-config.ts       models.json 產生與載入
 │   │   ├── model-ref.ts           ModelRef 解析（provider:model）
 │   │   ├── auth-profile-store.ts  OAuth profile 持久化
 │   │   ├── claude-api.ts          Anthropic Claude API
@@ -284,52 +284,67 @@ providers/
 │   ├── tools/                  ★ LLM 可呼叫 Tool
 │   │   ├── registry.ts            Tool 註冊表
 │   │   ├── types.ts               Tool 型別定義（ToolTier / ToolDefinition）
-│   │   └── builtin/
+│   │   └── builtin/               （25 個 tool）
+│   │       ├── atom-delete.ts     Atom 刪除
+│   │       ├── atom-write.ts      Atom 寫入
+│   │       ├── clear-session.ts   Session 清除
 │   │       ├── config-get.ts      讀取設定
 │   │       ├── config-patch.ts    修改設定
-│   │       ├── memory-recall.ts   記憶召回
-│   │       ├── read-file.ts       讀檔
-│   │       ├── write-file.ts      寫檔
 │   │       ├── edit-file.ts       編輯檔案
+│   │       ├── filewatch.ts       檔案監視
 │   │       ├── glob.ts            檔案搜尋
 │   │       ├── grep.ts            內容搜尋
+│   │       ├── hook-list.ts       Hook 列表
+│   │       ├── hook-register.ts   Hook 註冊
+│   │       ├── hook-remove.ts     Hook 移除
+│   │       ├── llm-task.ts        LLM 子任務
+│   │       ├── memory-recall.ts   記憶召回
+│   │       ├── read-file.ts       讀檔
 │   │       ├── run-command.ts     執行命令
+│   │       ├── session-context.ts Session Context 查詢
+│   │       ├── skill.ts           Skill 呼叫
 │   │       ├── spawn-subagent.ts  Spawn 子代理
 │   │       ├── subagents.ts       子代理管理
-│   │       ├── llm-task.ts        LLM 子任務
-│   │       ├── web-search.ts      網路搜尋
-│   │       ├── web-fetch.ts       網頁擷取
-│   │       ├── tool-search.ts     Deferred Tool Schema 查詢
 │   │       ├── task-manage.ts     結構化任務管理（create/update/list/get/delete）
-│   │       └── clear-session.ts  Session 清除
+│   │       ├── tool-search.ts     Deferred Tool Schema 查詢
+│   │       ├── web-fetch.ts       網頁擷取
+│   │       ├── web-search.ts      網路搜尋
+│   │       └── write-file.ts      寫檔
 │   │
 │   ├── skills/                 ★ 使用者 / 指令觸發 Skill
 │   │   ├── registry.ts            Skill 註冊表
 │   │   ├── types.ts               Skill 型別定義
-│   │   ├── builtin/
+│   │   ├── builtin/               （25 個 skill）
+│   │   │   ├── account.ts         /account — 帳號管理
+│   │   │   ├── add-bridge.ts      /add-bridge — CLI Bridge 新增
+│   │   │   ├── aidocs.ts          /aidocs — _AIDocs 管理
+│   │   │   ├── compact.ts         /compact — 手動壓縮
+│   │   │   ├── config-manage.ts   /config — 設定操作
 │   │   │   ├── configure.ts       /configure — 設定管理 + OAuth 登入
-│   │   │   ├── use.ts             /use — 切換 model
-│   │   │   ├── system.ts          /system — 系統資訊
+│   │   │   ├── context.ts         /context — Context 資訊
+│   │   │   ├── help.ts            /help
+│   │   │   ├── hook.ts            /hook — Hook 管理
+│   │   │   ├── migrate.ts         /migrate — 資料遷移
+│   │   │   ├── mode.ts            /mode — 精密模式
+│   │   │   ├── plan.ts            /plan — 計畫管理
+│   │   │   ├── project.ts         /project — 專案管理
+│   │   │   ├── register.ts        /register — 帳號註冊
+│   │   │   ├── remind.ts          /remind — 提醒
+│   │   │   ├── restart.ts         /restart — 重啟
 │   │   │   ├── session-manage.ts  /session — session 管理
 │   │   │   ├── status.ts          /status — 狀態查詢
-│   │   │   ├── config-manage.ts   /config — 設定操作
-│   │   │   ├── mode.ts            /mode — 精密模式
-│   │   │   ├── help.ts            /help
 │   │   │   ├── stop.ts            /stop — 中斷 turn
-│   │   │   ├── restart.ts         /restart — 重啟
+│   │   │   ├── subagents.ts       /subagents — 子代理管理
+│   │   │   ├── system.ts          /system — 系統資訊
 │   │   │   ├── think.ts           /think — 強制思考
-│   │   │   ├── usage.ts           /usage — 用量統計
 │   │   │   ├── turn-audit.ts      /audit — turn 追蹤
-│   │   │   ├── account.ts         /account — 帳號管理
-│   │   │   ├── register.ts        /register — 帳號註冊
-│   │   │   ├── project.ts         /project — 專案管理
-│   │   │   ├── migrate.ts         /migrate — 資料遷移
-│   │   │   └── subagents.ts       /subagents — 子代理管理
+│   │   │   ├── usage.ts           /usage — 用量統計
+│   │   │   └── use.ts             /use — 切換 model
 │   │   └── builtin-prompt/
 │   │       └── discord/SKILL.md   Discord 平台 skill 提示詞
 │   │
 │   ├── memory/                 ★ 四層記憶系統
-│   │   ├── engine.ts              記憶引擎（Global + Project + Personal）
+│   │   ├── engine.ts              記憶引擎（Global + Project + Account + Agent）
 │   │   ├── recall.ts              記憶召回
 │   │   ├── atom.ts                Atom 讀寫
 │   │   ├── extract.ts             知識萃取
@@ -363,10 +378,20 @@ providers/
 │   │   ├── rut-detector.ts        重試窠臼偵測
 │   │   ├── fix-escalation.ts      修正升級
 │   │   ├── wisdom-engine.ts       智慧引擎
+│   │   ├── memory-vector-sync.ts  記憶向量同步
 │   │   ├── consolidate-scheduler.ts  整合排程
 │   │   ├── file-tracker.ts        檔案追蹤
 │   │   ├── aidocs-manager.ts      _AIDocs 管理
 │   │   └── types.ts               工作流型別
+│   │
+│   ├── cli-bridge/             CLI Bridge（外部 CLI 橋接）
+│   │   ├── bridge.ts              Bridge 核心
+│   │   ├── discord-sender.ts      Discord 訊息發送
+│   │   ├── index.ts               進入點
+│   │   ├── process.ts             程序管理
+│   │   ├── reply.ts               回覆處理
+│   │   ├── stdout-log.ts          stdout 日誌
+│   │   └── types.ts               型別定義
 │   │
 │   ├── discord/                Discord 擴充
 │   │   └── inbound-history.ts     入站歷史（Decay II）
@@ -393,7 +418,7 @@ providers/
 
 ~/.catclaw/                     ← CATCLAW_CONFIG_DIR
 ├── catclaw.json        設定檔（含 token、guild 權限、providers、memory、workflow 等全區塊）
-├── models-config.json  Model 設定（primary / fallbacks / aliases / routing）
+├── models-config.json  Legacy model 設定（V2 已改用 per-agent models.json）
 └── workspace/          ← CATCLAW_WORKSPACE
     ├── AGENTS.md           bot 行為規則（system prompt）
     └── data/

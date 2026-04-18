@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **繁體中文**
 
-以 Discord 為介面的 AI Agent 運行平台 — multi-turn agent loop、25 builtin tools、28 builtin skills、34-event hook 系統、多 provider failover、四層記憶引擎、Web Dashboard。
+以 Discord 為介面的 AI Agent 運行平台 — multi-turn agent loop、25 builtin tools、28 builtin skills、36-event hook 系統、多 provider failover、四層記憶引擎、Web Dashboard。
 
 ## 功能總覽
 
@@ -11,13 +11,13 @@
 | **Agent Loop** | Multi-turn 推理迴圈、tool 執行、output token recovery、auto-compact |
 | **Tools** | 25 builtin tools — 檔案讀寫編輯、glob、grep、bash 執行、web 抓取/搜尋、記憶、subagent、任務管理、skill 執行、hook 管理、filewatch |
 | **Skills** | 28 builtin skills（25 TypeScript + 3 prompt 型）— config、session、account、status、restart、plan、remind、hook 等 |
-| **Hook 系統** | 34 events（10 類，Lifecycle/Turn/Memory/Subagent/Context/CLIBridge/FileCmd/FileWatcher/Error/Platform）+ folder-convention 掛載 + fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK |
-| **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / cli-* + circuit-breaker failover |
+| **Hook 系統** | 36 events（10 類，Lifecycle/Turn/Memory/Subagent/Context/CLIBridge/FileCmd/FileWatcher/Error/Platform）+ folder-convention 掛載 + fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK |
+| **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / acp-cli / cli-* + circuit-breaker failover |
 | **記憶引擎** | 四層記憶（Global / Project / Account / Agent）— 向量 recall + 關鍵字搜尋 + 自動萃取 + 晉升/衰減 |
-| **Context Engine** | decay / compaction / overflow-hard-stop 三策略 + anti-hallucination stub 誠實化 + turn cap warning |
-| **帳號權限** | 註冊、identity linking、5 級角色（public/standard/elevated/admin/owner）、per-channel 權限閘門 |
+| **Context Engine** | decay / dedup / turn-summary / compaction / overflow-hard-stop 五策略 + anti-hallucination stub 誠實化 + turn cap warning |
+| **帳號權限** | 註冊、identity linking、5 級角色（guest/member/developer/admin/platform-owner）、per-channel 權限閘門 |
 | **Subagent** | 子任務分派 + Discord thread bridge + 追蹤 |
-| **排程** | cron / every / at — message、subagent、exec、claude 動作 + `/cron` skill 動態管理 + agent 隔離 |
+| **排程** | cron / every / at — message、subagent、exec、claude-acp 動作 + `/cron` skill 動態管理 + agent 隔離 |
 | **Discord** | 串流回覆、debounce、thread 繼承、附件處理、crash recovery、bot circuit breaker |
 | **Dashboard** | Web UI（port 8088）— REST API、訊息追蹤視覺化、token 用量、session 管理 |
 
@@ -37,7 +37,7 @@ agent-loop.ts ─── Multi-turn 推理迴圈（LLM <-> Tool 執行）
     |                         |
     v                         v
 providers/ ───────── tools/ + skills/
-LLM 抽象層            25 Tools + 28 Skills + 34 Hook Events
+LLM 抽象層            25 Tools + 28 Skills + 36 Hook Events
 + Failover
     |
     v
@@ -273,7 +273,7 @@ src/
   providers/      LLM Provider 抽象（claude-api、ollama、openai-compat、cli-*）
   tools/          Tool Registry + 25 builtin tools
   skills/         Skill Registry + 28 builtin skills（25 TS + 3 prompt）
-  hooks/          Hook 系統 — 34 events + folder-convention + fs.watch + defineHook SDK + FileWatcher
+  hooks/          Hook 系統 — 36 events + folder-convention + fs.watch + defineHook SDK + FileWatcher
   safety/         安全攔截（guard、collab-conflict）
   workflow/       工作流引擎（rut、oscillation、fix-escalation、sync）
   accounts/       帳號 + 角色 + 權限 + identity linking

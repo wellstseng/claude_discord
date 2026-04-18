@@ -25,6 +25,19 @@ CatClaw 是以 Discord 為介面的 AI Agent 運行平台。透過 multi-turn ag
 | [[Discord-Integration]] | 訊息過濾、串流回覆、debounce、thread、附件處理 |
 | [[Accounts-and-Permissions]] | 帳號、角色、identity linking、權限閘門 |
 
+## 其他子系統
+
+以下子系統尚未獨立成 wiki 頁面，但已實作於程式碼中：
+
+| 子系統 | 說明 |
+| ------ | ---- |
+| Hook System | Tool before/after hooks — 權限檢查、安全攔截、loop 偵測、audit logging |
+| Workflow Engine | 工作流程引擎 — cron 排程、事件驅動 |
+| MCP Integration | Model Context Protocol — 外部工具伺服器整合 |
+| CLI Bridge | CLI 指令橋接 — 從終端機操作 CatClaw |
+| Safety System | 安全系統 — 危險操作攔截、exec-approval、read-before-write |
+| Vector/Embedding | 向量搜尋 — Memory Recall 的 embedding 儲存與相似度查詢 |
+
 ## 快速連結
 
 - [README](../README.md)

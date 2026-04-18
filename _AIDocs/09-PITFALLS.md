@@ -1,8 +1,8 @@
-# 09 — 陷阱速查
+# 09 — 陷阱速查（22 項）
 
 > 開發與維護時容易踩到的坑，全部從實際除錯經驗總結。
 
-## 1. stdin 必須 "ignore"
+## 1. stdin 必須 "ignore"（Legacy — 僅 ACP CLI 路徑）
 
 **現象**：spawn claude 後 stdout 完全無輸出，process 不結束。
 
@@ -10,7 +10,7 @@
 
 **解法**：`stdio: ["ignore", "pipe", "pipe"]`，prompt 透過 positional arg 傳入。
 
-## 2. stream-json 必須搭配 --verbose
+## 2. stream-json 必須搭配 --verbose（Legacy — 僅 ACP CLI 路徑）
 
 **現象**：`claude -p --output-format stream-json` 直接報錯。
 
@@ -52,7 +52,7 @@
 
 **解法**：使用 `SendableChannels` 型別替代。
 
-## 7. assistant event 是累積文字不是 delta
+## 7. assistant event 是累積文字不是 delta（Legacy — 僅 ACP CLI 路徑）
 
 **現象**：回覆內容重複（把累積文字當作 delta 直接使用）。
 

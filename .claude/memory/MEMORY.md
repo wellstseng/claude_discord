@@ -21,3 +21,4 @@
 | systemprompt-structure | catclaw-systemprompt-structure.md | system prompt, 動態組裝, prompt assembler, 區塊順序, breakdown, trace snapshot | [固] |
 | cli-bridge | project_catclaw_cli_bridge.md | CLI bridge, 常駐 session, stdin stdout, stream-json, 取代 channels, acp 常駐 | [臨] |
 | feedback-docs-sync | feedback_docs_sync.md | 文件同步, README, WIKI, _AIDocs, 知識庫, 腳本異動, 雙語 | [固] |
+| feedback-no-overinterpret | feedback_no_overinterpret_commands.md | 指令辨識, 過度推測, 認錯系統, CatClaw混淆, 直接執行 | [固] |

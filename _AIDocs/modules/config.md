@@ -300,6 +300,22 @@ export interface ProviderEntry;
 export interface ProviderRoutingConfig;
 export interface ModelRoutingConfig;
 
+// ── Memory Pipeline 型別 ──
+export type EmbeddingProviderType;
+export type ExtractionProviderType;
+export type RerankerProviderType;
+export interface MemoryPipelineConfig;
+
+// ── CE / Decay 型別 ──
+export interface ToolBudgetConfig;
+export interface DecayLevel;
+export interface ExternalizeConfig;
+export interface DecayStrategyConfig;
+
+// ── FileWatcher 型別 ──
+export interface FileWatchEntry;
+export interface FileWatcherConfig;
+
 // ── 平台擴充型別 ──
 export interface SessionConfig;
 export interface MemoryConfig;
