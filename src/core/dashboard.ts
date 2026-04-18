@@ -999,19 +999,9 @@ async function loadOverview() {
 async function loadSessions() {
   try {
     const d = await authFetch('/api/sessions').then(r => r.json());
+    const container = document.getElementById('sessions-list');
     if (!d.sessions?.length) { _safeSetHtml('sessions-list', '<p style="color:#888;font-size:0.8rem">無資料</p>'); return; }
-    // 記住展開狀態（skId → sessionKey）
-    const expandedMap = new Map();
-    document.querySelectorAll('.sess-expand').forEach(r => {
-      if (r.style.display !== 'none') {
-        const skId = r.id.replace('row-', '');
-        // 從 header row 的 onclick 取 sessionKey
-        const hdr = r.previousElementSibling;
-        const m = hdr?.getAttribute('onclick')?.match(/toggleSessionRow\\(this,'([^']+)'/);
-        if (m) expandedMap.set(skId, m[1]);
-      }
-    });
-    const rows = d.sessions.map(s => {
+    const rowsPairs = d.sessions.map(s => {
       const last = new Date(s.lastTs).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
       const tok = \`↑\${s.inputTokens.toLocaleString()}/↓\${s.outputTokens.toLocaleString()}\`;
       const cache = fmtCache(s.cacheRead, s.cacheWrite);
@@ -1021,21 +1011,76 @@ async function loadSessions() {
       const colCount = 8;
       const sk = s.sessionKey.replace(/'/g, "\\\\'");
       const acts = \`<span style="display:inline-flex;gap:4px"><button class="btn btn-sm" onclick="event.stopPropagation();sessAction('clear','\${sk}')" title="清空訊息">🗑 Clear</button><button class="btn btn-sm" onclick="event.stopPropagation();sessAction('compact','\${sk}')" title="強制 CE 壓縮">📦 Compact</button><button class="btn-danger" onclick="event.stopPropagation();sessAction('delete','\${sk}')" title="刪除 session">✕</button></span>\`;
-      return \`<tr style="cursor:pointer" onclick="toggleSessionRow(this,'\${s.sessionKey}','\${skId}')"><td title="\${s.sessionKey}">\${s.sessionKey.slice(-24)}</td><td>\${last}</td><td>\${s.turns}</td><td>\${tok}</td><td>\${cache}</td><td title="\${mdls}">\${provs}</td><td>\${s.ceTriggers}</td><td>\${acts}</td></tr>
-<tr class="sess-expand" id="row-\${skId}" style="display:none"><td colspan="\${colCount}" style="padding:8px 12px;background:var(--bg4)"><div id="\${skId}" style="font-size:0.8rem;color:var(--fg2)">載入 traces…</div></td></tr>\`;
-    }).join('');
-    _safeSetHtml('sessions-list',
-      \`<table class="tbl"><thead><tr><th>Session</th><th>最後活躍</th><th>Turns</th><th>Tokens</th><th>Cache</th><th>Provider</th><th>CE</th><th>操作</th></tr></thead><tbody>\${rows}</tbody></table>\`);
-    // 恢復展開狀態 + 重新載入 traces
-    expandedMap.forEach((sessionKey, skId) => {
-      const expandRow = document.getElementById('row-' + skId);
-      const headerRow = expandRow?.previousElementSibling;
-      if (expandRow) {
-        expandRow.style.display = '';
-        if (headerRow) headerRow.style.background = 'var(--bg3)';
-        loadSessionTraces(sessionKey, skId);
-      }
+      const headerHtml = \`<tr data-skid="\${skId}" style="cursor:pointer" onclick="toggleSessionRow(this,'\${s.sessionKey}','\${skId}')"><td title="\${s.sessionKey}">\${s.sessionKey.slice(-24)}</td><td>\${last}</td><td>\${s.turns}</td><td>\${tok}</td><td>\${cache}</td><td title="\${mdls}">\${provs}</td><td>\${s.ceTriggers}</td><td>\${acts}</td></tr>\`;
+      const expandHtml = \`<tr class="sess-expand" data-skid="\${skId}" id="row-\${skId}" style="display:none"><td colspan="\${colCount}" style="padding:8px 12px;background:var(--bg4)"><div id="\${skId}" style="font-size:0.8rem;color:var(--fg2)">載入 traces…</div></td></tr>\`;
+      return { skId, sessionKey: s.sessionKey, headerHtml, expandHtml };
     });
+
+    const existingTable = container?.querySelector('table');
+    if (existingTable) {
+      const tbody = existingTable.querySelector('tbody');
+      if (tbody) {
+        // 1. 錨點：第一個在 viewport 可見的 header row
+        let anchorSkid = null, anchorTopBefore = 0;
+        for (const r of tbody.children) {
+          if (!r.getAttribute) continue;
+          if (r.classList?.contains('sess-expand')) continue;
+          const rect = r.getBoundingClientRect();
+          if (rect.bottom > 0) {
+            anchorSkid = r.getAttribute('data-skid');
+            anchorTopBefore = rect.top;
+            break;
+          }
+        }
+
+        // 2. 建現有 skid → {header, expand} 索引
+        const existingMap = new Map();
+        for (const r of Array.from(tbody.children)) {
+          const skid = r.getAttribute && r.getAttribute('data-skid');
+          if (!skid) continue;
+          const entry = existingMap.get(skid) || {};
+          if (r.classList.contains('sess-expand')) entry.expand = r;
+          else entry.header = r;
+          existingMap.set(skid, entry);
+        }
+
+        // 3. 解析新列
+        const tmp = document.createElement('tbody');
+        tmp.innerHTML = rowsPairs.map(p => p.headerHtml + p.expandHtml).join('');
+        const newChildren = Array.from(tmp.children);
+
+        // 4. 差量合併：header/expand 分別比對 outerHTML，展開狀態保留
+        const finalNodes = [];
+        for (let i = 0; i < rowsPairs.length; i++) {
+          const p = rowsPairs[i];
+          const ex = existingMap.get(p.skId);
+          const newHeader = newChildren[i * 2];
+          const newExpand = newChildren[i * 2 + 1];
+          finalNodes.push(ex?.header && ex.header.outerHTML === newHeader.outerHTML ? ex.header : newHeader);
+          if (ex?.expand) {
+            // 保留展開狀態：display、innerHTML、背景色不覆蓋
+            finalNodes.push(ex.expand);
+          } else {
+            finalNodes.push(newExpand);
+          }
+        }
+        tbody.replaceChildren(...finalNodes);
+
+        // 5. 補回錨點位置
+        if (anchorSkid) {
+          const newAnchor = tbody.querySelector('tr[data-skid="' + anchorSkid + '"]:not(.sess-expand)');
+          if (newAnchor) {
+            const delta = newAnchor.getBoundingClientRect().top - anchorTopBefore;
+            if (delta) window.scrollBy(0, delta);
+          }
+        }
+        return;
+      }
+    }
+
+    // 首次建立：完整渲染，並載入已展開的 traces
+    _safeSetHtml('sessions-list',
+      \`<table class="tbl"><thead><tr><th>Session</th><th>最後活躍</th><th>Turns</th><th>Tokens</th><th>Cache</th><th>Provider</th><th>CE</th><th>操作</th></tr></thead><tbody>\${rowsPairs.map(p => p.headerHtml + p.expandHtml).join('')}</tbody></table>\`);
   } catch(e) { _safeSetHtml('sessions-list', '讀取失敗：' + e); }
 }
 
@@ -2306,18 +2351,52 @@ async function loadTraces() {
 
     if (merged.length === 0) { _safeSetHtml(el, '<div style="color:var(--fg2)">無 trace 記錄</div>'); return; }
 
-    // 差量更新：如果表格已存在，只更新變更的 row
+    // 差量更新：保留未變的 <tr> DOM 節點，避免 hover/選取/滾動錨點被破壞
     const existingTable = el.querySelector('table');
     if (existingTable) {
       const tbody = existingTable.querySelector('tbody');
       if (tbody) {
-        const existingRows = tbody.querySelectorAll('tr[data-trace-id]');
-        const existingIds = new Map();
-        existingRows.forEach(r => existingIds.set(r.getAttribute('data-trace-id'), r));
-        // 重建 tbody 但保留 detail card 外的展開狀態
+        // 1. 記住滾動錨點（第一個在 viewport 可見的 row）
+        let anchorId = null, anchorTopBefore = 0;
+        for (const r of tbody.children) {
+          if (!r.getAttribute) continue;
+          const rect = r.getBoundingClientRect();
+          if (rect.bottom > 0) {
+            anchorId = r.getAttribute('data-trace-id');
+            anchorTopBefore = rect.top;
+            break;
+          }
+        }
+
+        // 2. 解析新 tbody HTML 成 DOM
+        const tmp = document.createElement('tbody');
         let newTbody = '';
         for (const t of merged) newTbody += _traceRowHtml(t);
-        _safeSetHtml(tbody, newTbody);
+        tmp.innerHTML = newTbody;
+        const newNodes = Array.from(tmp.children);
+
+        // 3. 建索引 + 差量合併（outerHTML 相同則複用舊節點）
+        const existingById = new Map();
+        for (const r of Array.from(tbody.children)) {
+          const id = r.getAttribute && r.getAttribute('data-trace-id');
+          if (id) existingById.set(id, r);
+        }
+        const finalNodes = [];
+        for (const nn of newNodes) {
+          const id = nn.getAttribute('data-trace-id');
+          const ex = id ? existingById.get(id) : null;
+          finalNodes.push(ex && ex.outerHTML === nn.outerHTML ? ex : nn);
+        }
+        tbody.replaceChildren(...finalNodes);
+
+        // 4. 若錨點仍存在，補回視覺位置的偏移（新 row 插入頂端時不跳）
+        if (anchorId) {
+          const newAnchor = tbody.querySelector('tr[data-trace-id="' + anchorId + '"]');
+          if (newAnchor) {
+            const delta = newAnchor.getBoundingClientRect().top - anchorTopBefore;
+            if (delta) window.scrollBy(0, delta);
+          }
+        }
         return;
       }
     }
