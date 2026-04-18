@@ -8,7 +8,7 @@
 Hook = 在 agent-loop / memory / cli-bridge / platform 關鍵時機點執行的腳本。
 支援 TS / JS / Shell 三種 runtime，agent 可自助註冊。
 
-## 34 個事件點
+## 36 個事件點
 
 | 類別 | 事件 |
 |------|------|

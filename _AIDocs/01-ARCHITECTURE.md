@@ -341,7 +341,9 @@ providers/
 │   │   │   ├── usage.ts           /usage — 用量統計
 │   │   │   └── use.ts             /use — 切換 model
 │   │   └── builtin-prompt/
-│   │       └── discord/SKILL.md   Discord 平台 skill 提示詞
+│   │       ├── commit/SKILL.md    Git commit skill 提示詞
+│   │       ├── discord/SKILL.md   Discord 平台 skill 提示詞
+│   │       └── pr/SKILL.md        Pull Request skill 提示詞
 │   │
 │   ├── memory/                 ★ 四層記憶系統
 │   │   ├── engine.ts              記憶引擎（Global + Project + Account + Agent）
@@ -394,6 +396,7 @@ providers/
 │   │   └── types.ts               型別定義
 │   │
 │   ├── discord/                Discord 擴充
+│   │   ├── bot-circuit-breaker.ts Bot 層級斷路器
 │   │   └── inbound-history.ts     入站歷史（Decay II）
 │   │
 │   ├── mcp/                    MCP 協議
@@ -452,7 +455,7 @@ providers/
 | `logLevel` | string | `"info"` | — | debug/info/warn/error/silent |
 | `cron.enabled` | boolean | `false` | — | 啟用排程服務 |
 | `cron.maxConcurrentRuns` | number | `1` | — | 同時執行 job 上限 |
-| `dashboard.port` | number | — | — | Web Dashboard 監聽埠 |
+| `dashboard.port` | number | `8088` | — | Web Dashboard 監聽埠 |
 
 > catclaw.json 支援 JSONC（`//` 行尾 / 整行註解）。字串值符合 `${ENV_VAR_NAME}` 格式時自動展開環境變數。
 

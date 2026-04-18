@@ -10,8 +10,8 @@ CatClaw = **Codex 版 Claude Code CLI + 多人 AI 開發平台**。
 - **Multi-turn Agent Loop**：tool 迴圈 + output token recovery + auto-compact
 - **多 Provider**：Claude API / Ollama / OpenAI-compat / ACP CLI，failover 自動切換
 - **25 builtin tools**：file read/write/edit、run_command、search、memory、subagent、hook 管理等
-- **28 builtin skills**：Discord 指令層（/think、/mode、/use、/stop、/plan、/remind、/hook 等）
-- **34-event hook 系統**：folder-convention 掛載（global + per-agent）+ fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK
+- **34 builtin skills**（31 command-type + 3 prompt-type）：Discord 指令層（/think、/mode、/use、/stop、/plan、/remind、/hook 等）
+- **36-event hook 系統**：folder-convention 掛載（global + per-agent）+ fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK
 - **四層記憶引擎**：recall（vector + keyword）、extract、consolidate
 - **Context Engineering**：decay（漸進衰減+外部化）/ compaction（結構化摘要+意圖錨點）/ overflow-hard-stop
 - **帳號/角色/權限**：identity linking、role-based tool sets、rate limit
@@ -152,7 +152,7 @@ src/
 ├── tools/                   (25 builtin tools)
 │   ├── registry.ts          (Tool 註冊表)
 │   └── builtin/             (file read/write/edit、run_command、search、hook 管理等)
-├── skills/                  (28 builtin skills)
+├── skills/                  (34 builtin skills)
 │   ├── registry.ts          (Skill 註冊 + trigger match)
 │   ├── builtin/             (25 TS skills)
 │   └── builtin-prompt/      (3 prompt skill 子目錄：commit/ discord/ pr/，各含 SKILL.md)
@@ -357,7 +357,7 @@ src/
 | `contextEngineering.strategies` | object | — | — | Compaction 策略（model / maxTokens） |
 | `contextEngineering.toolBudget.resultTokenCap` | number | `0` | — | 單一工具結果 token 上限（0=無限制） |
 | `contextEngineering.toolBudget.perTurnTotalCap` | number | `0` | — | 每 turn 所有工具結果合計 token 上限 |
-| `contextEngineering.toolBudget.toolTimeoutMs` | number | `30000` | — | 單一 tool 執行超時毫秒（0=無限制） |
+| `contextEngineering.toolBudget.toolTimeoutMs` | number | `0` | — | 單一 tool 執行超時毫秒（0=無限制） |
 | `contextEngineering.toolBudget.maxWriteFileBytes` | number | `512000` | — | write/edit_file 單次寫入上限 bytes（500KB） |
 
 > **注意**：config.json（catclaw.json）支援 JSONC（`//` 行尾 / 整行註解）。`claude.cwd` / `claude.command` 已移除，改由環境變數 `CATCLAW_CONFIG_DIR` / `CATCLAW_WORKSPACE` / `CATCLAW_CLAUDE_BIN` 控制。

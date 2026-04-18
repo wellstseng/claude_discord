@@ -6,7 +6,7 @@
 
 CatClaw = Codex 版 Claude Code CLI + 多人 AI 開發平台。
 以 Discord 為前端，提供等同 Claude Code 的完整開發能力：multi-turn agent loop、25 builtin tools、
-31 builtin skills（25 檔 + 3 prompt）、36-event hook 系統、多 provider failover、四層記憶引擎、Context Engineering、
+34 builtin skills（31 command-type + 3 prompt）、36-event hook 系統、多 provider failover、四層記憶引擎、Context Engineering、
 subagent 編排、帳號/角色/權限系統、Web Dashboard + Trace 追蹤。
 
 ## 架構一句話摘要
@@ -33,7 +33,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Accounts | `src/accounts/` | 帳號 + 角色 + 權限 + identity linking |
 | Providers | `src/providers/` | LLM Provider 抽象：claude-api / codex-oauth / cli-claude / cli-gemini / cli-codex / ollama / openai-compat + failover + circuit-breaker |
 | Tools | `src/tools/` | Tool 註冊 + 25 builtin tools（read/write/edit/glob/grep/run/web/memory/subagent/task/atom_write/atom_delete/hook_register/hook_list/hook_remove...） |
-| Skills | `src/skills/` | Skill registry + 31 builtin skills（25 檔 + 3 prompt） |
+| Skills | `src/skills/` | Skill registry + 34 builtin skills（31 command-type + 3 prompt） |
 | Hooks | `src/hooks/` | Hook 系統：36 events + scanner + runner + defineHook SDK + folder-convention 掛載 + fs.watch 熱重載 |
 | Safety | `src/safety/` | 安全攔截：guard + collab-conflict |
 | Workflow | `src/workflow/` | 工作流引擎：rut/oscillation/fix-escalation/sync/wisdom/failure-detector |
@@ -79,7 +79,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | [modules/reply.md](modules/reply.md) | `src/core/reply-handler.ts` | Streaming 回覆 | 2026-04-05 |
 | [modules/accounts.md](modules/accounts.md) | `src/accounts/` | 帳號 + 角色 + 權限 + Identity Linking | 2026-04-05 |
 | [modules/event-bus.md](modules/event-bus.md) | `src/core/event-bus.ts` | 強型別事件匯流排 | 2026-04-05 |
-| [modules/hooks.md](modules/hooks.md) | `src/hooks/` | Hook 系統（34 events + defineHook SDK + folder-convention） | 2026-04-15 |
+| [modules/hooks.md](modules/hooks.md) | `src/hooks/` | Hook 系統（36 events + defineHook SDK + folder-convention） | 2026-04-15 |
 | [modules/safety.md](modules/safety.md) | `src/safety/` | 安全攔截 | 2026-04-05 |
 | [modules/workflow.md](modules/workflow.md) | `src/workflow/` | 工作流引擎 | 2026-04-05 |
 | [modules/acp.md](modules/acp.md) | `src/acp.ts` | Claude CLI spawn（Legacy，僅 cron.ts 使用） | 2026-04-13 |

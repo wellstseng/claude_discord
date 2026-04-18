@@ -2,7 +2,7 @@
 
 **English** | [繁體中文](README.md)
 
-Discord-based AI Agent platform with full development capabilities — multi-turn agent loop, 25 builtin tools, 28 builtin skills, 36-event hook system, multi-provider failover, four-layer memory engine, and web dashboard.
+Discord-based AI Agent platform with full development capabilities — multi-turn agent loop, 25 builtin tools, 34 builtin skills, 36-event hook system, multi-provider failover, four-layer memory engine, and web dashboard.
 
 ## Features
 
@@ -10,11 +10,11 @@ Discord-based AI Agent platform with full development capabilities — multi-tur
 |----------|-------------|
 | **Agent Loop** | Multi-turn reasoning loop, tool execution, output token recovery, auto-compact |
 | **Tools** | 25 builtin tools — file read/write/edit, glob, grep, bash exec, web fetch/search, memory, subagent, task management, skill execution, hook management, filewatch |
-| **Skills** | 28 builtin skills (25 TypeScript + 3 prompt-type) — config, session, account, status, restart, plan, remind, hook, and more |
+| **Skills** | 34 builtin skills (31 command-type + 3 prompt-type) — config, session, account, status, restart, plan, remind, hook, and more |
 | **Hook System** | 36 events (10 categories: Lifecycle / Turn / Memory / Subagent / Context / CLI Bridge / File+Command / File Watcher / Error / Platform) + folder-convention mount + fs.watch hot-reload + TS/JS/sh/ps1 runtimes + defineHook SDK |
 | **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / acp-cli / cli-* + circuit-breaker failover |
 | **Memory** | Four-layer engine (Global / Project / Account / Agent) — vector recall + keyword search + auto-extraction + consolidation |
-| **Context Engine** | Decay / dedup / turn-summary / compaction / overflow-hard-stop strategies + anti-hallucination honest stubs + turn cap warning |
+| **Context Engine** | Decay (progressive decay + externalization) / Compaction (LLM structured summary) / Overflow Hard Stop — three strategies + anti-hallucination honest stubs + turn cap warning |
 | **Accounts** | Registration, identity linking, 5-tier roles (guest/member/developer/admin/platform-owner), per-channel permission gate |
 | **Subagent** | Sub-task dispatch + Discord thread bridge + tracking |
 | **Scheduling** | cron / every / at — message, subagent, exec, claude-acp actions + `/cron` skill + agent isolation |
@@ -37,7 +37,7 @@ agent-loop.ts ─── Multi-turn Reasoning Loop (LLM <-> Tool Execution)
     |                         |
     v                         v
 providers/ ───────── tools/ + skills/
-LLM Abstraction      25 Tools + 28 Skills + 36 Hook Events
+LLM Abstraction      25 Tools + 34 Skills + 36 Hook Events
 + Failover
     |
     v
@@ -271,7 +271,7 @@ src/
   memory/         Four-layer memory engine (engine, recall, extract, consolidate)
   providers/      LLM Provider abstraction (claude-api, ollama, openai-compat, cli-*)
   tools/          Tool Registry + 25 builtin tools
-  skills/         Skill Registry + 28 builtin skills (25 TS + 3 prompt)
+  skills/         Skill Registry + 34 builtin skills (31 command-type + 3 prompt)
   hooks/          Hook system — 36 events + folder-convention + fs.watch + defineHook SDK + FileWatcher
   safety/         Safety interception (guard, collab-conflict)
   workflow/       Workflow engine (rut, oscillation, fix-escalation, sync)

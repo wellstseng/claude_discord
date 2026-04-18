@@ -22,7 +22,7 @@
 ### CatClaw 是什麼
 
 CatClaw 是一套以 Discord 為前端的多人 AI 開發平台，提供等同 Claude Code 的完整開發能力：
-multi-turn agent loop、25 builtin tools、28 builtin skills、34-event hook 系統、多 provider failover、
+multi-turn agent loop、25 builtin tools、34 builtin skills、36-event hook 系統、多 provider failover、
 四層記憶引擎、Context Engineering、subagent 編排、帳號/角色/權限系統、Web Dashboard。
 
 ### 一鍵安裝
@@ -110,10 +110,10 @@ Discord 訊息
 | **Session** | Per-channel 串行佇列 + 磁碟持久化 + TTL |
 | **Accounts** | 5 級角色（guest → platform-owner）+ Tool Tier 物理移除 |
 | **Tools** | 25 builtin tools + MCP tool 自動整合 |
-| **Skills** | 28 builtin skills（25 TS + 3 prompt） |
+| **Skills** | 34 builtin skills（31 command-type + 3 prompt） |
 | **Dashboard** | Web 監控面板 + REST API + Web Chat |
 | **Cron** | 排程服務（cron/every/at）+ 4 種動作型別 |
-| **Hooks** | 34 events（10 類）+ folder-convention 掛載 + fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK + FileWatcher |
+| **Hooks** | 36 events（10 類）+ folder-convention 掛載 + fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK + FileWatcher |
 | **Safety** | 安全攔截 + 協作衝突偵測 |
 
 ### 目錄結構
@@ -124,7 +124,7 @@ catclaw/                          <- 程式碼
 │   ├── core/                     核心模組（agent-loop, session, dashboard...）
 │   ├── providers/                LLM Provider 抽象層
 │   ├── tools/                    25 builtin tools
-│   ├── skills/                   28 builtin skills
+│   ├── skills/                   34 builtin skills
 │   ├── memory/                   四層記憶引擎
 │   ├── accounts/                 帳號/角色/權限
 │   ├── hooks/                    Hook 系統
@@ -233,9 +233,9 @@ LLM 需先呼叫 `tool_search` 載入完整 schema 才能使用（節省 context
 
 > 詳見：[modules/tool-registry.md](modules/tool-registry.md)
 
-### 4.3 Skill 系統（28 builtin skills）
+### 4.3 Skill 系統（34 builtin skills）
 
-Skill = Discord 指令層，在 agent loop 之前攔截。25 個檔案（含多重 export 共 25 TypeScript skills）+ 3 個 prompt 型。
+Skill = Discord 指令層，在 agent loop 之前攔截。25 個檔案（含多重 export 共 31 command-type skills）+ 3 個 prompt 型。
 LLM 也可透過 `skill` tool 主動執行 builtin skill（不需引導使用者手動輸入）。
 
 **觸發**：前綴匹配（如 `/think`、`/mode`、`/use`、`/stop`、`/plan`、`/status`）
@@ -390,9 +390,9 @@ MCP tool 註冊名稱格式：`mcp_{serverName}_{toolName}`。預設 deferred（
 
 ### 4.12 Hook 系統
 
-Hook = TS/JS 腳本或 shell 命令，在 agent-loop 的 34 個關鍵時機點執行。支援 global（所有 agent）+ per-agent（單一 agent）兩層掛載。
+Hook = TS/JS 腳本或 shell 命令，在 agent-loop 的 36 個關鍵時機點執行。支援 global（所有 agent）+ per-agent（單一 agent）兩層掛載。
 
-**34 個事件點（10 類）**：
+**36 個事件點（10 類）**：
 
 | 類別 | Events |
 |------|--------|

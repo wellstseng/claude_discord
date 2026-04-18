@@ -872,17 +872,21 @@ autoThread       = ...同上繼承鏈... ?? false
 
 ## Prompt Assembler 可用模組
 
-| 模組名 | 優先序 | 說明 |
-|--------|--------|------|
-| `date-time` | 5 | 當前時間（Asia/Taipei） |
-| `identity` | 10 | CatClaw 身份 + 多人場景說話者資訊 |
-| `catclaw-md` | 15 | 載入 CATCLAW.md 階層（workspace → 專案） |
-| `tools-usage` | 20 | 工具使用規則（read_file/edit_file 等） |
-| `coding-rules` | 30 | 行為約束 / 精密模式載入 coding-discipline.md |
-| `git-rules` | 40 | Git 安全協定 |
-| `output-format` | 50 | 輸出風格（精準、繁中、無廢話） |
-| `discord-reply` | 55 | Discord MCP 啟用時，強制回覆回 Discord |
-| `memory-rules` | 60 | 記憶系統使用規則 |
+| 模組名 | 優先序 | 載入方式 | 說明 |
+|--------|--------|---------|------|
+| `date-time` | 5 | 固定 | 當前時間（Asia/Taipei） |
+| `identity` | 10 | 固定 | CatClaw 身份 + 多人場景說話者資訊 |
+| `context-integrity` | 15 | 固定 | Anti-Hallucination 鐵則 + retry escalation 防線 |
+| `catclaw-md` | 20 | 固定 | 載入 CATCLAW.md 階層（workspace → agent） |
+| `tools-usage` | 25 | 固定 | 工具使用規則（read_file/edit_file 等） |
+| `coding-rules` | 30 | 固定 | 行為約束 / 精密模式載入 coding-discipline.md |
+| `git-rules` | 40 | 固定 | Git 安全協定 |
+| `output-format` | 50 | 固定 | 輸出風格（精準、繁中、無廢話） |
+| `discord-reply` | 55 | 條件 | Discord MCP 啟用時，強制回覆回 Discord |
+| `tool-summary` | 56 | 動態 | 由 `setToolSummary()` 注入的 tool 使用摘要 |
+| `skill-summary` | 57 | 動態 | 由 `setSkillSummary()` 注入的 skill 使用摘要 |
+| `memory-rules` | 60 | 固定 | 記憶系統使用規則 |
+| `failure-recall` | 70 | 條件 | 陷阱/失敗記憶注入（有 recall 結果時載入） |
 
 ---
 
