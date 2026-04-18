@@ -880,6 +880,18 @@ function fmtCache(r, w) {
 let _traceAutoRefresh = null;
 let _sessAutoRefresh = null;
 let _cbAutoRefresh = null;
+
+// 安全更新 innerHTML：內容相同直接 no-op，內容變了也保留 scrollX/Y。
+// 用在自動刷新 (loadStatus / loadSessions / loadTraces / loadCliBridges / cbLoadStatus 等)，
+// 避免每 5/10/30s 強制 reflow 把使用者的捲動位置或選取狀態彈走。
+function _safeSetHtml(elOrId, html) {
+  const el = typeof elOrId === 'string' ? document.getElementById(elOrId) : elOrId;
+  if (!el || el.innerHTML === html) return;
+  const sx = window.scrollX, sy = window.scrollY;
+  el.innerHTML = html;
+  if (window.scrollX !== sx || window.scrollY !== sy) window.scrollTo(sx, sy);
+}
+
 function switchTab(id, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
@@ -915,11 +927,11 @@ function refreshAll() { loadOverview(); loadStatus(); }
 async function loadStatus() {
   try {
     const d = await authFetch('/api/status').then(r => r.json());
-    document.getElementById('status-grid').innerHTML = [
+    _safeSetHtml('status-grid', [
       ['Uptime', d.uptimeStr], ['Memory', d.memoryMB + ' MB'],
       ['Heap', d.heapUsedMB + ' MB'], ['PID', d.pid],
       ['Config 目錄', d.configDir || '(未設定)'], ['工作目錄', d.workspace || '(未設定)'],
-    ].map(([l,v]) => \`<div class="stat"><div class="stat-val" style="font-size:\${String(v).length > 20 ? '0.7rem' : '1rem'}">\${v}</div><div class="stat-lbl">\${l}</div></div>\`).join('');
+    ].map(([l,v]) => \`<div class="stat"><div class="stat-val" style="font-size:\${String(v).length > 20 ? '0.7rem' : '1rem'}">\${v}</div><div class="stat-lbl">\${l}</div></div>\`).join(''));
   } catch {}
 }
 
@@ -987,7 +999,7 @@ async function loadOverview() {
 async function loadSessions() {
   try {
     const d = await authFetch('/api/sessions').then(r => r.json());
-    if (!d.sessions?.length) { document.getElementById('sessions-list').innerHTML = '<p style="color:#888;font-size:0.8rem">無資料</p>'; return; }
+    if (!d.sessions?.length) { _safeSetHtml('sessions-list', '<p style="color:#888;font-size:0.8rem">無資料</p>'); return; }
     // 記住展開狀態（skId → sessionKey）
     const expandedMap = new Map();
     document.querySelectorAll('.sess-expand').forEach(r => {
@@ -1012,8 +1024,8 @@ async function loadSessions() {
       return \`<tr style="cursor:pointer" onclick="toggleSessionRow(this,'\${s.sessionKey}','\${skId}')"><td title="\${s.sessionKey}">\${s.sessionKey.slice(-24)}</td><td>\${last}</td><td>\${s.turns}</td><td>\${tok}</td><td>\${cache}</td><td title="\${mdls}">\${provs}</td><td>\${s.ceTriggers}</td><td>\${acts}</td></tr>
 <tr class="sess-expand" id="row-\${skId}" style="display:none"><td colspan="\${colCount}" style="padding:8px 12px;background:var(--bg4)"><div id="\${skId}" style="font-size:0.8rem;color:var(--fg2)">載入 traces…</div></td></tr>\`;
     }).join('');
-    document.getElementById('sessions-list').innerHTML =
-      \`<table class="tbl"><thead><tr><th>Session</th><th>最後活躍</th><th>Turns</th><th>Tokens</th><th>Cache</th><th>Provider</th><th>CE</th><th>操作</th></tr></thead><tbody>\${rows}</tbody></table>\`;
+    _safeSetHtml('sessions-list',
+      \`<table class="tbl"><thead><tr><th>Session</th><th>最後活躍</th><th>Turns</th><th>Tokens</th><th>Cache</th><th>Provider</th><th>CE</th><th>操作</th></tr></thead><tbody>\${rows}</tbody></table>\`);
     // 恢復展開狀態 + 重新載入 traces
     expandedMap.forEach((sessionKey, skId) => {
       const expandRow = document.getElementById('row-' + skId);
@@ -1024,7 +1036,7 @@ async function loadSessions() {
         loadSessionTraces(sessionKey, skId);
       }
     });
-  } catch(e) { document.getElementById('sessions-list').innerHTML = '讀取失敗：' + e; }
+  } catch(e) { _safeSetHtml('sessions-list', '讀取失敗：' + e); }
 }
 
 function toggleSessionRow(headerRow, sessionKey, skId) {
@@ -2292,7 +2304,7 @@ async function loadTraces() {
     if (ceFilter === 'any') merged = merged.filter(t => t.contextEngineering?.strategiesApplied?.length > 0);
     else if (ceFilter) merged = merged.filter(t => t.contextEngineering?.strategiesApplied?.includes(ceFilter));
 
-    if (merged.length === 0) { el.innerHTML = '<div style="color:var(--fg2)">無 trace 記錄</div>'; return; }
+    if (merged.length === 0) { _safeSetHtml(el, '<div style="color:var(--fg2)">無 trace 記錄</div>'); return; }
 
     // 差量更新：如果表格已存在，只更新變更的 row
     const existingTable = el.querySelector('table');
@@ -2305,7 +2317,7 @@ async function loadTraces() {
         // 重建 tbody 但保留 detail card 外的展開狀態
         let newTbody = '';
         for (const t of merged) newTbody += _traceRowHtml(t);
-        tbody.innerHTML = newTbody;
+        _safeSetHtml(tbody, newTbody);
         return;
       }
     }
@@ -2314,8 +2326,8 @@ async function loadTraces() {
     let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem"><thead>' + _traceTableHeader + '</thead><tbody>';
     for (const t of merged) html += _traceRowHtml(t);
     html += '</tbody></table>';
-    el.innerHTML = html;
-  } catch (e) { if (!el.querySelector('table')) el.innerHTML = '<div style="color:var(--red2)">載入失敗：' + e + '</div>'; }
+    _safeSetHtml(el, html);
+  } catch (e) { if (!el.querySelector('table')) _safeSetHtml(el, '<div style="color:var(--red2)">載入失敗：' + e + '</div>'); }
 }
 
 // ── Trace Context Helpers ────────────────────────────────────────────────────
@@ -3450,16 +3462,16 @@ async function loadCliBridges() {
     const d = await authFetch('/api/cli-bridge/list').then(r => r.json());
     const bridges = d.bridges || [];
     if (!bridges.length) {
-      document.getElementById('cb-list').innerHTML = '<span style="color:var(--fg3)">沒有 CLI Bridge（需在 ~/.catclaw/cli-bridges.json 設定）</span>';
+      _safeSetHtml('cb-list', '<span style="color:var(--fg3)">沒有 CLI Bridge（需在 ~/.catclaw/cli-bridges.json 設定）</span>');
       document.getElementById('cb-detail').style.display = 'none';
       return;
     }
     const statusIcon = s => s === 'idle' ? '🟢' : s === 'busy' ? '🟡' : s === 'restarting' ? '🔄' : s === 'suspended' ? '💤' : '🔴';
-    document.getElementById('cb-list').innerHTML = '<table class="tbl"><thead><tr><th>Label</th><th>狀態</th><th>Session</th><th>Channel</th><th></th></tr></thead><tbody>' +
+    _safeSetHtml('cb-list', '<table class="tbl"><thead><tr><th>Label</th><th>狀態</th><th>Session</th><th>Channel</th><th></th></tr></thead><tbody>' +
       bridges.map(b => \`<tr><td>\${b.label}</td><td>\${statusIcon(b.status)} \${b.status}</td><td style="font-size:0.72rem;color:var(--fg3)">\${b.sessionId ? b.sessionId.slice(0,8) : '-'}</td><td style="font-size:0.72rem;color:var(--fg3)">\${b.channelId}</td><td><button class="btn btn-sm" onclick="cbSelect('\${b.label}')">開啟</button></td></tr>\`).join('') +
-      '</tbody></table>';
+      '</tbody></table>');
   } catch (err) {
-    document.getElementById('cb-list').innerHTML = '<span style="color:#f66">載入失敗: ' + err.message + '</span>';
+    _safeSetHtml('cb-list', '<span style="color:#f66">載入失敗: ' + err.message + '</span>');
   }
 }
 
@@ -3477,8 +3489,8 @@ async function cbLoadStatus() {
   try {
     const d = await authFetch('/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/status').then(r => r.json());
     const statusIcon = s => s === 'idle' ? '🟢' : s === 'busy' ? '🟡' : s === 'restarting' ? '🔄' : s === 'suspended' ? '💤' : '🔴';
-    document.getElementById('cb-detail-info').innerHTML =
-      \`狀態：\${statusIcon(d.status)} \${d.status}<br>Session：\${d.sessionId || '-'}<br>Channel：\${d.channelId}\`;
+    _safeSetHtml('cb-detail-info',
+      \`狀態：\${statusIcon(d.status)} \${d.status}<br>Session：\${d.sessionId || '-'}<br>Channel：\${d.channelId}\`);
   } catch {}
 }
 
@@ -3487,9 +3499,9 @@ async function cbLoadTurns() {
   try {
     const d = await authFetch('/api/cli-bridge/' + encodeURIComponent(_cbSelectedLabel) + '/turns?limit=30').then(r => r.json());
     const turns = d.turns || [];
-    if (!turns.length) { document.getElementById('cb-turns').innerHTML = '<span style="color:var(--fg3)">尚無 turn</span>'; return; }
+    if (!turns.length) { _safeSetHtml('cb-turns', '<span style="color:var(--fg3)">尚無 turn</span>'); return; }
     const deliveryIcon = s => s === 'success' ? '✅' : s === 'failed' ? '❌' : s === 'skipped' ? '⏭' : '⏳';
-    document.getElementById('cb-turns').innerHTML = '<table class="tbl"><thead><tr><th>時間</th><th>來源</th><th>輸入</th><th>回覆</th><th>工具</th><th>送達</th><th></th></tr></thead><tbody>' +
+    _safeSetHtml('cb-turns', '<table class="tbl"><thead><tr><th>時間</th><th>來源</th><th>輸入</th><th>回覆</th><th>工具</th><th>送達</th><th></th></tr></thead><tbody>' +
       turns.slice().reverse().map(t => {
         const time = t.startedAt ? new Date(t.startedAt).toLocaleTimeString() : '-';
         // 預覽時去除 inbound context / 跨頻道 context 前綴（--- 分隔符之後才是使用者原文）
@@ -3503,9 +3515,9 @@ async function cbLoadTurns() {
         const resendBtn = t.discordDelivery === 'failed' ? \`<button class="btn btn-sm" onclick="cbResend('\${t.turnId}')">重送</button>\` : '';
         return \`<tr><td>\${time}</td><td>\${t.source}</td><td title="\${rawInput.replace(/"/g,'&quot;')}">\${input}</td><td title="\${(t.assistantReply||'').replace(/"/g,'&quot;')}">\${reply}</td><td>\${t.toolCalls?.length || 0}</td><td>\${deliveryIcon(t.discordDelivery)}</td><td>\${resendBtn}</td></tr>\`;
       }).join('') +
-      '</tbody></table>';
+      '</tbody></table>');
   } catch (err) {
-    document.getElementById('cb-turns').innerHTML = '<span style="color:#f66">' + err.message + '</span>';
+    _safeSetHtml('cb-turns', '<span style="color:#f66">' + err.message + '</span>');
   }
 }
 
