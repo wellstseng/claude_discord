@@ -87,6 +87,10 @@ const commands = [
         .setDescription("指定 session ID（搭配 set 使用）")
         .setRequired(false)
     ),
+
+  new SlashCommandBuilder()
+    .setName("help")
+    .setDescription("顯示所有 CatClaw 指令清單（含權限標註）"),
 ];
 
 // ── 部署 Slash Commands 到 Discord ──────────────────────────────────────────
@@ -372,6 +376,40 @@ async function handleSession(interaction: ChatInputCommandInteraction): Promise<
   }
 }
 
+async function handleHelp(interaction: ChatInputCommandInteraction): Promise<void> {
+  const { matchSkill } = await import("./skills/registry.js");
+  const match = matchSkill("/help");
+  if (!match) {
+    await interaction.reply({ content: "❌ /help skill 未載入", ephemeral: true });
+    return;
+  }
+
+  const { skill } = match;
+  const result = await skill.execute({
+    args: "",
+    channelId: interaction.channelId,
+    authorId: interaction.user.id,
+    agentId: undefined as any,
+    config,
+  });
+
+  // 分段處理（超過 2000 字拆段）
+  const text = result.text;
+  if (text.length <= 2000) {
+    await interaction.reply(text);
+  } else {
+    const first = text.slice(0, 2000);
+    await interaction.reply(first);
+    for (let i = 2000; i < text.length; i += 2000) {
+      await interaction.followUp(text.slice(i, i + 2000));
+    }
+  }
+}
+
+// ── 不需 admin 的指令 ──────────────────────────────────────────────────────
+
+const PUBLIC_COMMANDS = new Set(["help"]);
+
 // ── 主要入口：綁定 interactionCreate 事件 ───────────────────────────────────
 
 /**
@@ -384,8 +422,8 @@ export function setupSlashCommands(client: Client): void {
 
     const { commandName, user } = interaction;
 
-    // 管理員白名單驗證
-    if (!isAdmin(user.id)) {
+    // 管理員白名單驗證（public 指令跳過）
+    if (!PUBLIC_COMMANDS.has(commandName) && !isAdmin(user.id)) {
       await interaction.reply({
         content: "❌ 你沒有執行此指令的權限",
         ephemeral: true,
@@ -415,6 +453,9 @@ export function setupSlashCommands(client: Client): void {
           break;
         case "session":
           await handleSession(interaction);
+          break;
+        case "help":
+          await handleHelp(interaction);
           break;
         default:
           await interaction.reply({ content: "未知指令", ephemeral: true });
