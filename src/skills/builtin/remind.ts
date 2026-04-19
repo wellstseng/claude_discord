@@ -277,7 +277,16 @@ function handleAdd(rest: string, channelId: string, agentId?: string): { text: s
 
 function handleList(agentId?: string): { text: string } {
   const jobs = listCronJobs(agentId);
-  if (jobs.length === 0) return { text: "目前沒有排程。" };
+  if (jobs.length === 0) {
+    // 揭露其他 agent 的 job 存在，避免誤判成「整個系統沒有排程」而手動亂寫 JSON
+    if (agentId !== undefined) {
+      const totalCount = listCronJobs().length;
+      if (totalCount > 0) {
+        return { text: `你（agent \`${agentId}\`）目前沒有排程。\n（系統內共 ${totalCount} 個排程屬於其他 agent，本指令依設計只顯示自己的；不要直接編輯 cron-jobs.json）` };
+      }
+    }
+    return { text: "目前沒有排程。" };
+  }
 
   const lines = jobs.map(({ id, entry }) => {
     const sched = formatSchedule(entry);

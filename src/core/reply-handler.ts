@@ -244,21 +244,23 @@ export async function handleAgentLoopReply(
   async function streamEditTextDelta(text: string): Promise<void> {
     buffer += text;
 
-    // 首次：建立 edit 目標訊息
-    if (!editMsg) {
-      await initEditMsg("💭");
-    }
-
-    // 超過安全上限 → 終結目前段，開新訊息
-    if (buffer.length >= STREAM_SPLIT_THRESHOLD) {
+    // 切分：每超過上限就 emit 一段，剩餘留在 buffer 給下一條訊息
+    // 用 while 處理單次 delta 就超過 threshold 數倍的情況（LLM 一口氣丟 5K 字）
+    while (buffer.length >= STREAM_SPLIT_THRESHOLD) {
       cancelEditTimer();
       await waitEditDone();
-      await doEdit();           // 最終 edit 目前段
-      editMsg = null;           // 重置，下次 initEditMsg 時開新訊息
-      buffer = "";              // 清空已發送部分
-      // 剩餘 text 已在 buffer（此次 call 全部 += 進去），實際上此 branch
-      // 只會發生在 text 本身很短的情況，所以 buffer 已清空沒有 residue
-    } else {
+      if (!editMsg) await initEditMsg("💭");
+      const firstChunk = buffer.slice(0, STREAM_SPLIT_THRESHOLD);
+      const remainder = buffer.slice(STREAM_SPLIT_THRESHOLD);
+      buffer = firstChunk;       // doEdit 用這段內容
+      await doEdit();
+      editMsg = null;            // 下次 initEditMsg 時建新訊息
+      buffer = remainder;        // 保留剩餘，避免內容遺失
+    }
+
+    // 殘餘 buffer 仍有內容 → 確保有 editMsg 並排程
+    if (buffer.length > 0) {
+      if (!editMsg) await initEditMsg("💭");
       scheduleEdit();
     }
   }
