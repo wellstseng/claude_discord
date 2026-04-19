@@ -101,7 +101,8 @@ export const skill: Skill = {
 
       // ── 組裝輸出 ──
       const sections: string[] = [];
-      sections.push(`📋 **CatClaw 指令清單**（角色：${accountRole}）`);
+      const displayRole = accountRole === "platform-owner" ? "admin" : accountRole;
+      sections.push(`📋 **CatClaw 指令清單**（角色：${displayRole}）`);
       sections.push(`⛔ = 你的角色無法使用此指令\n`);
 
       sections.push(`**▸ Trigger Skills（文字觸發，${allSkills.length} 個）**`);
