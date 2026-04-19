@@ -29,6 +29,17 @@ function closeFenceIfOpen(text: string): string {
   return countCodeFences(text) % 2 !== 0 ? text + "\n```" : text;
 }
 
+// 結構化內容偵測：報告/計劃/表格類超過 1500 字 → 提早走 fileMode（.md 附件）
+const STRUCTURED_MIN_LENGTH = 1500;
+function isStructuredContent(text: string): boolean {
+  if (text.length < STRUCTURED_MIN_LENGTH) return false;
+  const headers = (text.match(/^#{1,6}\s/gm) ?? []).length;
+  const tableRows = (text.match(/^\|.*\|$/gm) ?? []).length;
+  const hrLines = (text.match(/^---+$/gm) ?? []).length;
+  const codeBlocks = countCodeFences(text);
+  return headers >= 2 || tableRows >= 3 || hrLines >= 2 || codeBlocks >= 4;
+}
+
 const MEDIA_RE = /\bMEDIA:\s*`?([^\n`]+)`?/gi;
 const WINDOWS_ABS_PATH_RE = /^[a-zA-Z]:[\\/]/;
 
@@ -304,11 +315,16 @@ export async function handleAgentLoopReply(
 
         if (fileMode) continue;
 
-        if (threshold > 0 && totalText.length > threshold) {
+        // 觸發 fileMode 的兩條路徑：
+        // 1. 硬上限：totalText > fileUploadThreshold（預設 3000）
+        // 2. 結構化偵測：≥1500 字且呈現 headers/tables/hr/多 code block
+        const overHardLimit = threshold > 0 && totalText.length > threshold;
+        const isStructured = !overHardLimit && isStructuredContent(totalText);
+        if (overHardLimit || isStructured) {
           fileMode = true;
           if (useStreamEdit) {
             cancelEditTimer();
-            await finalizeStreamEdit();  // 把最後 segment 寫入 progressMsg 當預覽
+            await finalizeStreamEdit();
             segmentBuffer = "";
           } else {
             cancelFlushTimer();
