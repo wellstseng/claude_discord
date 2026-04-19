@@ -509,6 +509,19 @@ export async function handleCliBridgeReply(
             if (!ok) allOk = false;
           }
           discordDelivery = allOk ? "success" : "failed";
+        } else if (evt.text) {
+          // buffer 為空但 result 帶有文字（常見於 permission deny 後 CLI 直接結束 turn）
+          const chunks = splitForDiscord(evt.text);
+          let allOk = true;
+          for (const chunk of chunks) {
+            const ok = await retrySend(async () => { await sendText(chunk); });
+            if (!ok) allOk = false;
+          }
+          discordDelivery = allOk ? "success" : "failed";
+        } else if (evt.is_error) {
+          // 無文字但標記為錯誤 → 送通用提示
+          await retrySend(async () => { await sendText("⚠️ turn 結束（無回應文字）"); });
+          discordDelivery = "failed";
         } else {
           discordDelivery = "success";
         }

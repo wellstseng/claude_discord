@@ -50,6 +50,8 @@ const PATCH_WHITELIST: string[] = [
   "session.maxHistoryTurns",
   "session.compactAfterTurns",
   "contextEngineering.enabled",
+  "restartNotify.enabled",
+  "restartNotify.showPendingTasks",
 ];
 
 function matchesWhitelist(path: string): boolean {

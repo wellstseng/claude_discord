@@ -90,7 +90,7 @@ interface ToolContext {
 | Tool | 說明 |
 |------|------|
 | `config_get` | 讀取 catclaw.json 設定 |
-| `config_patch` | 修改 catclaw.json 設定 |
+| `config_patch` | 修改 catclaw.json 設定（whitelist 含 restartNotify.enabled / showPendingTasks） |
 
 ### Subagent（standard）
 
@@ -122,7 +122,7 @@ interface ToolContext {
 
 | Tool | 說明 |
 |------|------|
-| `skill` | 執行 builtin skill 指令（LLM 傳入完整指令如 `/cron list`，橋接 SkillContext 執行） |
+| `skill` | 執行 builtin skill 指令（LLM 傳入完整指令如 `/cron list`，橋接 SkillContext 執行）。admin agent（`ctx.isAdmin`）跳過 checkTier，並用 `allowedUserIds[0]` 作為 effectiveAuthorId 讓 skill 內部 isAdmin 檢查通過 |
 
 ### Hook（elevated/standard）
 

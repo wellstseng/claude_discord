@@ -29,6 +29,7 @@ initPlatform(config, catclawDir, distDir, workspaceDir)
   ├── 4.  SafetyGuard              — 安全攔截規則
   ├── 5.  ProviderRegistry         — V2（三層分離）或 V1（舊格式）
   ├── 6.  SessionManager           — per-channel 串行 + 磁碟持久化
+  ├── 6.5 TaskStore 持久化          — initTaskPersistence(wsDir/data/tasks)
   ├── 7.  RegistrationManager      — 帳號註冊 + IdentityLinker
   ├── 8.  ProjectManager           — 專案隔離
   ├── 8.5 OllamaClient             — embedding 用（可選）

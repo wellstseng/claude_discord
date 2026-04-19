@@ -233,6 +233,9 @@ export function createBot(): Client {
     // Task UI：Discord Components v2
     setTaskUiDiscordClient(client);
     registerTaskUiListener((channelId) => `discord:ch:${channelId}`);
+
+    // ── 重啟上線通知 ──
+    void sendRestartNotification(client);
   });
 
   // 按鈕互動處理（exec-approval + task UI）
@@ -257,6 +260,49 @@ export function createBot(): Client {
   });
 
   return client;
+}
+
+// ── 重啟上線通知 ────────────────────────────────────────────────────────────
+
+async function sendRestartNotification(client: Client): Promise<void> {
+  const notify = config.restartNotify;
+  if (notify?.enabled === false) return;
+
+  try {
+    // 決定通知頻道（必須明確設定，不自動廣播所有頻道）
+    const targetChannels = notify?.channels ?? [];
+    if (targetChannels.length === 0) return;
+
+    // 組裝通知訊息
+    const botName = client.user?.displayName ?? client.user?.username ?? "Bot";
+    let text = `✅ **${botName}** 已上線`;
+
+    // 未完成任務摘要
+    if (notify?.showPendingTasks !== false) {
+      try {
+        const { loadAllPersistedTasks } = await import("./core/task-store.js");
+        const allPending = loadAllPersistedTasks();
+        const totalPending = allPending.reduce((sum, s) => sum + s.tasks.length, 0);
+        if (totalPending > 0) {
+          text += `\n📋 有 ${totalPending} 個未完成任務（${allPending.length} 個 session）`;
+        }
+      } catch { /* task store 未初始化 */ }
+    }
+
+    // 發送
+    for (const chId of targetChannels) {
+      try {
+        const ch = await client.channels.fetch(chId);
+        if (ch && "send" in ch) await ch.send(text);
+      } catch (err) {
+        log.debug(`[discord] 上線通知發送失敗 ch=${chId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    log.info(`[discord] 上線通知已送出至 ${targetChannels.length} 個頻道`);
+  } catch (err) {
+    log.warn(`[discord] 上線通知失敗: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 // ── 訊息處理 ────────────────────────────────────────────────────────────────

@@ -53,6 +53,8 @@ const PATCH_WHITELIST = [
   "contextEngineering.strategies.turnSummary.*",
   "contextEngineering.strategies.compaction.*",
   "contextEngineering.strategies.overflowHardStop.*",
+  "restartNotify.enabled",
+  "restartNotify.showPendingTasks",
 ];
 
 function matchesWhitelist(path: string): boolean {

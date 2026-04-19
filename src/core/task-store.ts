@@ -3,10 +3,13 @@
  * @description Per-session task management — 結構化任務追蹤
  *
  * 每個 session（channelId）維護一份任務列表，LLM 可透過 tool 建立、更新、查詢任務。
- * 生命週期跟隨 session，不持久化。
+ * 支援磁碟持久化：未完成任務自動存檔，重啟後可載入。
  */
 
 import { randomUUID } from "node:crypto";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { log } from "../logger.js";
 
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
@@ -25,11 +28,42 @@ export interface Task {
   updatedAt: number;
 }
 
+/** 持久化時的檔案格式 */
+interface TaskStoreDump {
+  sessionKey: string;
+  counter: number;
+  tasks: Task[];
+  savedAt: string;
+}
+
+// ── 持久化目錄 ──────────────────────────────────────────────────────────────
+
+let _persistDir: string | null = null;
+
+/** 初始化持久化目錄（由 platform.ts 呼叫） */
+export function initTaskPersistence(dir: string): void {
+  _persistDir = dir;
+  mkdirSync(dir, { recursive: true });
+}
+
+function persistPath(sessionKey: string): string | null {
+  if (!_persistDir) return null;
+  // sessionKey 可能含 : 或其他特殊字元，用安全檔名
+  const safe = sessionKey.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return join(_persistDir, `tasks_${safe}.json`);
+}
+
 // ── TaskStore ────────────────────────────────────────────────────────────────
 
 export class TaskStore {
   private tasks = new Map<string, Task>();
   private counter = 0;
+  private sessionKey: string;
+  private dirty = false;
+
+  constructor(sessionKey: string = "") {
+    this.sessionKey = sessionKey;
+  }
 
   create(subject: string, description?: string): Task {
     const id = String(++this.counter);
@@ -44,6 +78,7 @@ export class TaskStore {
       updatedAt: Date.now(),
     };
     this.tasks.set(id, task);
+    this.persist();
     return task;
   }
 
@@ -87,15 +122,15 @@ export class TaskStore {
 
     task.updatedAt = Date.now();
 
-    // 刪除
+    // 完成時自動解除 blocks 關聯
     if (updates.status === "completed") {
-      // 自動解除 blocks 關聯（被此任務阻擋的任務移除 blockedBy 中此 id）
       for (const bid of task.blocks) {
         const other = this.tasks.get(bid);
         if (other) other.blockedBy = other.blockedBy.filter(b => b !== id);
       }
     }
 
+    this.persist();
     return task;
   }
 
@@ -111,12 +146,64 @@ export class TaskStore {
       const other = this.tasks.get(bid);
       if (other) other.blocks = other.blocks.filter(b => b !== id);
     }
-    return this.tasks.delete(id);
+    const ok = this.tasks.delete(id);
+    this.persist();
+    return ok;
   }
 
   clear(): void {
     this.tasks.clear();
     this.counter = 0;
+    this.removePersistFile();
+  }
+
+  // ── 持久化 ─────────────────────────────────────────────────────────────────
+
+  /** 將未完成任務存檔 */
+  private persist(): void {
+    const fp = persistPath(this.sessionKey);
+    if (!fp) return;
+
+    const pending = this.list().filter(t => t.status !== "completed");
+    if (pending.length === 0) {
+      this.removePersistFile();
+      return;
+    }
+
+    try {
+      const dump: TaskStoreDump = {
+        sessionKey: this.sessionKey,
+        counter: this.counter,
+        tasks: pending,
+        savedAt: new Date().toISOString(),
+      };
+      writeFileSync(fp, JSON.stringify(dump, null, 2), "utf-8");
+    } catch (err) {
+      log.warn(`[task-store] 持久化失敗 ${this.sessionKey}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private removePersistFile(): void {
+    const fp = persistPath(this.sessionKey);
+    if (!fp) return;
+    try { unlinkSync(fp); } catch { /* 檔案不存在也沒關係 */ }
+  }
+
+  /** 從磁碟載入任務 */
+  loadFromDisk(): void {
+    const fp = persistPath(this.sessionKey);
+    if (!fp || !existsSync(fp)) return;
+
+    try {
+      const raw = JSON.parse(readFileSync(fp, "utf-8")) as TaskStoreDump;
+      this.counter = raw.counter;
+      for (const task of raw.tasks) {
+        this.tasks.set(task.id, task);
+      }
+      log.debug(`[task-store] 已從磁碟載入 ${raw.tasks.length} 個任務 (${this.sessionKey})`);
+    } catch (err) {
+      log.warn(`[task-store] 載入失敗 ${this.sessionKey}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
 
@@ -127,13 +214,16 @@ const stores = new Map<string, TaskStore>();
 export function getTaskStore(sessionKey: string): TaskStore {
   let store = stores.get(sessionKey);
   if (!store) {
-    store = new TaskStore();
+    store = new TaskStore(sessionKey);
+    store.loadFromDisk();
     stores.set(sessionKey, store);
   }
   return store;
 }
 
 export function deleteTaskStore(sessionKey: string): void {
+  const store = stores.get(sessionKey);
+  if (store) store.clear();
   stores.delete(sessionKey);
 }
 
@@ -143,6 +233,31 @@ export function listAllTasks(): Array<{ sessionKey: string; tasks: Task[] }> {
   for (const [key, store] of stores) {
     const tasks = store.list();
     if (tasks.length > 0) result.push({ sessionKey: key, tasks });
+  }
+  return result;
+}
+
+/** 載入所有持久化的未完成任務（重啟時用） */
+export function loadAllPersistedTasks(): Array<{ sessionKey: string; tasks: Task[] }> {
+  if (!_persistDir || !existsSync(_persistDir)) return [];
+
+  const result: Array<{ sessionKey: string; tasks: Task[] }> = [];
+  try {
+    const files = readdirSync(_persistDir).filter(f => f.startsWith("tasks_") && f.endsWith(".json"));
+    for (const file of files) {
+      try {
+        const raw = JSON.parse(readFileSync(join(_persistDir, file), "utf-8")) as TaskStoreDump;
+        const pending = raw.tasks.filter(t => t.status !== "completed");
+        if (pending.length > 0) {
+          result.push({ sessionKey: raw.sessionKey, tasks: pending });
+          // 同時載入到記憶體 store
+          const store = getTaskStore(raw.sessionKey);
+          // getTaskStore 已經會呼叫 loadFromDisk，不需重複載入
+        }
+      } catch { /* 單一檔案損壞不影響其他 */ }
+    }
+  } catch (err) {
+    log.warn(`[task-store] 掃描持久化目錄失敗: ${err instanceof Error ? err.message : String(err)}`);
   }
   return result;
 }

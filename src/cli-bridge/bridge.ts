@@ -115,6 +115,9 @@ export class CliBridge {
           });
         }
       } catch { /* hook 系統未就緒 */ }
+
+      // ── 上線通知 ──
+      void this.sendStartupNotification();
     } catch (err) {
       log.error(`[cli-bridge:${this.label}] start failed: ${err instanceof Error ? err.message : String(err)}`);
       // 進入自動重啟迴路（session ID 衝突等暫態問題可自動恢復）
@@ -460,6 +463,41 @@ export class CliBridge {
 
   getChannelConfig(): CliBridgeChannelConfig {
     return this.channelConfig;
+  }
+
+  // ── 上線通知 ──────────────────────────────────────────────────────────────
+
+  private async sendStartupNotification(): Promise<void> {
+    try {
+      const { config: cfg } = await import("../core/config.js");
+      if (cfg.restartNotify?.enabled === false) return;
+    } catch { /* config 未就緒 */ return; }
+
+    if (!this._sender) return;
+
+    try {
+      let text = `✅ CLI Bridge **${this.label}** 已上線`;
+
+      // 未完成任務摘要
+      try {
+        const { getTaskStore } = await import("../core/task-store.js");
+        const sessionKey = `discord:ch:${this.channelId}`;
+        const store = getTaskStore(sessionKey);
+        const pending = store.list().filter(t => t.status !== "completed");
+        if (pending.length > 0) {
+          text += `\n📋 有 ${pending.length} 個未完成任務：`;
+          for (const t of pending.slice(0, 5)) {
+            text += `\n  • [${t.status}] ${t.subject}`;
+          }
+          if (pending.length > 5) text += `\n  …還有 ${pending.length - 5} 個`;
+        }
+      } catch { /* task store 未初始化 */ }
+
+      await this._sender.send(text);
+      log.debug(`[cli-bridge:${this.label}] 上線通知已送出`);
+    } catch (err) {
+      log.debug(`[cli-bridge:${this.label}] 上線通知失敗: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   getBridgeConfig(): CliBridgeConfig {

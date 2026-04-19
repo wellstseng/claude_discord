@@ -308,6 +308,13 @@
     "enabled": false
   },
 
+  // ── 重啟上線通知 ─────────────────────────────────────────────────
+  // "restartNotify": {
+  //   "enabled": true,
+  //   "channels": ["頻道ID"],  // 必須明確指定，不設 = 不通知
+  //   "showPendingTasks": true
+  // },
+
   // ── MCP Servers（CatClaw 內建 MCP server 設定）──────────────────
   // "mcpServers": {
   //   "catclaw-discord": {

@@ -49,28 +49,37 @@ export const tool: Tool = {
 
     const { skill, args } = match;
 
-    // 權限檢查
-    try {
-      const { isPlatformReady } = await import("../../core/platform.js");
-      if (isPlatformReady()) {
-        const { getPlatformPermissionGate } = await import("../../core/platform.js");
-        const tierCheck = getPlatformPermissionGate().checkTier(ctx.accountId, skill.tier);
-        if (!tierCheck.allowed) {
-          return { error: `權限不足：${tierCheck.reason ?? "tier 限制"}` };
+    // 權限檢查（admin agent 跳過 tier 檢查——tool registry 已驗證 tool tier）
+    if (!ctx.isAdmin) {
+      try {
+        const { isPlatformReady } = await import("../../core/platform.js");
+        if (isPlatformReady()) {
+          const { getPlatformPermissionGate } = await import("../../core/platform.js");
+          const tierCheck = getPlatformPermissionGate().checkTier(ctx.accountId, skill.tier);
+          if (!tierCheck.allowed) {
+            return { error: `權限不足：${tierCheck.reason ?? "tier 限制"}` };
+          }
         }
+      } catch {
+        // platform 未就緒，跳過權限檢查
       }
-    } catch {
-      // platform 未就緒，跳過權限檢查
     }
 
     // 建構 SkillContext（無 Discord Message）
     const { getBootAgentId } = await import("../../core/agent-loader.js");
     const { config } = await import("../../core/config.js");
 
+    // 若 agent 是 admin（config.json admin flag），authorId 用 allowedUserIds[0]
+    // 讓 skill 內部的 isAdmin() 檢查通過
+    const adminIds = (config.admin as { allowedUserIds?: string[] } | undefined)?.allowedUserIds ?? [];
+    const effectiveAuthorId = ctx.isAdmin && adminIds.length > 0
+      ? adminIds[0]!
+      : ctx.accountId;
+
     const skillCtx = {
       args,
       channelId: ctx.channelId,
-      authorId: ctx.accountId,
+      authorId: effectiveAuthorId,
       accountId: ctx.accountId,
       agentId: ctx.agentId ?? getBootAgentId(),
       config,

@@ -154,6 +154,12 @@ export async function initPlatform(
   renameSessions({ persistDir: sessionPersistDir, platform: "discord" });
   await _sessionManager.init();
 
+  // ── 6.5 Task Store 持久化 ──────────────────────────────────────────────────
+  {
+    const { initTaskPersistence } = await import("./task-store.js");
+    initTaskPersistence(join(wsDir, "data", "tasks"));
+  }
+
   // ── 7. Registration + Identity Linker ─────────────────────────────────────
   initRegistrationManager(catclawDir, _accountRegistry);
   initIdentityLinker(_accountRegistry);

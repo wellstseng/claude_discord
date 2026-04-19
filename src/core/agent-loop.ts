@@ -1290,7 +1290,7 @@ export async function* agentLoop(
 
         const batchResults = await Promise.all(spawnCalls.map(async (call): Promise<SpawnBatchResult> => {
           const params = call.params as Record<string, unknown>;
-          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth, parentRunId: opts.parentRunId, traceId: trace?.traceId, agentId: opts.agentId };
+          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth, parentRunId: opts.parentRunId, traceId: trace?.traceId, agentId: opts.agentId, isAdmin: opts.isAdmin };
           const events: SpawnEvent[] = [];
           const hookResult = await runBeforeToolCall(
             { id: call.id, name: call.name, params },
@@ -1368,7 +1368,7 @@ export async function* agentLoop(
         };
         const batchResults = await Promise.all(concurrentCalls.map(async (call): Promise<BatchResult> => {
           const params = call.params as Record<string, unknown>;
-          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth, parentRunId: opts.parentRunId, traceId: trace?.traceId, agentId: opts.agentId };
+          const toolCtx: ToolContext = { accountId, projectId, sessionId: sessionKey, channelId, eventBus, spawnDepth, parentRunId: opts.parentRunId, traceId: trace?.traceId, agentId: opts.agentId, isAdmin: opts.isAdmin };
           const events: AgentLoopEvent[] = [];
 
           const hookResult = await runBeforeToolCall(
@@ -1442,6 +1442,7 @@ export async function* agentLoop(
           parentRunId: opts.parentRunId,
           traceId: trace?.traceId,
           agentId: opts.agentId,
+          isAdmin: opts.isAdmin,
         };
 
         // before_tool_call

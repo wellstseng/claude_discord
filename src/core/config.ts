@@ -728,6 +728,17 @@ export interface BridgeConfig {
    */
   /** Bot-to-Bot 對話防呆（circuit breaker） */
   botCircuitBreaker?: BotCircuitBreakerConfig;
+  /** 重啟上線通知設定 */
+  restartNotify?: RestartNotifyConfig;
+}
+
+export interface RestartNotifyConfig {
+  /** 是否啟用（預設 true） */
+  enabled?: boolean;
+  /** 通知的 Discord 頻道 ID 清單（空 = 所有已 allow 的頻道都通知） */
+  channels?: string[];
+  /** 是否包含未完成任務摘要（預設 true） */
+  showPendingTasks?: boolean;
 }
 
 export interface BotCircuitBreakerConfig {

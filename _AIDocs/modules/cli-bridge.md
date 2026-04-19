@@ -70,6 +70,8 @@
 | 跨頻道上下文注入 | `index.ts` `handleIndependentBotMessage()` + `consumeBridgeInboundHistory(bridge, channelId)` | 跨頻道 mention 時消費來源頻道的 inbound history（scope=`bridge:{label}`），統一走 inbound 機制而非 Discord API fetch。消費即清除，不重複注入 |
 | rate limit 保護 | `reply.ts` `editIntervalMs` + `lastEditTime` 計數器 | `cliBridge.editIntervalMs` 可設定（預設 800ms），防止 Discord API rate limit |
 | 長訊息分段 | `reply.ts` `splitForDiscord()` | 串流溢出 / 最終 flush 超過 Discord 2000 字上限時自動切段（優先換行切、跨段 fence 補 open/close），避免 `.slice(0, TEXT_LIMIT)` 靜默截斷 |
+| result fallback 文字 | `reply.ts` result handler | buffer 為空但 `result.text` 有值時送出該文字（常見於 permission deny 後 CLI 直接結束 turn）；`is_error` 且無文字時送 `⚠️ turn 結束（無回應文字）` |
+| 上線通知 | `bridge.ts` `sendStartupNotification()` | Bridge start 完成後通知綁定頻道，附帶該 session 未完成任務摘要 |
 | Dashboard 監控 | `dashboard.ts` UI + `_cbAutoRefresh` | 10s 自動刷新狀態、SSE 即時串流、匯出按鈕、刷新按鈕 |
 | `/cd` 工作目錄切換 | `slash.ts` `handleCd()` + `index.ts` `rebuildBridgeForChannel()` | Slash command 切換 bridge cwd，原子重建路徑統一關舊建新，持久化到 `cli-bridges.json` |
 | `/session new/set` | `slash.ts` `handleSession()` + `index.ts` `rebuildBridgeForChannel()` | 改寫 channelConfig.sessionId 後走原子重建，讓新 process 以正確的 `--resume` 啟動 |
