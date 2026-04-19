@@ -412,6 +412,10 @@ const PUBLIC_COMMANDS = new Set(["help"]);
 
 // ── 主要入口：綁定 interactionCreate 事件 ───────────────────────────────────
 
+/** 已處理過的 interaction ID（防止多 client 重複處理同一 interaction） */
+const _handledInteractions = new Set<string>();
+const INTERACTION_TTL_MS = 30_000;
+
 /**
  * 綁定 slash command 事件到 Discord client
  * @param client Discord Client（已登入）
@@ -419,6 +423,14 @@ const PUBLIC_COMMANDS = new Set(["help"]);
 export function setupSlashCommands(client: Client): void {
   client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
+
+    // 去重：多個 client 可能同時收到同一 interaction
+    if (_handledInteractions.has(interaction.id)) {
+      log.debug(`[slash] interaction ${interaction.id} 已由另一個 client 處理，跳過`);
+      return;
+    }
+    _handledInteractions.add(interaction.id);
+    setTimeout(() => _handledInteractions.delete(interaction.id), INTERACTION_TTL_MS);
 
     const { commandName, user } = interaction;
 
@@ -463,10 +475,14 @@ export function setupSlashCommands(client: Client): void {
     } catch (err) {
       log.error(`[slash] /${commandName} 執行失敗：${err}`);
       const msg = err instanceof Error ? err.message : String(err);
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: `❌ 執行失敗：${msg}`, ephemeral: true });
-      } else {
-        await interaction.reply({ content: `❌ 執行失敗：${msg}`, ephemeral: true });
+      try {
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({ content: `❌ 執行失敗：${msg}`, ephemeral: true });
+        } else {
+          await interaction.reply({ content: `❌ 執行失敗：${msg}`, ephemeral: true });
+        }
+      } catch (replyErr) {
+        log.warn(`[slash] /${commandName} 錯誤回覆也失敗：${replyErr instanceof Error ? replyErr.message : String(replyErr)}`);
       }
     }
   });

@@ -632,29 +632,30 @@ async function handleMessage(
         try {
           const sender = cliBridge.getSender();
           if (sender.mode === "independent-bot") {
-            // 獨立 bot 模式 → 主 bot 不代為路由（獨立 bot 自己監聽）
-            log.debug(`[discord] CLI Bridge ${cliBridge.label} 是 independent-bot，主 bot 跳過路由`);
-            // fall through to agent loop
-          } else {
-            // main-bot fallback 模式 → 主 bot 代為路由
-            const chCfg = cliBridge.getChannelConfig();
-            const needsMention = chCfg.requireMention;
-            const botUserId = sender.getBotUserId();
-            const isMentioned = botUserId ? firstMessage.mentions.has(botUserId) : true;
+            // 獨立 bot 模式：頻道已綁定 CliBridge，由獨立 Client 自行監聽處理。
+            // 主 bot 一律跳過 AgentLoop，避免同 token 雙 Client 雙路由導致主 bot
+            // 用無記憶的 AgentLoop 回覆蓋掉 CliBridge 的上下文。
+            log.debug(`[discord] CLI Bridge ${cliBridge.label} 是 independent-bot，頻道已綁定，跳過 AgentLoop`);
+            return;
+          }
+          // main-bot fallback 模式 → 主 bot 代為路由
+          const chCfg = cliBridge.getChannelConfig();
+          const needsMention = chCfg.requireMention;
+          const botUserId = sender.getBotUserId();
+          const isMentioned = botUserId ? firstMessage.mentions.has(botUserId) : true;
 
-            if (!needsMention || isMentioned) {
-              await cliBridge.ensureAlive();
-              const { handleCliBridgeReply, extractAttachments } = await import("./cli-bridge/reply.js");
-              const { consumeBridgeInboundHistory } = await import("./cli-bridge/index.js");
-              const { text: attachmentText, imageBlocks } = await extractAttachments(firstMessage);
-              let fullText = combinedText + attachmentText;
-              // 消費 inbound history（bridge scope）
-              const inboundCtx = await consumeBridgeInboundHistory(cliBridge);
-              if (inboundCtx) fullText = inboundCtx + "\n\n---\n" + fullText;
-              log.info(`[discord] CLI Bridge 路由：${cliBridge.label} channel=${firstMessage.channelId}${attachmentText ? " +attachments" : ""}${imageBlocks.length ? ` +${imageBlocks.length}image` : ""}${inboundCtx ? " +inbound" : ""}`);
-              void handleCliBridgeReply(cliBridge, fullText, firstMessage, config, cliBridge.getBridgeConfig(), imageBlocks);
-              return;
-            }
+          if (!needsMention || isMentioned) {
+            await cliBridge.ensureAlive();
+            const { handleCliBridgeReply, extractAttachments } = await import("./cli-bridge/reply.js");
+            const { consumeBridgeInboundHistory } = await import("./cli-bridge/index.js");
+            const { text: attachmentText, imageBlocks } = await extractAttachments(firstMessage);
+            let fullText = combinedText + attachmentText;
+            // 消費 inbound history（bridge scope）
+            const inboundCtx = await consumeBridgeInboundHistory(cliBridge);
+            if (inboundCtx) fullText = inboundCtx + "\n\n---\n" + fullText;
+            log.info(`[discord] CLI Bridge 路由：${cliBridge.label} channel=${firstMessage.channelId}${attachmentText ? " +attachments" : ""}${imageBlocks.length ? ` +${imageBlocks.length}image` : ""}${inboundCtx ? " +inbound" : ""}`);
+            void handleCliBridgeReply(cliBridge, fullText, firstMessage, config, cliBridge.getBridgeConfig(), imageBlocks);
+            return;
           }
         } catch {
           // sender 未初始化 → 跳過 CLI Bridge 路由
