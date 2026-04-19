@@ -97,7 +97,7 @@ export async function handleAgentLoopReply(
   bridgeConfig: BridgeConfig,
   opts?: { threadChannel?: SendableChannels },
 ): Promise<void> {
-  let buffer = "";
+  let buffer = "";          // chunk 模式累積（streaming 模式不再使用，改 segmentBuffer）
   let totalText = "";
   let fileMode = false;
   let isFirst = true;
@@ -110,18 +110,23 @@ export async function handleAgentLoopReply(
   const threadChannel = opts?.threadChannel;
   const useStreamEdit = (bridgeConfig.streamingReply !== false);
 
-  // ── Streaming edit 狀態 ───────────────────────────────────────────────────
-  let editMsg: Message | null = null;   // 目前正在被 live-edit 的訊息
+  // ── Streaming edit 狀態（rolling progress msg 模式） ──────────────────────
+  // progressMsg：此 turn 唯一的 live-edit 目標訊息
+  // segmentBuffer：當前 segment（兩個 tool_use 之間）累積的 text
+  // pendingSegmentReset：tool_start 後置 true → 下一個 text_delta 觸發覆寫（不 append）
+  let progressMsg: Message | null = null;
+  let segmentBuffer = "";
+  let pendingSegmentReset = false;
   let editTimer: ReturnType<typeof setTimeout> | null = null;
-  let editBusy = false;  // 正在 await edit，避免重疊
+  let editBusy = false;
 
   async function doEdit(): Promise<void> {
-    if (!editMsg || !buffer.trim() || editBusy) return;
-    const content = closeFenceIfOpen(buffer);
+    if (!progressMsg || !segmentBuffer.trim() || editBusy) return;
+    const content = closeFenceIfOpen(segmentBuffer);
     const safeContent = content.length > TEXT_LIMIT ? content.slice(0, TEXT_LIMIT - 3) + "…" : content;
     try {
       editBusy = true;
-      await editMsg.edit(safeContent);
+      await progressMsg.edit(safeContent);
     } catch { /* rate-limited 或訊息被刪，靜默 */ }
     finally { editBusy = false; }
   }
@@ -147,8 +152,8 @@ export async function handleAgentLoopReply(
     }
   }
 
-  /** 建立新的 edit 目標訊息（並立刻把 buffer 寫入） */
-  async function initEditMsg(initialContent = "💭"): Promise<void> {
+  /** 建立新的 progress 訊息（"💭" placeholder）— 一個 turn 通常只呼叫一次 */
+  async function initProgressMsg(initialContent = "💭"): Promise<void> {
     try {
       let msg: Message;
       if (threadChannel) {
@@ -160,9 +165,9 @@ export async function handleAgentLoopReply(
       } else {
         msg = await (originalMessage.channel as SendableChannels).send(initialContent);
       }
-      editMsg = msg;
+      progressMsg = msg;
     } catch (err) {
-      log.debug(`[reply-handler] initEditMsg 失敗：${err instanceof Error ? err.message : String(err)}`);
+      log.debug(`[reply-handler] initProgressMsg 失敗：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -238,29 +243,36 @@ export async function handleAgentLoopReply(
     thinkingBuffer = "";
   }
 
-  // ── Streaming edit：文字累積後 live-edit ────────────────────────────────
+  // ── Streaming edit：rolling progress msg（每 segment 覆寫前段） ─────────
   const STREAM_SPLIT_THRESHOLD = TEXT_LIMIT - 100; // 1900
 
   async function streamEditTextDelta(text: string): Promise<void> {
-    buffer += text;
-
-    // 切分：每超過上限就 emit 一段，剩餘留在 buffer 給下一條訊息
-    // 用 while 處理單次 delta 就超過 threshold 數倍的情況（LLM 一口氣丟 5K 字）
-    while (buffer.length >= STREAM_SPLIT_THRESHOLD) {
-      cancelEditTimer();
-      await waitEditDone();
-      if (!editMsg) await initEditMsg("💭");
-      const firstChunk = buffer.slice(0, STREAM_SPLIT_THRESHOLD);
-      const remainder = buffer.slice(STREAM_SPLIT_THRESHOLD);
-      buffer = firstChunk;       // doEdit 用這段內容
-      await doEdit();
-      editMsg = null;            // 下次 initEditMsg 時建新訊息
-      buffer = remainder;        // 保留剩餘，避免內容遺失
+    // 新 segment 第一個 delta：覆寫 segmentBuffer（替換前段內容）
+    if (pendingSegmentReset) {
+      segmentBuffer = text;
+      pendingSegmentReset = false;
+    } else {
+      segmentBuffer += text;
     }
 
-    // 殘餘 buffer 仍有內容 → 確保有 editMsg 並排程
-    if (buffer.length > 0) {
-      if (!editMsg) await initEditMsg("💭");
+    // 確保 progressMsg 存在（首個 text_delta 才建）
+    if (!progressMsg) await initProgressMsg("💭");
+
+    // 單一 segment 超過 1900 → 切到下一條 progressMsg 保留 remainder
+    // 預設 fileUploadThreshold=3000 通常會在這之前先觸發 fileMode；只有 1900~3000 才會進這裡
+    while (segmentBuffer.length >= STREAM_SPLIT_THRESHOLD) {
+      cancelEditTimer();
+      await waitEditDone();
+      const firstChunk = segmentBuffer.slice(0, STREAM_SPLIT_THRESHOLD);
+      const remainder = segmentBuffer.slice(STREAM_SPLIT_THRESHOLD);
+      segmentBuffer = firstChunk;
+      await doEdit();
+      progressMsg = null;
+      await initProgressMsg("💭");
+      segmentBuffer = remainder;
+    }
+
+    if (segmentBuffer.length > 0) {
       scheduleEdit();
     }
   }
@@ -268,11 +280,9 @@ export async function handleAgentLoopReply(
   async function finalizeStreamEdit(): Promise<void> {
     cancelEditTimer();
     await waitEditDone();
-    if (buffer.trim()) {
+    if (segmentBuffer.trim()) {
       await doEdit();
     }
-    editMsg = null;
-    buffer = "";
   }
 
   // ── 主事件迴圈 ───────────────────────────────────────────────────────────
@@ -298,11 +308,12 @@ export async function handleAgentLoopReply(
           fileMode = true;
           if (useStreamEdit) {
             cancelEditTimer();
-            await finalizeStreamEdit();
+            await finalizeStreamEdit();  // 把最後 segment 寫入 progressMsg 當預覽
+            segmentBuffer = "";
           } else {
             cancelFlushTimer();
+            buffer = "";
           }
-          buffer = "";
           continue;
         }
 
@@ -319,31 +330,33 @@ export async function handleAgentLoopReply(
         }
 
       } else if (event.type === "tool_start") {
+        // streaming 模式：finalize 寫入最後 segment 到 progressMsg；
+        // pendingSegmentReset 讓下個 text_delta 覆寫 segmentBuffer 而非 append
         if (toolMode === "all") {
-          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); }
+          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); pendingSegmentReset = true; }
           else { cancelFlushTimer(); if (!fileMode) await flush(true); }
           await send(`🔧 使用工具：${event.name}`);
           if (isFirst) stopTyping();
           isFirst = false;
-          editMsg = null; // 重置，下次文字重新起始
         } else if (toolMode === "summary" && !summaryHintSent) {
-          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); }
+          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); pendingSegmentReset = true; }
           else { cancelFlushTimer(); if (!fileMode) await flush(true); }
           await send("⏳ 處理中...");
           if (isFirst) stopTyping();
           isFirst = false;
           summaryHintSent = true;
-          editMsg = null;
+        } else if (toolMode === "summary") {
+          // summary 模式後續 tool：靜默切下一段，progressMsg 保留前段內容直到下個 text_delta 覆寫
+          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); pendingSegmentReset = true; }
         }
 
       } else if (event.type === "tool_blocked") {
         if (toolMode !== "none") {
-          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); }
+          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); pendingSegmentReset = true; }
           else { cancelFlushTimer(); if (!fileMode) await flush(true); }
           await send(`🚫 工具被阻擋：${event.name} — ${event.reason}`);
           if (isFirst) stopTyping();
           isFirst = false;
-          editMsg = null;
         }
 
       } else if (event.type === "done") {
@@ -354,29 +367,45 @@ export async function handleAgentLoopReply(
         // Fallback：LLM 回傳空字串時，送出預設訊息避免使用者完全收不到回覆
         if (!totalText.trim()) {
           totalText = "（抱歉，我暫時無法回覆這條訊息。請再試一次或換個方式描述。）";
-          buffer = totalText;
+          if (useStreamEdit) segmentBuffer = totalText;
+          else buffer = totalText;
           log.warn(`[reply-handler] LLM 回傳空字串，使用 fallback 回覆`);
         }
 
         const { text: cleanedText, mediaPaths } = extractMediaTokens(totalText);
 
-        if (fileMode && mediaPaths.length === 0) {
-          const preview = cleanedText.slice(0, 150).replace(/\n/g, " ") + "...";
-          if (threadChannel) {
-            const attachment = new AttachmentBuilder(Buffer.from(cleanedText, "utf-8"), { name: "response.md" });
-            await threadChannel.send({ content: preview ?? undefined, files: [attachment] });
+        if (useStreamEdit) {
+          if (fileMode) {
+            // fileMode：完整 transcript 上傳；progressMsg 標示已歸檔
+            const preview = cleanedText.slice(0, 150).replace(/\n/g, " ") + "...";
+            if (threadChannel) {
+              const attachment = new AttachmentBuilder(Buffer.from(cleanedText, "utf-8"), { name: "response.md" });
+              await threadChannel.send({ content: preview, files: [attachment] });
+            } else {
+              await sendFile(cleanedText, "response.md", originalMessage, isFirst, preview);
+            }
+            isFirst = false;
+            if (progressMsg !== null) {
+              try { await (progressMsg as Message).edit("📎 完整回覆已上傳（見附件）"); } catch { /* 靜默 */ }
+            }
           } else {
-            await sendFile(cleanedText, "response.md", originalMessage, isFirst, preview);
-          }
-          isFirst = false;
-        } else {
-          if (useStreamEdit) {
-            // 串流模式：buffer 已是完整文字，做最終 edit
-            if (fileMode) buffer = cleanedText;
-            else { const { text: cb } = extractMediaTokens(buffer); buffer = cb; }
+            // 非 fileMode：清 segmentBuffer 中 MEDIA token，最終 edit progressMsg
+            const { text: cleanSeg } = extractMediaTokens(segmentBuffer);
+            segmentBuffer = cleanSeg;
             await waitEditDone();
             await doEdit();
-            editMsg = null; buffer = "";
+          }
+        } else {
+          // chunk 模式：維持原邏輯
+          if (fileMode && mediaPaths.length === 0) {
+            const preview = cleanedText.slice(0, 150).replace(/\n/g, " ") + "...";
+            if (threadChannel) {
+              const attachment = new AttachmentBuilder(Buffer.from(cleanedText, "utf-8"), { name: "response.md" });
+              await threadChannel.send({ content: preview, files: [attachment] });
+            } else {
+              await sendFile(cleanedText, "response.md", originalMessage, isFirst, preview);
+            }
+            isFirst = false;
           } else {
             if (fileMode) buffer = cleanedText;
             else { const { text: cb } = extractMediaTokens(buffer); buffer = cb; }
@@ -428,10 +457,10 @@ export async function handleAgentLoopReply(
         if (useStreamEdit) {
           cancelEditTimer();
           await waitEditDone();
-          // 若有空白 placeholder（editMsg 存在但 buffer 空），直接 edit 為錯誤訊息
-          if (editMsg !== null && !buffer.trim()) {
-            try { await (editMsg as Message).edit(errorMsg); } catch { /* 靜默 */ }
-            editMsg = null; buffer = "";
+          // 若 progressMsg 還是空白 placeholder（無實質 segment 內容），直接 edit 為錯誤訊息
+          if (progressMsg !== null && !segmentBuffer.trim()) {
+            try { await (progressMsg as Message).edit(errorMsg); } catch { /* 靜默 */ }
+            progressMsg = null; segmentBuffer = "";
           } else {
             await finalizeStreamEdit();
             await send(errorMsg);

@@ -35,7 +35,7 @@ export 所有型別定義（包括 cron.ts 使用的 `CronSchedule` / `CronActio
 | `showToolCalls` | `"all" \| "summary" \| "none"` | `"all"` | — | 工具呼叫顯示模式 |
 | `showThinking` | `boolean` | `false` | — | 是否顯示 Claude 推理過程 |
 | `debounceMs` | `number` | `500` | — | 訊息合併等待毫秒 |
-| `fileUploadThreshold` | `number` | `4000` | — | 超過此字數上傳 .md，0=停用 |
+| `fileUploadThreshold` | `number` | `3000` | — | 超過此字數上傳 .md，0=停用 |
 | `streamingReply` | `boolean` | `true` | — | 串流 live-edit 回覆模式（false=chunk） |
 | `logLevel` | `LogLevel` | `"info"` | — | Log 層級 |
 | `cron` | `CronConfig` | — | — | 排程設定（含 `defaultAccountId` / `defaultProvider` / `defaultAgentId`） |

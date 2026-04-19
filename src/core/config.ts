@@ -1269,7 +1269,7 @@ function loadConfig(): BridgeConfig {
     showToolCalls: parseShowToolCalls(raw.showToolCalls),
     showThinking: raw.showThinking ?? false,
     debounceMs: raw.debounceMs ?? 500,
-    fileUploadThreshold: raw.fileUploadThreshold ?? 4000,
+    fileUploadThreshold: raw.fileUploadThreshold ?? 3000,
     streamingReply: raw.streamingReply ?? true,
     logLevel,
     cron: {
