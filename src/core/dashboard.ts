@@ -2281,11 +2281,33 @@ function _traceRowHtml(t) {
     }
     ceTooltip = tipLines.join('\\n');
   }
+  // 錯誤/異常偵測
+  let errorBadge = '';
+  const toolErrors = [];
+  if (t.llmCalls) {
+    for (const lc of t.llmCalls) {
+      if (lc.toolCalls) {
+        for (const tc of lc.toolCalls) {
+          if (tc.error) toolErrors.push(tc.name + ': ' + tc.error);
+        }
+      }
+    }
+  }
+  if (t.error || t.status === 'error' || toolErrors.length > 0) {
+    const parts = [];
+    if (t.error) parts.push('Trace: ' + t.error);
+    parts.push(...toolErrors);
+    const tooltip = parts.join('\\n').replace(/"/g, '&quot;');
+    const count = (t.error ? 1 : 0) + toolErrors.length;
+    errorBadge = '<span title="' + tooltip + '" style="background:#dc2626;color:#fff;font-size:0.65rem;padding:1px 4px;border-radius:3px;cursor:help">⚠ ' + count + '</span>';
+  }
+
   const prev = (t.inbound?.textPreview ?? '').slice(0, 40);
   const cost = t.estimatedCostUsd ? '$' + t.estimatedCostUsd.toFixed(4) : '-';
   const ctxIcon = t.hasContextSnapshot ? '<span title="有 Context Snapshot，點擊查看" style="cursor:pointer">📋</span>' : '';
   const liveStyle = isLive ? 'background:rgba(255,200,0,0.08);' : '';
-  let html = '<tr data-trace-id="' + t.traceId + '" style="border-bottom:1px solid var(--border);cursor:pointer;' + liveStyle + '" onclick="showTraceDetail(\\'' + t.traceId + '\\')">';
+  const errorStyle = errorBadge ? 'background:rgba(220,38,38,0.06);' : '';
+  let html = '<tr data-trace-id="' + t.traceId + '" style="border-bottom:1px solid var(--border);cursor:pointer;' + liveStyle + errorStyle + '" onclick="showTraceDetail(\\'' + t.traceId + '\\')">';
   html += '<td style="padding:4px;color:var(--fg2)">' + ts + '</td>';
   const agentBadge = t.agentId ? ' <span style="background:#7c3aed;color:#fff;font-size:0.6rem;padding:0 3px;border-radius:3px">' + t.agentId + '</span>' : '';
   html += '<td style="padding:4px">…' + ch + agentBadge + '</td>';
@@ -2297,6 +2319,7 @@ function _traceRowHtml(t) {
   html += '<td style="padding:4px;text-align:right">' + (t.llmCalls?.length ?? 0) + '</td>';
   html += '<td style="padding:4px;text-align:center"' + (ceTooltip ? ' title="' + ceTooltip.replace(/"/g, '&quot;') + '"' : '') + '>' + ce + '</td>';
   html += '<td style="padding:4px;text-align:center">' + statusIcon + '</td>';
+  html += '<td style="padding:4px;text-align:center">' + errorBadge + '</td>';
   html += '<td style="padding:4px;text-align:right;color:var(--warn)">' + cost + '</td>';
   html += '<td style="padding:4px;text-align:center">' + ctxIcon + '</td>';
   html += '<td style="padding:4px;color:var(--fg2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + prev + '</td>';
@@ -2317,6 +2340,7 @@ const _traceTableHeader = (() => {
   h += '<th style="text-align:right;padding:4px">' + tip('LLM', 'LLM 來回呼叫次數（含 tool use 迴圈）') + '</th>';
   h += '<th style="text-align:center;padding:4px">' + tip('CE', 'Context Engineering 策略（compaction 等）') + '</th>';
   h += '<th style="text-align:center;padding:4px">Status</th>';
+  h += '<th style="text-align:center;padding:4px">' + tip('Err', '工具執行錯誤或 trace 異常數量') + '</th>';
   h += '<th style="text-align:right;padding:4px">' + tip('Cost', '預估 API 費用（USD）') + '</th>';
   h += '<th style="text-align:center;padding:4px">' + tip('Ctx', '有完整 Context Snapshot（system prompt + messages）') + '</th>';
   h += '<th style="text-align:left;padding:4px">Preview</th>';

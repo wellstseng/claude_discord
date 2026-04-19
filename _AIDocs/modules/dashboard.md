@@ -1,7 +1,7 @@
 # modules/dashboard — Web Dashboard + REST API
 
-> 檔案：`src/core/dashboard.ts` (~5449 行)
-> 更新日期：2026-04-16
+> 檔案：`src/core/dashboard.ts` (~5500 行)
+> 更新日期：2026-04-19
 
 ## 職責
 
@@ -27,7 +27,7 @@ Bearer token 認證（可選）：
 |------|------|
 | 概覽 | 狀態總覽、provider 狀態、uptime |
 | Sessions | Session 列表 + 操作（Clear/Compact/Delete/Purge） |
-| Traces | Message Lifecycle Trace 列表 + 詳情（支援 agentId 篩選） |
+| Traces | Message Lifecycle Trace 列表 + 詳情（支援 agentId 篩選、Err 欄位顯示 tool/trace 錯誤、Trace ID 雙擊複製、單筆匯出 Markdown） |
 | Subagents | 子 agent 列表 + Kill（含 agentId badge） |
 | Tasks | 任務管理面板 |
 | Cron | 排程 job 管理 |
@@ -63,6 +63,7 @@ Bearer token 認證（可選）：
 |------|------|------|
 | `/api/traces` | GET | Trace 列表（`?limit=N&sessionKey=xxx`） |
 | `/api/traces/:id` | GET | 單筆 trace 詳情 |
+| `/api/traces/:id/export` | GET | 匯出單筆 trace 為 Markdown（Content-Disposition: attachment） |
 | `/api/traces/:id/context` | GET | Context snapshot（lazy-load） |
 
 ### Inbound History
@@ -170,6 +171,7 @@ Bearer token 認證（可選）：
 | `/api/cli-bridge/:label/resend/:turnId` | POST | 重送失敗的 turn（用原始 userInput） |
 | `/api/cli-bridge/:label/stream` | GET | SSE 即時串流（init 送最近 50 筆，後續即時推送） |
 | `/api/cli-bridge/:label/export` | GET | 匯出 turn 歷程為 Markdown（Content-Disposition: attachment） |
+| `/api/cli-bridge/:label` | DELETE | 關閉 bridge 並從 cli-bridges.json 移除設定 |
 
 ### Logs
 

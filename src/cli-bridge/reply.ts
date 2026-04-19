@@ -42,6 +42,21 @@ const SUPPORTED_IMAGE_TYPES: Record<string, StdinImageBlock["source"]["media_typ
 };
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // Anthropic API 單張上限 5MB
 
+/** 從 binary magic bytes 偵測真實圖片格式（Discord contentType 不可靠） */
+function detectImageMediaType(buf: Buffer): StdinImageBlock["source"]["media_type"] | null {
+  if (buf.length < 4) return null;
+  // PNG: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return "image/png";
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return "image/jpeg";
+  // GIF: 47 49 46 (GIF)
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return "image/gif";
+  // WebP: RIFF....WEBP
+  if (buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46
+    && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return "image/webp";
+  return null;
+}
+
 const TEXT_LIMIT = 2000;
 const RETRY_DELAYS = [1000, 2000, 4000];
 
@@ -141,9 +156,14 @@ export async function extractAttachments(msg: Message): Promise<{ text: string; 
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const buf = Buffer.from(await resp.arrayBuffer());
         if (buf.length > MAX_IMAGE_BYTES) throw new Error(`下載後超過 ${MAX_IMAGE_BYTES} bytes`);
+        // 用 magic bytes 偵測真實格式（Discord contentType 可能不正確，例如 webp 實為 png）
+        const actualType = detectImageMediaType(buf) ?? mediaType;
+        if (actualType !== mediaType) {
+          log.info(`[cli-bridge-reply] 圖片格式校正：Discord 報 ${ct} → 實際 ${actualType}（${att.name}）`);
+        }
         imageBlocks.push({
           type: "image",
-          source: { type: "base64", media_type: mediaType, data: buf.toString("base64") },
+          source: { type: "base64", media_type: actualType, data: buf.toString("base64") },
         });
         textParts.push(`${descPrefix} 已以 inline image 附上]`);
         continue;
