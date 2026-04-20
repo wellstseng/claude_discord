@@ -147,7 +147,7 @@ function flattenContentBlocks(blocks: ContentBlock[]): string {
         parts.push(`<tool_call id="${b.id}" name="${b.name}">\n${JSON.stringify(b.input)}\n</tool_call>`);
         break;
       case "tool_result":
-        parts.push(`<tool_result id="${b.tool_use_id}"${b.is_error ? ' is_error="true"' : ''}>\n${b.content}\n</tool_result>`);
+        parts.push(`<tool_result id="${b.tool_use_id}"${b.is_error ? ' is_error="true"' : ''}>\n${typeof b.content === "string" ? b.content : JSON.stringify(b.content)}\n</tool_result>`);
         break;
       case "image":       parts.push("[Image]"); break;
     }

@@ -218,7 +218,7 @@ function convertMessages(messages: Message[], systemPrompt?: string): OpenAIMess
       } else if (block.type === "tool_result") {
         result.push({
           role: "tool",
-          content: block.content,
+          content: typeof block.content === "string" ? block.content : JSON.stringify(block.content),
           tool_call_id: block.tool_use_id,
         });
       }

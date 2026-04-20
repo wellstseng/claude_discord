@@ -199,17 +199,39 @@ export class McpClient {
   }
 
   async call(toolName: string, args: Record<string, unknown>): Promise<string> {
+    const result = await this.callRich(toolName, args);
+    return result.text;
+  }
+
+  /**
+   * 呼叫 MCP tool，回傳 rich content（含圖片 blocks）。
+   * 若有 image content，contentBlocks 會包含 { type: "image", data, mimeType }。
+   */
+  async callRich(toolName: string, args: Record<string, unknown>): Promise<{
+    text: string;
+    contentBlocks?: Array<{ type: string; [key: string]: unknown }>;
+    isError: boolean;
+  }> {
     if (!this.ready) throw new Error(`MCP server ${this.serverName} 尚未就緒`);
     const res = await this._call("tools/call", { name: toolName, arguments: args }) as {
-      content?: Array<{ type: string; text?: string }>;
+      content?: Array<{ type: string; text?: string; data?: string; mimeType?: string; [k: string]: unknown }>;
       isError?: boolean;
     };
-    const text = (res?.content ?? [])
+    const blocks = res?.content ?? [];
+    const text = blocks
       .filter(c => c.type === "text")
       .map(c => c.text ?? "")
       .join("\n");
-    if (res?.isError) throw new Error(text || "MCP tool error");
-    return text;
+    const isError = !!res?.isError;
+    if (isError) throw new Error(text || "MCP tool error");
+
+    // 有 image blocks → 回傳 rich content
+    const hasImage = blocks.some(c => c.type === "image");
+    return {
+      text,
+      contentBlocks: hasImage ? blocks : undefined,
+      isError,
+    };
   }
 
   private _registerTools(): void {
@@ -227,8 +249,11 @@ export class McpClient {
         parameters: (mcpTool.inputSchema ?? { type: "object", properties: {} }) as import("../tools/types.js").JsonSchema,
         async execute(params) {
           try {
-            const text = await client.call(mcpTool.name, params);
-            return { result: text };
+            const rich = await client.callRich(mcpTool.name, params);
+            return {
+              result: rich.text,
+              ...(rich.contentBlocks ? { contentBlocks: rich.contentBlocks } : {}),
+            };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }

@@ -1,12 +1,12 @@
 # providers — LLM Provider 系統
 
-> 更新日期：2026-04-07
+> 更新日期：2026-04-20
 
 ## 檔案
 
 | 檔案 | 說明 |
 |------|------|
-| `src/providers/base.ts` | 型別定義：LLMProvider, Message, ProviderOpts, StreamResult, ProviderEvent |
+| `src/providers/base.ts` | 型別定義：LLMProvider, Message, ProviderOpts, StreamResult, ProviderEvent。`ToolResultBlock.content` 支援 `string \| Array`（rich content） |
 | `src/providers/registry.ts` | ProviderRegistry：V1（ProviderEntry）+ V2（三層分離：agentDefaults + models.json + authStore） |
 | `src/providers/claude-api.ts` | ClaudeApiProvider（@mariozechner/pi-ai） |
 | `src/providers/auth-profile-store.ts` | AuthProfileStore：多憑證管理 + cooldown |

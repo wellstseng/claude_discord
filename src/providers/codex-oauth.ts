@@ -362,7 +362,7 @@ function convertToResponsesInput(messages: Message[]): ResponsesInputItem[] {
         result.push({
           type: "function_call_output",
           call_id: block.tool_use_id,
-          output: block.content,
+          output: typeof block.content === "string" ? block.content : JSON.stringify(block.content),
         });
       }
     }

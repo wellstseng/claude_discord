@@ -1,7 +1,7 @@
 # modules/agent-loop — 核心對話迴圈
 
-> 檔案：`src/core/agent-loop.ts` (~1864 行)
-> 更新日期：2026-04-17
+> 檔案：`src/core/agent-loop.ts` (~1880 行)
+> 更新日期：2026-04-20
 
 ## 職責
 

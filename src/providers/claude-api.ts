@@ -82,11 +82,24 @@ function toPiMessages(messages: Message[]): PiMessage[] {
 
         for (const b of toolResults) {
           if (b.type !== "tool_result") continue;
+          // rich content blocks（圖片 + 文字混合）or 純文字
+          let trContent: ToolResultMessage["content"];
+          if (Array.isArray(b.content)) {
+            trContent = b.content.map(block => {
+              const raw = block as Record<string, unknown>;
+              if (raw["type"] === "image") {
+                return { type: "image" as const, data: String(raw["data"] ?? ""), mimeType: String(raw["mimeType"] ?? "image/png") };
+              }
+              return { type: "text" as const, text: String(raw["text"] ?? JSON.stringify(raw)) };
+            });
+          } else {
+            trContent = [{ type: "text", text: b.content }];
+          }
           result.push({
             role: "toolResult",
             toolCallId: b.tool_use_id,
             toolName: toolNameMap.get(b.tool_use_id) ?? "unknown",
-            content: [{ type: "text", text: b.content }],
+            content: trContent,
             isError: b.is_error ?? false,
             timestamp: 0,
           } satisfies ToolResultMessage);

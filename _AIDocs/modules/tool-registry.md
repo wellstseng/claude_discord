@@ -1,7 +1,7 @@
 # modules/tool-registry — Tool 註冊 + Builtin Tools
 
 > 檔案：`src/tools/registry.ts` + `src/tools/builtin/`
-> 更新日期：2026-04-16
+> 更新日期：2026-04-20
 
 ## 職責
 
@@ -30,6 +30,14 @@ interface Tool {
   deferred?: boolean;          // true = 名稱注入 system prompt，schema 需 tool_search 載入
   parameters: JsonSchema;
   execute(params: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
+}
+
+interface ToolResult {
+  result?: unknown;
+  error?: string;
+  fileModified?: boolean;
+  modifiedPath?: string;
+  contentBlocks?: Array<{ type: string; [key: string]: unknown }>;  // MCP image 等 rich content
 }
 ```
 

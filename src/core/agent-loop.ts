@@ -1261,7 +1261,7 @@ export async function* agentLoop(
 
       // ── 5c. Tool 執行 ──────────────────────────────────────────────────────
       log.debug(`[agent-loop] [loop=${loopCount}] 執行 ${streamResult.toolCalls.length} 個 tool: ${streamResult.toolCalls.map(t => t.name).join(", ")}`);
-      const toolResults: Array<{ tool_use_id: string; content: string; is_error: boolean }> = [];
+      const toolResults: Array<{ tool_use_id: string; content: string | Array<{ type: string; [key: string]: unknown }>; is_error: boolean }> = [];
 
       // 先把 assistant 的 tool_use 加入 messages（B: 標記 token 數）
       messages.push({
@@ -1588,26 +1588,36 @@ export async function* agentLoop(
           log.debug(`[agent-loop] [使用工具] (${call.name}) :: ok ${durationMs}ms`);
         }
 
-        const rawResultText = toolResult.error
-          ? `錯誤：${toolResult.error}`
-          : JSON.stringify(toolResult.result ?? null);
-        const cap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens, opts.modePreset?.resultTokenCap);
-        const resultText = truncateToolResult(rawResultText, cap, call.name);
-        if (resultText.length < rawResultText.length) {
-          log.debug(`[agent-loop] [使用工具] (${call.name}) :: result truncated ${rawResultText.length} → ${resultText.length} chars`);
+        // Rich content blocks（MCP screenshot 等回傳圖片時使用）
+        if (toolResult.contentBlocks?.length && !toolResult.error) {
+          turnToolResultTokens += Math.ceil(JSON.stringify(toolResult.contentBlocks).length / 4);
+          toolResults.push({
+            tool_use_id: call.id,
+            content: toolResult.contentBlocks,
+            is_error: false,
+          });
+        } else {
+          const rawResultText = toolResult.error
+            ? `錯誤：${toolResult.error}`
+            : JSON.stringify(toolResult.result ?? null);
+          const cap = resolveResultTokenCap(toolRegistry.get(call.name)?.resultTokenCap, turnToolResultTokens, opts.modePreset?.resultTokenCap);
+          const resultText = truncateToolResult(rawResultText, cap, call.name);
+          if (resultText.length < rawResultText.length) {
+            log.debug(`[agent-loop] [使用工具] (${call.name}) :: result truncated ${rawResultText.length} → ${resultText.length} chars`);
+          }
+          turnToolResultTokens += Math.ceil(resultText.length / 4);
+
+          // Reversibility warning 前置到結果
+          const finalResultText = _reversibilityWarning
+            ? `⚠️ [可逆性警告] ${_reversibilityWarning}\n\n${resultText}`
+            : resultText;
+
+          toolResults.push({
+            tool_use_id: call.id,
+            content: finalResultText,
+            is_error: Boolean(toolResult.error),
+          });
         }
-        turnToolResultTokens += Math.ceil(resultText.length / 4);
-
-        // Reversibility warning 前置到結果
-        const finalResultText = _reversibilityWarning
-          ? `⚠️ [可逆性警告] ${_reversibilityWarning}\n\n${resultText}`
-          : resultText;
-
-        toolResults.push({
-          tool_use_id: call.id,
-          content: finalResultText,
-          is_error: Boolean(toolResult.error),
-        });
 
         yield {
           type: "tool_result",

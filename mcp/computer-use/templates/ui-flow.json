@@ -1,0 +1,31 @@
+{
+  "name": "ui-flow-basic",
+  "description": "基本 UI 流程驗證：開啟應用→導航→操作→確認結果",
+  "timeout": 180000,
+  "steps": [
+    {
+      "name": "open-app",
+      "description": "開啟目標應用程式",
+      "successCondition": "應用程式視窗出現在螢幕上",
+      "timeoutMs": 30000
+    },
+    {
+      "name": "navigate",
+      "description": "導航到目標頁面或功能",
+      "successCondition": "看到目標頁面的關鍵 UI 元素",
+      "timeoutMs": 30000
+    },
+    {
+      "name": "interact",
+      "description": "執行核心操作（點擊、輸入等）",
+      "successCondition": "操作完成，畫面有對應回饋",
+      "timeoutMs": 30000
+    },
+    {
+      "name": "verify",
+      "description": "確認操作結果正確",
+      "successCondition": "結果與預期一致",
+      "timeoutMs": 30000
+    }
+  ]
+}

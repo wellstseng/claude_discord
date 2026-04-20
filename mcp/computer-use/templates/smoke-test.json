@@ -1,0 +1,31 @@
+{
+  "name": "tslg-smoke",
+  "description": "TSLG 冒煙測試：登入→主城→背包",
+  "timeout": 300000,
+  "steps": [
+    {
+      "name": "launch",
+      "description": "確認 Unity Editor 的 Game View 已開啟並處於登入畫面",
+      "successCondition": "看到登入按鈕或帳號輸入框",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "login",
+      "description": "輸入帳號密碼並點擊登入",
+      "successCondition": "進入遊戲載入畫面或主城",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "main-city",
+      "description": "確認已進入主城場景",
+      "successCondition": "看到主城 UI 元素（金幣、體力、功能圖示）",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "backpack",
+      "description": "打開背包介面",
+      "successCondition": "看到背包物品列表",
+      "timeoutMs": 60000
+    }
+  ]
+}

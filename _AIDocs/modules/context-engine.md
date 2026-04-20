@@ -1,7 +1,7 @@
 # modules/context-engine — Context 壓縮策略
 
 > 檔案：`src/core/context-engine.ts`
-> 更新日期：2026-04-18
+> 更新日期：2026-04-20
 
 ## 職責
 

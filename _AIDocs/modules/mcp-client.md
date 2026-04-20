@@ -1,7 +1,7 @@
 # modules/mcp-client — MCP Server 連線
 
 > 檔案：`src/mcp/client.ts`
-> 更新日期：2026-04-06
+> 更新日期：2026-04-20
 
 ## 職責
 
@@ -44,10 +44,23 @@ MCP tool 註冊名稱格式：`mcp_{serverName}_{toolName}`
 ## Tool 執行
 
 ```typescript
+// 純文字回傳（向後相容）
 client.call(toolName: string, args: Record<string, unknown>): Promise<string>
+
+// Rich content 回傳（含圖片 blocks）
+client.callRich(toolName: string, args: Record<string, unknown>): Promise<{
+  text: string;
+  contentBlocks?: Array<{ type: string; [key: string]: unknown }>;  // 有 image 時才設定
+  isError: boolean;
+}>
 ```
 
-發送 JSON-RPC `tools/call` → 回傳 `content[].text` 合併文字。
+- `call()` 內部呼�� `callRich()`，只回傳 text
+- `callRich()` 偵測 MCP response 中的 image content blocks，有 image 時回傳 `contentBlocks`
+- `_registerTools()` 使用 `callRich()`，將 `contentBlocks` 設入 `ToolResult.contentBlocks`
+- Agent-loop 偵測到 `contentBlocks` 時直接用 rich content 作為 tool_result（不走 JSON.stringify）
+- Claude API provider 將 image blocks 轉為 Vision API 格式，其他 provider fallback 為 JSON
+
 timeout: 30 秒。
 
 ## 崩潰重連

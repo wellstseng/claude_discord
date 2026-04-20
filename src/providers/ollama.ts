@@ -262,7 +262,7 @@ function convertMessages(messages: Message[], systemPrompt?: string): OllamaMess
       } else if (block.type === "tool_use") {
         toolUseCalls.push({ id: block.id, name: block.name, input: block.input });
       } else if (block.type === "tool_result") {
-        toolResults.push({ tool_use_id: block.tool_use_id, content: block.content });
+        toolResults.push({ tool_use_id: block.tool_use_id, content: typeof block.content === "string" ? block.content : JSON.stringify(block.content) });
       }
     }
 

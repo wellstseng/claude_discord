@@ -139,7 +139,7 @@ export function estimateTokens(messages: Message[]): number {
     } else {
       for (const b of m.content) {
         if (b.type === "text") chars += b.text.length;
-        else if (b.type === "tool_result") chars += b.content.length;
+        else if (b.type === "tool_result") chars += typeof b.content === "string" ? b.content.length : JSON.stringify(b.content).length;
         else if (b.type === "tool_use") chars += JSON.stringify(b.input).length;
       }
     }
@@ -194,16 +194,22 @@ function truncateBlocks(blocks: ContentBlock[], maxTokens: number): ContentBlock
 
   for (const b of blocks) {
     if (b.type === "tool_result") {
-      const remaining = Math.max(0, maxChars - totalChars);
-      if (remaining <= 0) {
-        result.push({ ...b, content: `[⚠️ CE 已截斷：此 tool_result 原文 ${b.content.length} chars，已全部丟失，勿假設完整性]` });
-      } else if (b.content.length > remaining) {
-        const origLen = b.content.length;
-        result.push({ ...b, content: b.content.slice(0, remaining) + `\n…[⚠️ CE 已截斷：原文 ${origLen} chars，僅保留前 ${remaining} chars。後續內容已丟失，勿假設完整性]` });
-        totalChars += remaining;
-      } else {
+      // rich content（圖片等）不截斷，直接保留
+      if (typeof b.content !== "string") {
         result.push(b);
-        totalChars += b.content.length;
+        totalChars += JSON.stringify(b.content).length;
+      } else {
+        const remaining = Math.max(0, maxChars - totalChars);
+        if (remaining <= 0) {
+          result.push({ ...b, content: `[⚠️ CE 已截斷：此 tool_result 原文 ${b.content.length} chars，已全部丟失，勿假設完整性]` });
+        } else if (b.content.length > remaining) {
+          const origLen = b.content.length;
+          result.push({ ...b, content: b.content.slice(0, remaining) + `\n…[⚠️ CE 已截斷：原文 ${origLen} chars，僅保留前 ${remaining} chars。後續內容已丟失，勿假設完整性]` });
+          totalChars += remaining;
+        } else {
+          result.push(b);
+          totalChars += b.content.length;
+        }
       }
     } else if (b.type === "tool_use") {
       const input = JSON.stringify(b.input);
@@ -261,7 +267,7 @@ export function getMessageText(m: Message): string {
   return m.content
     .map(b => {
       if (b.type === "text") return b.text;
-      if (b.type === "tool_result") return b.content;
+      if (b.type === "tool_result") return typeof b.content === "string" ? b.content : JSON.stringify(b.content);
       if (b.type === "tool_use") return `[tool:${b.name}]`;
       return "";
     })

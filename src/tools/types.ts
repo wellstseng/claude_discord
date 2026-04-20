@@ -30,6 +30,12 @@ export interface ToolResult {
   /** Tool 自標記：是否修改了檔案（用於 file:modified 事件） */
   fileModified?: boolean;
   modifiedPath?: string;
+  /**
+   * Rich content blocks（圖片 + 文字混合）。
+   * 若設定，agent-loop 會直接用此作為 tool_result 的 content，
+   * 不走 JSON.stringify(result) 路徑。用於 MCP screenshot 等需要回傳圖片的工具。
+   */
+  contentBlocks?: Array<{ type: string; [key: string]: unknown }>;
 }
 
 // ── ToolContext（Tool 執行時可用的上下文）────────────────────────────────────

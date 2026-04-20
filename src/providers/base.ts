@@ -24,7 +24,8 @@ export interface ToolUseBlock {
 export interface ToolResultBlock {
   type: "tool_result";
   tool_use_id: string;
-  content: string;
+  /** 純文字 or rich content blocks（含圖片時用 array） */
+  content: string | Array<{ type: string; [key: string]: unknown }>;
   is_error?: boolean;
 }
 
@@ -84,7 +85,8 @@ export interface ToolCall {
 
 export interface ToolResult {
   tool_use_id: string;
-  content: string;
+  /** 純文字 or rich content blocks（含圖片時用 array） */
+  content: string | Array<{ type: string; [key: string]: unknown }>;
   is_error?: boolean;
 }
 

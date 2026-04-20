@@ -38,7 +38,8 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Safety | `src/safety/` | 安全攔截：guard + collab-conflict |
 | Workflow | `src/workflow/` | 工作流引擎：rut/oscillation/fix-escalation/sync/wisdom/failure-detector |
 | Cron | `src/cron.ts` | 排程服務（cron/every/at），croner 驅動 |
-| MCP | `src/mcp/` | MCP client + Discord MCP server |
+| MCP | `src/mcp/` | MCP client（rich content 支援）+ Discord MCP server |
+| Computer Use MCP | `mcp/computer-use/` | 獨立 MCP Server：螢幕截圖/鍵鼠操控/視窗管理/測試框架（9 tools） |
 | Vector | `src/vector/` | Ollama embedding + LanceDB 向量搜尋 |
 | Discord Entry | `src/discord.ts` | Discord Client、訊息過濾、debounce、message-pipeline 呼叫、agent-loop 啟動 |
 | History | `src/history.ts` | 訊息歷史記錄（NDJSON append-only） |
@@ -88,7 +89,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | [modules/vector-service.md](modules/vector-service.md) | `src/vector/` | LanceDB 向量服務 + Embedding Provider 抽象層 | 2026-04-13 |
 | [modules/task-store.md](modules/task-store.md) | `src/core/task-store.ts` | 任務 CRUD + per-session | 2026-04-06 |
 | [modules/task-ui.md](modules/task-ui.md) | `src/core/task-ui.ts` | Discord 任務按鈕互動 | 2026-04-06 |
-| [modules/mcp-client.md](modules/mcp-client.md) | `src/mcp/client.ts` | MCP server 連線 + tool 自動註冊 | 2026-04-06 |
+| [modules/mcp-client.md](modules/mcp-client.md) | `src/mcp/client.ts` | MCP server 連線 + tool 自動註冊 + rich content | 2026-04-20 |
 | [modules/message-pipeline.md](modules/message-pipeline.md) | `src/core/message-pipeline.ts` | 統一訊息管線 | 2026-04-06 |
 | [modules/agent-system.md](modules/agent-system.md) | `src/core/agent-loader.ts` + `agent-registry.ts` + `agent-types.ts` | Multi-Agent 設定與型別 | 2026-04-06 |
 | [modules/subagent-system.md](modules/subagent-system.md) | `src/core/subagent-registry.ts` + `subagent-discord-bridge.ts` | Subagent 編排與追蹤 | 2026-04-06 |
