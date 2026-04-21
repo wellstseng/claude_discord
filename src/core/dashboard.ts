@@ -1620,9 +1620,10 @@ const CFG_SCHEMA = [
   { key:'rateLimit', label:'Rate Limit', dynamic:true, dynamicPath:'rateLimit', entryFields:[
     {k:'requestsPerMinute',t:'num',l:'Requests Per Minute',d:'該角色每分鐘最多發送幾則訊息'},
   ]},
-  { key:'mcpServers', label:'MCP Servers', dynamic:true, dynamicPath:'mcpServers', entryFields:[
+  { key:'mcpServers', label:'MCP Servers', dynamic:true, dynamicPath:'mcpServers', hasPresets:true, entryFields:[
     {k:'command',t:'text',l:'Command',d:'MCP server 啟動指令（如 node, python）'},
     {k:'args',t:'list',l:'Args',d:'啟動指令的參數列表'},
+    {k:'env',t:'map',l:'Env',d:'環境變數（key=value）'},
     {k:'tier',t:'select',l:'Tier',opts:['public','standard','elevated','admin','owner'],d:'工具權限層級：public=所有人, elevated=需核准, owner=僅管理員'},
   ]},
   { key:'fileWatcher', label:'File Watcher', fields:[
@@ -1665,6 +1666,14 @@ function renderField(f, val, prefix, dataPath) {
   if (f.t === 'select') {
     const opts = (f.opts||[]).map(o => \`<option value="\${o}" \${v===o?'selected':''}>\${o||'(auto)'}</option>\`).join('');
     return \`<div class="cfg-row"><label>\${f.l}\${hint}</label><select data-path="\${dp}">\${opts}</select></div>\`;
+  }
+  if (f.t === 'map') {
+    const obj = (typeof val === 'object' && val && !Array.isArray(val)) ? val : {};
+    const mapId = id.replace(/\\./g,'_') + '__map';
+    let rows = Object.entries(obj).map(([k,v]) =>
+      \`<div class="cfg-map-row"><input value="\${esc(k)}" class="map-key" placeholder="key"><input value="\${esc(String(v))}" class="map-val" placeholder="value"><button class="btn-x" onclick="this.parentElement.remove()">✕</button></div>\`
+    ).join('');
+    return \`<div class="cfg-row" style="align-items:start"><label>\${f.l}\${hint}</label><div class="cfg-map" id="map_\${mapId}" data-map-path="\${dp}">\${rows}<button class="cfg-add" onclick="addMapRow('map_\${mapId}')">+ 新增</button></div></div>\`;
   }
   if (f.t === 'list') {
     const items = Array.isArray(val) ? val : [];
@@ -1742,7 +1751,47 @@ function renderDynamic(section, data) {
     html += \`<div class="cfg-dynamic-entry" id="dyn_\${secId}_\${esc(entryKey)}"><div class="entry-header"><span style="color:#a78bfa;font-size:0.75rem">🔑</span><input value="\${esc(entryKey)}" class="dyn-key" disabled style="color:#a78bfa;background:transparent;border:none;font-size:0.82rem;flex:1"><button class="btn btn-red btn-sm" onclick="removeDynEntry('\${secId}','\${esc(entryKey)}',this)">刪除</button></div>\${fieldsHtml}</div>\`;
   }
   html += \`<div style="margin-top:8px"><input id="new_dyn_\${secId}" placeholder="新 ID" style="background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3e;border-radius:4px;padding:4px 8px;font-size:0.78rem;font-family:monospace;width:200px"><button class="cfg-add" style="margin-left:8px" onclick="addDynEntry('\${secId}','\${path}')">+ 新增</button></div>\`;
+  if (section.hasPresets) {
+    html += \`<div style="margin-top:12px;padding:10px;background:#0f1117;border:1px solid #2a2d3e;border-radius:6px">
+      <div style="font-size:0.75rem;color:#818cf8;margin-bottom:8px;font-weight:bold">⚡ 快速新增內建 MCP</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        \${Object.entries(_mcpPresets).filter(([k]) => !obj[k]).map(([k,p]) =>
+          \`<button class="btn btn-sm" style="background:#1e1b4b;border:1px solid #4338ca;color:#a5b4fc" onclick="addMcpPreset('\${k}','\${path}')">\${p.icon} \${p.label}</button>\`
+        ).join('')}
+        \${Object.entries(_mcpPresets).every(([k]) => obj[k]) ? '<span style="color:#6b7280;font-size:0.75rem">所有內建 MCP 已新增</span>' : ''}
+      </div>
+    </div>\`;
+  }
   return html;
+}
+
+const _mcpPresets = {
+  'catclaw-discord': {
+    icon: '💬', label: 'Discord',
+    command: 'node', args: ['./dist/mcp/discord-server.js'],
+    env: {}, tier: 'public'
+  },
+  'computer-use': {
+    icon: '🖥️', label: 'Computer Use',
+    command: 'node', args: ['./mcp/computer-use/dist/index.js'],
+    env: { COMPUTER_USE_ALLOWED_WINDOWS: '*', COMPUTER_USE_MAX_SCREENSHOT_WIDTH: '1024' },
+    tier: 'elevated'
+  },
+  'playwright': {
+    icon: '🌐', label: 'Playwright',
+    command: 'node', args: ['./mcp/playwright/dist/index.js'],
+    env: { PLAYWRIGHT_HEADLESS: 'true', PLAYWRIGHT_BROWSER: 'chromium', PLAYWRIGHT_VIEWPORT: '1280x720' },
+    tier: 'elevated'
+  }
+};
+
+function addMcpPreset(presetKey, path) {
+  const preset = _mcpPresets[presetKey];
+  if (!preset) return;
+  const obj = getPath(_cfgData, path) || {};
+  obj[presetKey] = { command: preset.command, args: [...preset.args], env: {...preset.env}, tier: preset.tier };
+  setPath(_cfgData, path, obj);
+  document.getElementById('cfg-gui').innerHTML = renderConfigGUI(_cfgData);
 }
 
 function addDynEntry(secId, path) {
