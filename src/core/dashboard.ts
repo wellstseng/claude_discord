@@ -2222,7 +2222,7 @@ async function addAuthProfile() {
   if (cred.length < 10) { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = 'Credential 長度不足（至少 10 字元）'; return; }
   try {
     const d = await authFetch('/api/auth-profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',id,credential:cred,type})}).then(r=>r.json());
-    if (d.success) { document.getElementById('auth-new-id').value = ''; document.getElementById('auth-new-cred').value = ''; document.getElementById('auth-msg').className = 'msg ok'; document.getElementById('auth-msg').textContent = '已新增 ' + id + '，重啟中...'; await authFetch('/api/restart',{method:'POST'}); setTimeout(() => { document.getElementById('auth-msg').textContent = '已新增 ' + id + '（已重啟）'; loadAuthProfiles(); }, 3000); }
+    if (d.success) { document.getElementById('auth-new-id').value = ''; document.getElementById('auth-new-cred').value = ''; document.getElementById('auth-msg').className = 'msg ok'; const syncInfo = d.modelSync ? ' [model-sync: ' + d.modelSync + ']' : ''; document.getElementById('auth-msg').textContent = '已新增 ' + id + syncInfo + '，重啟中...'; await authFetch('/api/restart',{method:'POST'}); setTimeout(() => { document.getElementById('auth-msg').textContent = '已新增 ' + id + syncInfo + '（已重啟）'; loadAuthProfiles(); if (typeof loadModelsConfig === 'function') loadModelsConfig(); }, 3000); }
     else { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = d.error; }
   } catch(e) { document.getElementById('auth-msg').className = 'msg err'; document.getElementById('auth-msg').textContent = '失敗：' + e; }
 }
@@ -4172,6 +4172,7 @@ export class DashboardServer {
               renameSync(tmp, credPath);
 
               // ── 自動同步 models-config.json：新增 provider 時補上 alias ──
+              let syncResult: string | undefined;
               if (body.action === "add" && body.id) {
                 try {
                   const providerId = (body.id as string).split(":")[0];
@@ -4181,13 +4182,19 @@ export class DashboardServer {
                   const aliases = mc.aliases ?? {};
                   // 檢查是否已有此 provider 的 alias
                   const hasAlias = Object.values(aliases).some((v: unknown) => typeof v === "string" && v.startsWith(providerId + "/"));
-                  if (!hasAlias) {
+                  if (hasAlias) {
+                    syncResult = `skip:already_has_alias(${providerId})`;
+                  } else {
                     // 從 models.json 讀取 provider 的模型清單
                     const modelsPath = join(ws, "agents", "default", "models.json");
-                    if (existsSync(modelsPath)) {
+                    if (!existsSync(modelsPath)) {
+                      syncResult = `skip:models.json_not_found(${modelsPath})`;
+                    } else {
                       const modelsData = JSON.parse(readFileSync(modelsPath, "utf-8"));
                       const providerDef = modelsData.providers?.[providerId];
-                      if (providerDef?.models?.length) {
+                      if (!providerDef?.models?.length) {
+                        syncResult = `skip:provider_${providerId}_not_in_models.json`;
+                      } else {
                         // 用 provider 的第一個 model 建立 alias
                         const firstModel = providerDef.models[0];
                         const aliasName = providerId.replace(/^openai-/, ""); // openai-codex → codex
@@ -4205,16 +4212,18 @@ export class DashboardServer {
                         const mcTmp = mcPath + ".tmp";
                         writeFileSync(mcTmp, JSON.stringify(mc, null, 2), "utf-8");
                         renameSync(mcTmp, mcPath);
+                        syncResult = `synced:${aliasName}→${providerId}/${firstModel.id}`;
                         log.info(`[dashboard] auth-profile 新增 → 自動同步 models-config.json：alias "${aliasName}" → "${providerId}/${firstModel.id}"`);
                       }
                     }
                   }
                 } catch (syncErr) {
-                  log.warn(`[dashboard] models-config.json 自動同步失敗（不影響 credential 寫入）：${syncErr instanceof Error ? syncErr.message : String(syncErr)}`);
+                  syncResult = `error:${syncErr instanceof Error ? syncErr.message : String(syncErr)}`;
+                  log.warn(`[dashboard] models-config.json 自動同步失敗：${syncResult}`);
                 }
               }
 
-              res.writeHead(200); res.end(JSON.stringify({ success: true, count: Object.keys(data.profiles).length }));
+              res.writeHead(200); res.end(JSON.stringify({ success: true, count: Object.keys(data.profiles).length, modelSync: syncResult }));
             } catch (err) {
               res.writeHead(400); res.end(JSON.stringify({ error: String(err) }));
             }
