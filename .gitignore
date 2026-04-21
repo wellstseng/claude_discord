@@ -6,4 +6,3 @@ data/
 signal/
 .signal/
 .env
-outbounds/
