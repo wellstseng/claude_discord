@@ -14,6 +14,8 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
+import { writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { log } from "../logger.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolTier } from "../tools/types.js";
@@ -225,13 +227,36 @@ export class McpClient {
     const isError = !!res?.isError;
     if (isError) throw new Error(text || "MCP tool error");
 
-    // 有 image blocks → 回傳 rich content
+    // 有 image blocks → 存檔 + 回傳 rich content
     const hasImage = blocks.some(c => c.type === "image");
-    return {
-      text,
-      contentBlocks: hasImage ? blocks : undefined,
-      isError,
-    };
+    if (hasImage) {
+      const savedPaths: string[] = [];
+      const cfgDir = process.env.CATCLAW_CONFIG_DIR;
+      const imgDir = join(cfgDir ?? process.cwd(), "outbounds");
+      await mkdir(imgDir, { recursive: true });
+      for (const block of blocks) {
+        if (block.type === "image" && block.data) {
+          const ext = block.mimeType === "image/jpeg" ? "jpg" : "png";
+          const filename = `${this.serverName}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+          const filePath = join(imgDir, filename);
+          try {
+            await writeFile(filePath, Buffer.from(block.data as string, "base64"));
+            savedPaths.push(filePath);
+          } catch (e) {
+            log.warn(`[mcp:${this.serverName}] 圖片存檔失敗：${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+      const pathsText = savedPaths.length > 0
+        ? `\n📎 圖片已存至：${savedPaths.join(", ")}\n（可用 files 參數附加到 Discord 回覆）`
+        : "";
+      return {
+        text: text + pathsText,
+        contentBlocks: blocks,
+        isError,
+      };
+    }
+    return { text, isError };
   }
 
   private _registerTools(): void {
