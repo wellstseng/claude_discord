@@ -4170,6 +4170,50 @@ export class DashboardServer {
               const tmp = credPath + ".tmp";
               writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
               renameSync(tmp, credPath);
+
+              // ── 自動同步 models-config.json：新增 provider 時補上 alias ──
+              if (body.action === "add" && body.id) {
+                try {
+                  const providerId = (body.id as string).split(":")[0];
+                  const { resolveCatclawDir } = await import("./config.js");
+                  const mcPath = join(resolveCatclawDir(), "models-config.json");
+                  const mc = existsSync(mcPath) ? JSON.parse(readFileSync(mcPath, "utf-8")) : { mode: "merge", primary: "sonnet", fallbacks: [], aliases: {}, providers: {} };
+                  const aliases = mc.aliases ?? {};
+                  // 檢查是否已有此 provider 的 alias
+                  const hasAlias = Object.values(aliases).some((v: unknown) => typeof v === "string" && v.startsWith(providerId + "/"));
+                  if (!hasAlias) {
+                    // 從 models.json 讀取 provider 的模型清單
+                    const modelsPath = join(ws, "agents", "default", "models.json");
+                    if (existsSync(modelsPath)) {
+                      const modelsData = JSON.parse(readFileSync(modelsPath, "utf-8"));
+                      const providerDef = modelsData.providers?.[providerId];
+                      if (providerDef?.models?.length) {
+                        // 用 provider 的第一個 model 建立 alias
+                        const firstModel = providerDef.models[0];
+                        const aliasName = providerId.replace(/^openai-/, ""); // openai-codex → codex
+                        aliases[aliasName] = `${providerId}/${firstModel.id}`;
+                        mc.aliases = aliases;
+                        // 同步 provider 定義（baseUrl, api, models）
+                        if (!mc.providers) mc.providers = {};
+                        if (!mc.providers[providerId]) {
+                          const pDef: Record<string, unknown> = {};
+                          if (providerDef.baseUrl) pDef.baseUrl = providerDef.baseUrl;
+                          if (providerDef.api) pDef.api = providerDef.api;
+                          if (providerDef.models) pDef.models = providerDef.models;
+                          mc.providers[providerId] = pDef;
+                        }
+                        const mcTmp = mcPath + ".tmp";
+                        writeFileSync(mcTmp, JSON.stringify(mc, null, 2), "utf-8");
+                        renameSync(mcTmp, mcPath);
+                        log.info(`[dashboard] auth-profile 新增 → 自動同步 models-config.json：alias "${aliasName}" → "${providerId}/${firstModel.id}"`);
+                      }
+                    }
+                  }
+                } catch (syncErr) {
+                  log.warn(`[dashboard] models-config.json 自動同步失敗（不影響 credential 寫入）：${syncErr instanceof Error ? syncErr.message : String(syncErr)}`);
+                }
+              }
+
               res.writeHead(200); res.end(JSON.stringify({ success: true, count: Object.keys(data.profiles).length }));
             } catch (err) {
               res.writeHead(400); res.end(JSON.stringify({ error: String(err) }));
