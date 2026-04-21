@@ -118,6 +118,10 @@ export class CliBridge {
 
       // ── 上線通知 ──
       void this.sendStartupNotification();
+
+      // ── 補處理 inbound history（離線期間累積的訊息）──
+      // 排在「已上線」之後 fire；Discord 先看到 ✅ 再看到 CLI 處理離線訊息
+      void this.drainInboundHistoryOnStartup();
     } catch (err) {
       log.error(`[cli-bridge:${this.label}] start failed: ${err instanceof Error ? err.message : String(err)}`);
       // 進入自動重啟迴路（session ID 衝突等暫態問題可自動恢復）
@@ -497,6 +501,34 @@ export class CliBridge {
       log.debug(`[cli-bridge:${this.label}] 上線通知已送出`);
     } catch (err) {
       log.debug(`[cli-bridge:${this.label}] 上線通知失敗: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // ── 補處理離線期 inbound history ────────────────────────────────────────
+  //
+  // 上線後自動 drain 本 bridge scope 的 inbound entries，直接丟進 CLI 處理。
+  // 不需要使用者再送一次訊息觸發 consumeBridgeInboundHistory。
+  // 無 entries 時 noop；consumeForInjection 會清空 JSONL 避免重複消費。
+  private async drainInboundHistoryOnStartup(): Promise<void> {
+    try {
+      const { getInboundHistoryStore } = await import("../discord/inbound-history.js");
+      const store = getInboundHistoryStore();
+      if (!store) return;
+      const result = await store.consumeForInjection(
+        this.channelId,
+        { enabled: true, fullWindowHours: 24, decayWindowHours: 168, bucketBTokenCap: 600, decayIITokenCap: 300, inject: { enabled: true } },
+        undefined,
+        `bridge:${this.label}`,
+      );
+      if (!result || result.entriesCount === 0) return;
+
+      log.info(`[cli-bridge:${this.label}] 上線後補處理 inbound: ${result.entriesCount} 則（bucketA=${result.bucketA} bucketB=${result.bucketB}）`);
+
+      // 加前綴讓 CLI 知道這批是離線期累積的，而非使用者當下意圖
+      const prefixed = `[bridge 上線補處理：以下是你離線期間累積的頻道訊息，請當成要回應的使用者請求處理]\n\n${result.text}`;
+      this.send(prefixed, "discord", { user: "system-inbound-replay", ts: new Date().toISOString() });
+    } catch (err) {
+      log.warn(`[cli-bridge:${this.label}] drainInboundHistoryOnStartup 失敗: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
