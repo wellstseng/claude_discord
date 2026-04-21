@@ -71,13 +71,24 @@ async function grabFullScreen(): Promise<Buffer> {
 
 /**
  * 將 nut-js Image 轉成 PNG Buffer
- * nut-js v4 的 Image 有 data (RGBA buffer)、width、height
+ * nut-js v4 的 Image: { width, height, data (Buffer), pixelDensity }
+ * Windows 回傳 BGRA，macOS 回傳 RGBA — 需要交換 R/B 通道
  */
 async function imageToBuffer(img: Awaited<ReturnType<typeof screen.grab>>): Promise<Buffer> {
-  // nut-js Image: { width, height, data (Buffer, RGBA), pixelDensity }
   const { width, height, data } = img;
+  const buf = Buffer.from(data);
+
+  // Windows: nut-js 回傳 BGRA，需轉為 RGBA（交換 R 和 B）
+  if (process.platform === "win32") {
+    for (let i = 0; i < buf.length; i += 4) {
+      const r = buf[i]!;
+      buf[i] = buf[i + 2]!;
+      buf[i + 2] = r;
+    }
+  }
+
   const { default: sharp } = await import("sharp");
-  return sharp(Buffer.from(data), {
+  return sharp(buf, {
     raw: { width, height, channels: 4 },
   }).png().toBuffer();
 }
