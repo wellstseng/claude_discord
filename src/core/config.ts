@@ -1147,12 +1147,34 @@ function defaultMemoryConfig(raw: Partial<MemoryConfig> | undefined, workspaceDi
 
 // ── 載入 ──────────────────────────────────────────────────────────────────────
 
+/** 從 auth-profile.json 讀取第一把 Anthropic API key（用於 extraction fallback） */
+function resolveAnthropicKeyFromAuthProfile(): string | undefined {
+  try {
+    const ws = resolveWorkspaceDirSafe();
+    if (!ws) return undefined;
+    const profilePath = join(ws, "agents", "default", "auth-profile.json");
+    const raw = readFileSync(profilePath, "utf-8");
+    const data = JSON.parse(raw) as { profiles?: Record<string, { provider?: string; key?: string; type?: string }> };
+    if (!data.profiles) return undefined;
+    for (const p of Object.values(data.profiles)) {
+      if (p.provider === "anthropic" && p.type === "api_key" && p.key) return p.key;
+    }
+  } catch { /* 無 auth-profile 或格式錯誤 */ }
+  return undefined;
+}
+
 /** 建構 MemoryPipelineConfig：優先用明確設定，fallback 從 ollama.primary 推導 */
 function buildMemoryPipelineConfig(
   raw: Partial<MemoryPipelineConfig> | undefined,
   ollamaRaw: RawConfig["ollama"],
 ): MemoryPipelineConfig | undefined {
   if (raw?.embedding) {
+    const extractionProvider = raw.extraction?.provider ?? "ollama";
+    // 自動解析 Anthropic apiKey：若 provider=anthropic 但沒設 apiKey，嘗試從 auth-profile 讀取
+    let extractionApiKey = raw.extraction?.apiKey;
+    if (extractionProvider === "anthropic" && !extractionApiKey) {
+      extractionApiKey = resolveAnthropicKeyFromAuthProfile();
+    }
     return {
       embedding: {
         provider: raw.embedding.provider ?? "ollama",
@@ -1162,10 +1184,10 @@ function buildMemoryPipelineConfig(
         dimensions: raw.embedding.dimensions,
       },
       extraction: {
-        provider: raw.extraction?.provider ?? "ollama",
-        model:    raw.extraction?.model ?? ollamaRaw?.primary?.model ?? "qwen3:8b",
+        provider: extractionProvider,
+        model:    raw.extraction?.model ?? (extractionProvider === "anthropic" ? "claude-haiku-4-5-20251001" : ollamaRaw?.primary?.model ?? "qwen3:8b"),
         host:     raw.extraction?.host,
-        apiKey:   raw.extraction?.apiKey,
+        apiKey:   extractionApiKey,
       },
       reranker: {
         provider: raw.reranker?.provider ?? "none",

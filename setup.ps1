@@ -550,6 +550,39 @@ if ($enableCron -match '^[Yy]') {
     Info "排程已停用（稍後可在 catclaw.json 開啟）"
 }
 
+# ── Ollama（記憶管線 embedding / extraction 後端）──────────────
+Write-Host ""
+Write-Host "  Ollama（本地 LLM，記憶系統用）" -ForegroundColor White
+$ollamaAvailable = $false
+$ollamaPath = Get-Command ollama -ErrorAction SilentlyContinue
+if ($ollamaPath) {
+    Ok "Ollama 已安裝"
+    $ollamaAvailable = $true
+} else {
+    $installOllama = Read-Host "  Ollama 未偵測到。要安裝嗎？(y/N)"
+    if ($installOllama -match '^[Yy]') {
+        Info "請從 https://ollama.com/download 下載安裝"
+        Info "安裝完成後重新執行 setup.ps1 即可自動偵測"
+    }
+}
+
+$extractionProvider = "ollama"
+$extractionModel = "qwen3:14b"
+if ($ollamaAvailable) {
+    $pullModels = Read-Host "  自動拉取記憶模型（qwen3-embedding:8b + qwen3:14b）？(Y/n)"
+    if ($pullModels -notmatch '^[Nn]') {
+        Info "拉取 qwen3-embedding:8b（embedding 用）..."
+        & ollama pull qwen3-embedding:8b 2>&1 | Out-Null
+        Info "拉取 qwen3:14b（extraction 用）..."
+        & ollama pull qwen3:14b 2>&1 | Out-Null
+    }
+} else {
+    Info "無 Ollama — 記憶萃取改用 Anthropic API（haiku，低成本）"
+    Info "（apiKey 自動從 auth-profile.json 讀取，不需額外設定）"
+    $extractionProvider = "anthropic"
+    $extractionModel = "claude-haiku-4-5-20251001"
+}
+
 # ── MCP Servers ─────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  MCP Servers（擴充工具伺服器）" -ForegroundColor White
@@ -609,7 +642,7 @@ if ($enablePwMcp -match '^[Yy]') {
 }
 
 # 寫入設定（用 node 避免 ConvertTo-Json 巢狀問題）
-node -e "const fs=require('fs'),p=process.argv[1];const c=JSON.parse(fs.readFileSync(p,'utf-8'));c.dashboard.enabled=(process.argv[2]==='true');c.cron.enabled=(process.argv[3]==='true');if(!c.mcpServers)c.mcpServers={};if(process.argv[4]==='true'){c.mcpServers['catclaw-discord']={command:'node',args:['./dist/mcp/discord-server.js'],tier:'public'}}if(process.argv[5]==='true'){c.mcpServers['computer-use']={command:'node',args:['./mcp/computer-use/dist/index.js'],env:{COMPUTER_USE_ALLOWED_WINDOWS:process.argv[8],COMPUTER_USE_MAX_SCREENSHOT_WIDTH:process.argv[7],COMPUTER_USE_HISTORY_DIR:process.argv[9]},tier:'elevated'}}if(process.argv[6]==='true'){c.mcpServers['playwright']={command:'node',args:['./mcp/playwright/dist/index.js'],env:{PLAYWRIGHT_HEADLESS:process.argv[12],PLAYWRIGHT_BROWSER:process.argv[10],PLAYWRIGHT_VIEWPORT:process.argv[11]},tier:'elevated'}}fs.writeFileSync(p,JSON.stringify(c,null,2),'utf-8')" $CatclawJson $dashEnabled $cronEnabled $dcMcp $cuMcp $pwMcp $cuScreenshotW $cuAllowedWin $cuHistoryDir $pwBrowser $pwViewport $pwHeadless
+node -e "const fs=require('fs'),p=process.argv[1];const c=JSON.parse(fs.readFileSync(p,'utf-8'));c.dashboard.enabled=(process.argv[2]==='true');c.cron.enabled=(process.argv[3]==='true');if(!c.mcpServers)c.mcpServers={};if(process.argv[4]==='true'){c.mcpServers['catclaw-discord']={command:'node',args:['./dist/mcp/discord-server.js'],tier:'public'}}if(process.argv[5]==='true'){c.mcpServers['computer-use']={command:'node',args:['./mcp/computer-use/dist/index.js'],env:{COMPUTER_USE_ALLOWED_WINDOWS:process.argv[8],COMPUTER_USE_MAX_SCREENSHOT_WIDTH:process.argv[7],COMPUTER_USE_HISTORY_DIR:process.argv[9]},tier:'elevated'}}if(process.argv[6]==='true'){c.mcpServers['playwright']={command:'node',args:['./mcp/playwright/dist/index.js'],env:{PLAYWRIGHT_HEADLESS:process.argv[12],PLAYWRIGHT_BROWSER:process.argv[10],PLAYWRIGHT_VIEWPORT:process.argv[11]},tier:'elevated'}}if(process.argv[13]&&process.argv[13]!=='ollama'){if(!c.memoryPipeline)c.memoryPipeline={};c.memoryPipeline.extraction={provider:process.argv[13],model:process.argv[14]}}fs.writeFileSync(p,JSON.stringify(c,null,2),'utf-8')" $CatclawJson $dashEnabled $cronEnabled $dcMcp $cuMcp $pwMcp $cuScreenshotW $cuAllowedWin $cuHistoryDir $pwBrowser $pwViewport $pwHeadless $extractionProvider $extractionModel
 
 # ═══════════════════════════════════════════════════════════════════
 # Step 9: 編譯 & 啟動

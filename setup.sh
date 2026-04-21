@@ -443,6 +443,47 @@ else
   info "排程已停用（稍後可在 catclaw.json 開啟）"
 fi
 
+# ── Ollama（記憶管線 embedding / extraction 後端）──────────────
+echo ""
+echo -e "  ${BOLD}Ollama（本地 LLM，記憶系統用）${NC}"
+OLLAMA_AVAILABLE=false
+if command -v ollama &>/dev/null; then
+  ok "Ollama 已安裝"
+  OLLAMA_AVAILABLE=true
+else
+  echo -n "  Ollama 未偵測到。要安裝嗎？(y/N) "
+  read -r INSTALL_OLLAMA
+  if [[ "$INSTALL_OLLAMA" =~ ^[Yy] ]]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      info "請從 https://ollama.com/download 下載安裝"
+      info "安裝完成後重新執行 setup.sh 即可自動偵測"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+      info "正在安裝 Ollama..."
+      curl -fsSL https://ollama.com/install.sh | sh && OLLAMA_AVAILABLE=true
+    fi
+  fi
+fi
+
+# 根據 Ollama 狀態決定 extraction provider
+EXTRACTION_PROVIDER="ollama"
+EXTRACTION_MODEL="qwen3:14b"
+if [ "$OLLAMA_AVAILABLE" = true ]; then
+  # 自動拉取 embedding + extraction 模型
+  echo -n "  自動拉取記憶模型（qwen3-embedding:8b + qwen3:14b）？(Y/n) "
+  read -r PULL_MODELS
+  if [[ ! "$PULL_MODELS" =~ ^[Nn] ]]; then
+    info "拉取 qwen3-embedding:8b（embedding 用）..."
+    ollama pull qwen3-embedding:8b 2>&1 || warn "拉取失敗，稍後可手動 ollama pull qwen3-embedding:8b"
+    info "拉取 qwen3:14b（extraction 用）..."
+    ollama pull qwen3:14b 2>&1 || warn "拉取失敗，稍後可手動 ollama pull qwen3:14b"
+  fi
+else
+  info "無 Ollama — 記憶萃取改用 Anthropic API（haiku，低成本）"
+  info "（apiKey 自動從 auth-profile.json 讀取，不需額外設定）"
+  EXTRACTION_PROVIDER="anthropic"
+  EXTRACTION_MODEL="claude-haiku-4-5-20251001"
+fi
+
 # ── MCP Servers ─────────────────────────────────────────────────
 echo ""
 echo -e "  ${BOLD}MCP Servers（擴充工具伺服器）${NC}"
@@ -547,10 +588,16 @@ node -e "
       tier:'elevated'
     };
   }
+  // extraction provider 設定
+  if(process.argv[13] && process.argv[13]!=='ollama'){
+    if(!c.memoryPipeline)c.memoryPipeline={};
+    c.memoryPipeline.extraction={provider:process.argv[13],model:process.argv[14]};
+  }
   fs.writeFileSync(p,JSON.stringify(c,null,2),'utf-8');
 " "$CATCLAW_JSON" "$DASH_ENABLED" "$CRON_ENABLED" "$DC_MCP" "$CU_MCP" "$PW_MCP" \
   "$CU_SCREENSHOT_W" "$CU_ALLOWED_WIN" "$CU_HISTORY_DIR" \
-  "$PW_BROWSER" "$PW_VIEWPORT" "$PW_HEADLESS"
+  "$PW_BROWSER" "$PW_VIEWPORT" "$PW_HEADLESS" \
+  "$EXTRACTION_PROVIDER" "$EXTRACTION_MODEL"
 
 # ═══════════════════════════════════════════════════════════════════
 # Step 9: 編譯 & 啟動

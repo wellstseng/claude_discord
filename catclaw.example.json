@@ -236,6 +236,8 @@
   },
 
   // ── 記憶管線（embedding / extraction / reranker 後端）────────
+  // extraction provider: "ollama"（本地免費）/ "anthropic"（API，自動從 auth-profile 讀 key）/ "openai"
+  // 沒有 Ollama 的環境建議用 "anthropic" + haiku 模型（低成本）
   "memoryPipeline": {
     "embedding":  { "provider": "ollama", "model": "qwen3-embedding:8b", "host": "http://localhost:11434" },
     "extraction": { "provider": "ollama", "model": "qwen3:14b",          "host": "http://localhost:11434" },

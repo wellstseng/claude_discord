@@ -114,7 +114,19 @@ function parseExtractResult(raw: string): KnowledgeItem[] {
   }
 
   try {
-    const parsed = JSON.parse(match[0]) as Array<{
+    let jsonStr = match[0];
+    // 修復被截斷的 JSON array：嘗試補上缺少的 `]`
+    try { JSON.parse(jsonStr); } catch {
+      // 移除最後一個不完整的物件，補上 ]
+      const lastComplete = jsonStr.lastIndexOf("},");
+      if (lastComplete > 0) {
+        jsonStr = jsonStr.slice(0, lastComplete + 1) + "]";
+      } else {
+        const lastObj = jsonStr.lastIndexOf("}");
+        if (lastObj > 0) jsonStr = jsonStr.slice(0, lastObj + 1) + "]";
+      }
+    }
+    const parsed = JSON.parse(jsonStr) as Array<{
       type?: string; tier?: string; content?: string; triggers?: string[];
     }>;
     if (!Array.isArray(parsed)) return [];
@@ -196,17 +208,19 @@ async function doExtract(task: ExtractTask): Promise<KnowledgeItem[]> {
   // 跨 session 觀察（E5）
   const crossCtx = await getCrossSessionContext(task.response.slice(0, 500), task.namespace);
 
-  // Ollama generate（最多 2048 token 輸出，0-5 項 JSON 足夠）
+  // LLM generate（最多 2048 token 輸出，0-5 項 JSON 足夠）
   let raw: string;
   try {
-    const { getOllamaClient } = await import("../ollama/client.js");
-    const { config } = await import("../core/config.js");
-    const client = getOllamaClient();
+    const { hasExtractionProvider, getExtractionProvider } = await import("./extraction-provider.js");
+    if (!hasExtractionProvider()) {
+      log.debug("[extract] ExtractionProvider 未初始化，跳過");
+      return [];
+    }
+    const provider = getExtractionProvider();
     const prompt = buildExtractPrompt(task.response, crossCtx);
-    const extractModel = config.memoryPipeline?.extraction?.model;
-    raw = await client.generate(prompt, { model: extractModel, think: "auto", numPredict: 2048 });
+    raw = await provider.generate(prompt, { maxTokens: 2048 });
   } catch (err) {
-    log.debug(`[extract] Ollama 不可用，跳過：${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`[extract] 萃取 LLM 不可用，跳過：${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 

@@ -34,6 +34,7 @@ import { initProjectManager, type ProjectManager } from "../projects/manager.js"
 import { initMemoryEngine, type MemoryEngine } from "../memory/engine.js";
 import { initOllamaClient } from "../ollama/client.js";
 import { initEmbeddingProvider } from "../vector/embedding-provider.js";
+import { initExtractionProvider } from "../memory/extraction-provider.js";
 import { initRateLimiter, getRateLimiter, type RateLimiter } from "./rate-limiter.js";
 import { renameSessions } from "../migration/rename-sessions.js";
 import { initTraceStore, getTraceStore, getTraceContextStore } from "./message-trace.js";
@@ -176,6 +177,15 @@ export async function initPlatform(
   // ── 8.6 Embedding Provider（provider 抽象層）──────────────────────────────
   if (config.memoryPipeline?.embedding) {
     initEmbeddingProvider(config.memoryPipeline.embedding);
+  }
+
+  // ── 8.7 Extraction Provider（provider 抽象層）─────────────────────────────
+  if (config.memoryPipeline?.extraction) {
+    try {
+      initExtractionProvider(config.memoryPipeline.extraction);
+    } catch (err) {
+      log.warn(`[platform] ExtractionProvider 初始化失敗（萃取將靜默跳過）：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // ── 9. Memory Engine ───────────────────────────────────────────────────────

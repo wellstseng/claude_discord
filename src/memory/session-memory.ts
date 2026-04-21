@@ -73,9 +73,13 @@ export async function checkAndSaveNote(
     .join("\n");
 
   try {
-    const { getOllamaClient } = await import("../ollama/client.js");
-    const client = getOllamaClient();
-    const note = await client.chat(
+    const { hasExtractionProvider, getExtractionProvider } = await import("./extraction-provider.js");
+    if (!hasExtractionProvider()) {
+      log.debug("[session-memory] ExtractionProvider 未初始化，跳過");
+      return;
+    }
+    const provider = getExtractionProvider();
+    const note = await provider.chat(
       [{ role: "user", content: dialogue }],
       { system: EXTRACT_SYSTEM, timeout: 15_000 }
     );
