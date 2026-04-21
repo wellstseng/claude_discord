@@ -1189,15 +1189,17 @@ async function loadInboundHistory() {
     const d = await authFetch('/api/inbound-history').then(r => r.json());
     const channels = d.channels || [];
     if (!channels.length) { el.innerHTML = '<p style="color:#888">無 pending entries</p>'; return; }
-    let html = '<table class="tbl"><thead><tr><th>Channel</th><th>Pending</th><th>最新</th><th></th></tr></thead><tbody>';
+    let html = '<table class="tbl"><thead><tr><th>Channel</th><th>Scope</th><th>Pending</th><th>最新</th><th></th></tr></thead><tbody>';
     for (const ch of channels) {
       const chD = new Date(ch.lastTs);
       const ts = chD.toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}) + '.' + String(chD.getMilliseconds()).padStart(3,'0');
+      const scope = ch.scope || 'main';
       html += '<tr>';
       html += '<td title="' + ch.channelId + '">' + ch.channelId.slice(-12) + '</td>';
+      html += '<td style="font-size:0.75rem;color:var(--fg2)">' + scope + '</td>';
       html += '<td>' + ch.count + '</td>';
       html += '<td>' + ts + '</td>';
-      html += '<td><a href="#" style="color:var(--accent);text-decoration:none;font-size:0.78rem" onclick="event.preventDefault();expandInbound(\\'' + ch.channelId + '\\',this.closest(\\'tr\\'))">展開</a> <a href="#" style="color:var(--red2);text-decoration:none;font-size:0.78rem;margin-left:6px" onclick="event.preventDefault();clearInbound(\\'' + ch.channelId + '\\')">清除</a></td>';
+      html += '<td><a href="#" style="color:var(--accent);text-decoration:none;font-size:0.78rem" onclick="event.preventDefault();expandInbound(\\'' + ch.channelId + '\\',\\'' + scope + '\\',this.closest(\\'tr\\'))">展開</a> <a href="#" style="color:var(--red2);text-decoration:none;font-size:0.78rem;margin-left:6px" onclick="event.preventDefault();clearInbound(\\'' + ch.channelId + '\\',\\'' + scope + '\\')">清除</a></td>';
       html += '</tr>';
     }
     html += '</tbody></table>';
@@ -1205,15 +1207,15 @@ async function loadInboundHistory() {
   } catch(e) { el.innerHTML = '載入失敗：' + e; }
 }
 
-async function expandInbound(channelId, row) {
+async function expandInbound(channelId, scope, row) {
   const existing = row.nextElementSibling;
   if (existing && existing.classList.contains('inbound-expand')) {
     existing.remove(); return;
   }
   try {
-    const d = await authFetch('/api/inbound-history?channelId=' + encodeURIComponent(channelId)).then(r => r.json());
+    const d = await authFetch('/api/inbound-history?channelId=' + encodeURIComponent(channelId) + '&scope=' + encodeURIComponent(scope)).then(r => r.json());
     const entries = d.entries || [];
-    let html = '<td colspan="4" style="padding:8px 12px;background:var(--bg4);font-size:0.78rem">';
+    let html = '<td colspan="5" style="padding:8px 12px;background:var(--bg4);font-size:0.78rem">';
     if (!entries.length) { html += '無 entries'; }
     else {
       html += '<div style="max-height:200px;overflow-y:auto">';
@@ -1232,12 +1234,12 @@ async function expandInbound(channelId, row) {
   } catch(e) { alert('載入失敗：' + e); }
 }
 
-async function clearInbound(channelId) {
-  if (!confirm('清除 channel ' + channelId.slice(-12) + ' 的 inbound entries？')) return;
+async function clearInbound(channelId, scope) {
+  if (!confirm('清除 channel ' + channelId.slice(-12) + ' / ' + scope + ' 的 inbound entries？')) return;
   try {
     const r = await authFetch('/api/inbound-history/clear', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ channelId }),
+      body: JSON.stringify({ channelId, scope }),
     });
     const d = await r.json();
     if (d.success) { alert('已清除 ' + d.cleared + ' 筆'); loadInboundHistory(); }
@@ -4787,7 +4789,9 @@ export class DashboardServer {
         const chMatch = url.match(/[?&]channelId=([^&]+)/);
         if (chMatch) {
           const channelId = decodeURIComponent(chMatch[1]!);
-          const entries = store.readEntries(channelId);
+          const scopeMatch = url.match(/[?&]scope=([^&]+)/);
+          const scope = scopeMatch ? decodeURIComponent(scopeMatch[1]!) : "main";
+          const entries = store.readEntries(channelId, scope);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ channelId, entries }));
         } else {
@@ -4805,10 +4809,12 @@ export class DashboardServer {
         req.on("data", (c: Buffer) => { sz += c.length; if (sz < 8192) chunks.push(c); });
         req.on("end", () => {
           try {
-            const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { channelId?: string };
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { channelId?: string; scope?: string };
             const store = getInboundHistoryStore();
             if (!store) { res.writeHead(500); res.end(JSON.stringify({ error: "InboundHistoryStore not initialized" })); return; }
-            const count = body.channelId ? store.clearChannelAllScopes(body.channelId) : store.clearAll();
+            const count = body.channelId
+              ? (body.scope ? store.clearChannel(body.channelId, body.scope) : store.clearChannelAllScopes(body.channelId))
+              : store.clearAll();
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ success: true, cleared: count }));
           } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: String(err) })); }
