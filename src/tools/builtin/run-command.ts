@@ -139,17 +139,20 @@ export const tool: Tool = {
         if (process.env[key]) safeEnv[key] = process.env[key];
       }
 
-      const isWin = process.platform === "win32";
-      const proc = spawn(
-        isWin ? "cmd" : "sh",
-        isWin ? ["/c", command] : ["-c", command],
-        {
-          cwd,
-          env: safeEnv,
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-        },
-      );
+      // Windows 額外繼承 SYSTEMROOT / COMSPEC / PATHEXT，否則 cmd.exe 找不到自己
+      if (process.platform === "win32") {
+        for (const key of ["SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP", "APPDATA", "USERPROFILE"]) {
+          if (process.env[key]) safeEnv[key] = process.env[key];
+        }
+      }
+
+      const proc = spawn(command, [], {
+        cwd,
+        env: safeEnv,
+        shell: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
 
       let output = "";
       let truncated = false;

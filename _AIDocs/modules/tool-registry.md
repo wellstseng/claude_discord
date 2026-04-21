@@ -74,7 +74,7 @@ interface ToolContext {
 
 | Tool | 說明 |
 |------|------|
-| `run_command` | 執行 shell 指令（timeout + cwd + abort）。Windows 用 `cmd /c`，Unix 用 `sh -c`；`windowsHide: true` 防止閃現 console |
+| `run_command` | 執行 shell 指令（timeout + cwd + abort）。使用 `shell: true`（Node.js 自動選擇 sh/cmd）；Windows 額外繼承 SYSTEMROOT/COMSPEC/PATHEXT 等環境變數；`windowsHide: true` 防止閃現 console |
 
 ### 網路（elevated，deferred）
 
