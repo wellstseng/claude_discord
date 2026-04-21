@@ -1,6 +1,6 @@
 # CLI Bridge 模組
 
-> 原始碼：`src/cli-bridge/` | 更新：2026-04-15
+> 原始碼：`src/cli-bridge/` | 更新：2026-04-21
 
 ## 定位
 
@@ -72,6 +72,7 @@
 | 長訊息分段 | `reply.ts` `splitForDiscord()` | 串流溢出 / 最終 flush 超過 Discord 2000 字上限時自動切段（優先換行切、跨段 fence 補 open/close），避免 `.slice(0, TEXT_LIMIT)` 靜默截斷 |
 | result fallback 文字 | `reply.ts` result handler | buffer 為空但 `result.text` 有值時送出該文字（常見於 permission deny 後 CLI 直接結束 turn）；`is_error` 且無文字時送 `⚠️ turn 結束（無回應文字）` |
 | 上線通知 | `bridge.ts` `sendStartupNotification()` | Bridge start 完成後通知綁定頻道，附帶該 session 未完成任務摘要 |
+| 上線補處理 inbound | `bridge.ts` `drainInboundHistoryOnStartup()` | Bridge start 結尾 fire-and-forget，`consumeForInjection(channelId, ..., "bridge:{label}")` 拿該 scope 全部未消費 inbound entries，加前綴「[bridge 上線補處理：...]」後 `bridge.send()` 丟進 CLI。無 entries 時 noop；避免離線期累積訊息被卡在 inbound 等下一則新訊息才觸發消費 |
 | Dashboard 監控 | `dashboard.ts` UI + `_cbAutoRefresh` | 10s 自動刷新狀態、SSE 即時串流、匯出按鈕、刷新按鈕 |
 | `/cd` 工作目錄切換 | `slash.ts` `handleCd()` + `index.ts` `rebuildBridgeForChannel()` | Slash command 切換 bridge cwd，原子重建路徑統一關舊建新，持久化到 `cli-bridges.json` |
 | `/session new/set` | `slash.ts` `handleSession()` + `index.ts` `rebuildBridgeForChannel()` | 改寫 channelConfig.sessionId 後走原子重建，讓新 process 以正確的 `--resume` 啟動 |
