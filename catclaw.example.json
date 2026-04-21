@@ -400,8 +400,18 @@
     //   "args": ["./mcp/computer-use/dist/index.js"],
     //   "env": {
     //     "COMPUTER_USE_ALLOWED_WINDOWS": "*",
-    //     "COMPUTER_USE_MAX_SCREENSHOT_WIDTH": "1568",
+    //     "COMPUTER_USE_MAX_SCREENSHOT_WIDTH": "1024",
     //     "COMPUTER_USE_HISTORY_DIR": "/tmp/computer-use-history"
+    //   },
+    //   "tier": "elevated"
+    // },
+    // "playwright": {
+    //   "command": "node",
+    //   "args": ["./mcp/playwright/dist/index.js"],
+    //   "env": {
+    //     "PLAYWRIGHT_HEADLESS": "true",
+    //     "PLAYWRIGHT_BROWSER": "chromium",
+    //     "PLAYWRIGHT_VIEWPORT": "1280x720"
     //   },
     //   "tier": "elevated"
     // }
