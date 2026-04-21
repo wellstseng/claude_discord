@@ -39,7 +39,7 @@
 - **權限審批（D3）** — `dangerouslySkipPermissions` **預設 false**（fail-safe）。`process.ts` spawn 時走互斥分支：
   - `true` → 加 `--dangerously-skip-permissions`，**不**加 `--permission-prompt-tool`（信任模式，沿用舊行為），同時 log warn
   - `false`（預設）→ 加 `--permission-prompt-tool mcp__catclaw-bridge-discord__request_permission`，**不**加 dangerous flag
-  CLI 任何權限請求（含 `ExitPlanMode` / `AskUserQuestion`）會呼叫 MCP server 的 `request_permission` tool；`discord-server.ts` 開自己的 discord.js Gateway Client（用 bridge bot token），在 `DISCORD_CHANNEL_ID`（由 process.ts 注入）顯示按鈕：`ExitPlanMode` 顯示 plan 預覽 + Approve/Reject、`AskUserQuestion` 渲染 StringSelectMenu 收集答案塞回 `updatedInput.answers`、其他 tool 顯示 `tool_name + input JSON` + Approve/Deny。60s 內無回應 → `{behavior:"deny", interrupt:true}` 中斷整個 turn。stdin close 時 `client.destroy()` 收尾
+  CLI 任何權限請求（含 `ExitPlanMode` / `AskUserQuestion`）會呼叫 MCP server 的 `request_permission` tool；`discord-server.ts` 開自己的 discord.js Gateway Client（用 bridge bot token），在 `DISCORD_CHANNEL_ID`（由 process.ts 注入）顯示按鈕：`ExitPlanMode` 顯示 plan 預覽 + Approve/Reject、`AskUserQuestion` 渲染 StringSelectMenu 收集答案塞回 `updatedInput.answers`、其他 tool 顯示 `tool_name + input JSON` + Approve/Deny。預設 10 分鐘內無回應 → `{behavior:"deny", interrupt:true}` 中斷整個 turn（可用環境變數 `CATCLAW_PERMISSION_TIMEOUT_MS` 覆寫）。stdin close 時 `client.destroy()` 收尾
 
 ## 整合點
 
@@ -59,7 +59,7 @@
 
 | 功能 | 實作位置 | 說明 |
 |------|---------|------|
-| control_request | `reply.ts` `handleControlRequest()` + `bridge.ts` `sendControlResponse()` | CLI 權限請求 → Discord Approve/Deny 按鈕，60s 超時自動拒絕（舊版 fallback；`dangerouslySkipPermissions=false` 時主路徑為 D3） |
+| control_request | `reply.ts` `handleControlRequest()` + `bridge.ts` `sendControlResponse()` | CLI 權限請求 → Discord Approve/Deny 按鈕，預設 10 分鐘超時自動拒絕（可用 `CATCLAW_PERMISSION_TIMEOUT_MS` 覆寫；舊版 fallback，`dangerouslySkipPermissions=false` 時主路徑為 D3） |
 | 權限審批（D3） | `mcp/discord-server.ts` `request_permission` + `process.ts` spawn 互斥分支 + `bridge.ts:517` 預設 false | Claude CLI `--permission-prompt-tool mcp__catclaw-bridge-discord__request_permission` → MCP server 啟自己的 Gateway Client → 綁定頻道顯示 Approve/Deny / Reject / SelectMenu。`ExitPlanMode` 顯示 plan、`AskUserQuestion` 渲染 select menu 把答案塞回 `updatedInput.answers`、其他 tool 顯示 JSON 預覽。60s timeout = `{behavior:"deny", interrupt:true}` |
 | thinking 顯示 | `reply.ts` + `types.ts` `showThinking` | `cliBridge.showThinking: true` → thinking 以 Discord spoiler (`||..||`) 顯示 |
 | 附件支援 | `reply.ts` `extractAttachments()` + `discord.ts` / `cli-bridge/index.ts` 路由 | 圖片下載後轉 base64 inline（stdin content 變 array），其他檔案仍以 URL 文字描述附加 |

@@ -33,7 +33,7 @@ const TOKEN = process.env.DISCORD_TOKEN ?? "";
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID ?? "";
 const BRIDGE_LABEL = process.env.CATCLAW_BRIDGE_LABEL ?? "bridge";
 const API = "https://discord.com/api/v10";
-const PERMISSION_TIMEOUT_MS = 60_000;
+const PERMISSION_TIMEOUT_MS = Number(process.env.CATCLAW_PERMISSION_TIMEOUT_MS ?? 600_000); // 預設 10 分鐘
 
 // ── Discord REST ─────────────────────────────────────────────────────────────
 
@@ -612,7 +612,7 @@ async function handleExitPlanMode(p: PermissionInput): Promise<PermissionResult>
     return { behavior: "deny", message: "使用者拒絕 plan", interrupt: true };
   } catch {
     await promptMsg.edit({ content: lastContent + "\n\n→ ⏰ Timeout (auto-deny)", components: [] }).catch(() => {});
-    return { behavior: "deny", message: "60s 內無回應", interrupt: true };
+    return { behavior: "deny", message: `${Math.round(PERMISSION_TIMEOUT_MS / 1000)}s 內無回應`, interrupt: true };
   }
 }
 
@@ -660,7 +660,7 @@ async function handleAskUserQuestion(p: PermissionInput): Promise<PermissionResu
       });
     } catch {
       await promptMsg.edit({ content: promptText + "\n\n→ ⏰ Timeout", components: [] }).catch(() => {});
-      return { behavior: "deny", message: `使用者未在 60s 內回答 "${q.question}"`, interrupt: true };
+      return { behavior: "deny", message: `使用者未在 ${Math.round(PERMISSION_TIMEOUT_MS / 1000)}s 內回答 "${q.question}"`, interrupt: true };
     }
   }
 
@@ -693,7 +693,7 @@ async function handleGenericPermission(p: PermissionInput): Promise<PermissionRe
     return { behavior: "deny", message: `使用者拒絕 ${p.tool_name}`, interrupt: true };
   } catch {
     await promptMsg.edit({ content: content + "\n\n→ ⏰ Timeout (auto-deny)", components: [] }).catch(() => {});
-    return { behavior: "deny", message: "60s 內無回應", interrupt: true };
+    return { behavior: "deny", message: `${Math.round(PERMISSION_TIMEOUT_MS / 1000)}s 內無回應`, interrupt: true };
   }
 }
 
@@ -716,7 +716,7 @@ const REQUEST_PERMISSION_TOOL = {
     "ExitPlanMode → 顯示 plan 預覽 + Approve/Reject。",
     "AskUserQuestion → 渲染 select menu 收集答案塞回 updatedInput.answers。",
     "其他 tool → 顯示 tool name + input JSON + Approve/Deny。",
-    "60s 內無回應 → deny + interrupt（中斷整個 turn）。",
+    `${Math.round(PERMISSION_TIMEOUT_MS / 1000)}s 內無回應 → deny + interrupt（中斷整個 turn）。`,
   ].join("\n"),
   inputSchema: {
     type: "object",

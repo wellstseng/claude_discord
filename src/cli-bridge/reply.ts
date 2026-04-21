@@ -613,12 +613,13 @@ async function handleControlRequest(
     components: [row],
   });
 
-  // 等待按鈕互動（60 秒超時）
+  // 等待按鈕互動（預設 10 分鐘，可用 CATCLAW_PERMISSION_TIMEOUT_MS 覆寫）
+  const permissionTimeoutMs = Number(process.env.CATCLAW_PERMISSION_TIMEOUT_MS ?? 600_000);
   try {
     const interaction = await promptMsg.awaitMessageComponent({
       componentType: ComponentType.Button,
       filter: (i: ButtonInteraction) => i.user.id === originalMessage.author.id,
-      time: 60_000,
+      time: permissionTimeoutMs,
     });
 
     const allowed = interaction.customId.startsWith("cb-approve-");

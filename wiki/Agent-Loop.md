@@ -72,7 +72,7 @@ LLM 輸出被截斷時（`max_tokens` stop reason），自動續接：
 | 層級 | 偵測條件 | 動作 |
 | ---- | -------- | ---- |
 | Exact Loop | 同參數呼叫 3 次 | 中斷 + 警告 |
-| Loose Retry | 最近 10 次中 8 次同 tool | 中斷 + 警告 |
+| Loose Retry | 最近 10 次中 ≥8 次同 tool，且其中 ≥5 次「失敗 + args 相似於當前 call」 | 中斷 + 警告（單看 tool name 會誤擋探索性呼叫，需疊 args 相似度 + 失敗判定） |
 | Alternating Cycle | 交替循環偵測 | 中斷 + 警告 |
 
 ### TurnTracker

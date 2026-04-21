@@ -986,6 +986,7 @@ Hot-reload：存檔後 500ms 內自動生效。
 | `CATCLAW_CLAUDE_BIN` | `"claude"` | Claude CLI binary 路徑 |
 | `ACP_TRACE` | — | 設為 `1` 開啟 ACP 串流除錯 log |
 | `CATCLAW_CHANNEL_ID` | — | 由 acp.ts 自動注入，供重啟回報用 |
+| `CATCLAW_PERMISSION_TIMEOUT_MS` | `600000`（10 分鐘）| CLI Bridge 權限請求按鈕超時（`control_request` 與 `discord-server.ts` MCP permission 共用） |
 
 ### ecosystem.config.cjs 中的預設值
 
