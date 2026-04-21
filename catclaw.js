@@ -278,8 +278,16 @@ switch (cmd) {
   case "restart":
     run("npx pnpm build");
     triggerRestart();
-    run("npx pm2 restart catclaw");
-    console.log("🔄 catclaw 已重啟");
+    if (isRunning()) {
+      run("npx pm2 restart catclaw");
+      console.log("🔄 catclaw 已重啟");
+    } else {
+      // process 不存在（被 delete 或從未啟動）→ fallback 到 start
+      console.log("⚠️ PM2 中找不到 catclaw process，改為啟動...");
+      mkdirSync(resolve(__dirname, "signal"), { recursive: true });
+      run("npx pm2 start ecosystem.config.cjs");
+      console.log("✅ catclaw 已啟動");
+    }
     break;
 
   case "logs": {
