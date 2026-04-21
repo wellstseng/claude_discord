@@ -27,7 +27,7 @@
 
 ```
 McpClient.start()
-  ↓ spawn(command, args)          — stdio: pipe/pipe/pipe
+  ↓ spawn(command, args)          — stdio: pipe/pipe/pipe, windowsHide: true
   ↓ JSON-RPC: initialize          — protocolVersion: "2024-11-05"
   ↓ notification: initialized
   ↓ JSON-RPC: tools/list          — 取得 server 提供的 tool 清單

@@ -74,7 +74,7 @@ interface ToolContext {
 
 | Tool | 說明 |
 |------|------|
-| `run_command` | 執行 shell 指令（timeout + cwd + abort） |
+| `run_command` | 執行 shell 指令（timeout + cwd + abort）。Windows 用 `cmd /c`，Unix 用 `sh -c`；`windowsHide: true` 防止閃現 console |
 
 ### 網路（elevated，deferred）
 

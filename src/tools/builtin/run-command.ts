@@ -139,11 +139,17 @@ export const tool: Tool = {
         if (process.env[key]) safeEnv[key] = process.env[key];
       }
 
-      const proc = spawn("sh", ["-c", command], {
-        cwd,
-        env: safeEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      const isWin = process.platform === "win32";
+      const proc = spawn(
+        isWin ? "cmd" : "sh",
+        isWin ? ["/c", command] : ["-c", command],
+        {
+          cwd,
+          env: safeEnv,
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
 
       let output = "";
       let truncated = false;

@@ -95,6 +95,7 @@ export class McpClient {
     this.proc = spawn(this.cfg.command, this.cfg.args ?? [], {
       env,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     this.proc.on("error", (err) => {
