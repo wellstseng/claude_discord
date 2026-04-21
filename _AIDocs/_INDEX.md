@@ -1,6 +1,6 @@
 # CatClaw _AIDocs 知識庫索引
 
-> 建立日期：2026-03-18 | 最近更新：2026-04-20 | 專案：catclaw
+> 建立日期：2026-03-18 | 最近更新：2026-04-21 | 專案：catclaw
 
 ## 專案簡介
 
@@ -39,7 +39,8 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Workflow | `src/workflow/` | 工作流引擎：rut/oscillation/fix-escalation/sync/wisdom/failure-detector |
 | Cron | `src/cron.ts` | 排程服務（cron/every/at），croner 驅動 |
 | MCP | `src/mcp/` | MCP client（rich content 支援）+ Discord MCP server |
-| Computer Use MCP | `mcp/computer-use/` | 獨立 MCP Server：螢幕截圖/鍵鼠操控/視窗管理/測試框架（9 tools） |
+| Computer Use MCP | `mcp/computer-use/` | 獨立 MCP Server：螢幕截圖（等比縮放+座標自動換算）/鍵鼠操控（拖曳插值）/視窗管理/測試框架（9 tools） |
+| Playwright MCP | `mcp/playwright/` | 獨立 MCP Server：headless 瀏覽器自動化（封裝 @playwright/mcp，不佔用螢幕鍵鼠） |
 | Vector | `src/vector/` | Ollama embedding + LanceDB 向量搜尋 |
 | Discord Entry | `src/discord.ts` | Discord Client、訊息過濾、debounce、message-pipeline 呼叫、agent-loop 啟動 |
 | History | `src/history.ts` | 訊息歷史記錄（NDJSON append-only） |

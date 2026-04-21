@@ -1,7 +1,7 @@
 # modules/dashboard — Web Dashboard + REST API
 
-> 檔案：`src/core/dashboard.ts` (~5500 行)
-> 更新日期：2026-04-19
+> 檔案：`src/core/dashboard.ts` (~5700 行)
+> 更新日期：2026-04-21
 
 ## 職責
 
@@ -31,7 +31,7 @@ Bearer token 認證（可選）：
 | Subagents | 子 agent 列表 + Kill（含 agentId badge） |
 | Tasks | 任務管理面板 |
 | Cron | 排程 job 管理 |
-| Config | catclaw.json 線上編輯（含 FileWatcher 目錄監聽設定） |
+| Config | catclaw.json 線上編輯（含 FileWatcher 目錄監聽設定、MCP Servers 模組化設定 + env map 編輯 + 一鍵預設） |
 | Memory | Atom Browser（排序/篩選/刪除）+ Recall Tester + Stats Panel |
 | Pipeline | 管線設定總覽 + Embedding/Extract Model 切換 + Ollama 模型管理 + Vector Resync |
 | CLI Bridge | 持久 CLI Bridge 控制台（狀態、即時日誌、turn 歷程、Console 輸入、控制按鈕、idleSuspendMs 設定） |
