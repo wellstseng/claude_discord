@@ -101,7 +101,7 @@ Bearer token 認證（可選）：
 | 端點 | 方法 | 說明 |
 |------|------|------|
 | `/api/config` | GET | 取得設定（敏感欄位遮罩 `***`） |
-| `/api/config` | POST | 更新設定（自動備份 + 敏感欄位還原） |
+| `/api/config` | POST | 更新設定（自動備份 + 敏感欄位還原 + S17 守門：拒絕寫入 `safety.enabled=false` / `safety.selfProtect=false`） |
 | `/api/models-json` | GET | models.json 內容 |
 | `/api/models-config` | GET/POST | models-config.json 讀寫 |
 

@@ -10,6 +10,7 @@
 
 import {
   Client,
+  Events,
   GatewayIntentBits,
   type Message,
   type GuildTextBasedChannel,
@@ -81,7 +82,7 @@ async function acquireSharedClient(botToken: string, sender: IndependentBotSende
     if (!entry.ready) {
       await new Promise<void>((resolve) => {
         if (entry!.client.isReady()) { entry!.ready = true; resolve(); return; }
-        entry!.client.once("ready", () => { entry!.ready = true; resolve(); });
+        entry!.client.once(Events.ClientReady, () => { entry!.ready = true; resolve(); });
       });
     }
     return entry.client;
@@ -101,7 +102,7 @@ async function acquireSharedClient(botToken: string, sender: IndependentBotSende
   await client.login(botToken);
   await new Promise<void>((resolve) => {
     if (client.isReady()) { resolve(); return; }
-    client.once("ready", () => resolve());
+    client.once(Events.ClientReady, () => resolve());
   });
   entry.ready = true;
 

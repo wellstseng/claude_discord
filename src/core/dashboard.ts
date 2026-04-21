@@ -4011,6 +4011,14 @@ export class DashboardServer {
               const restored = restoreMasked(parsed, originalRaw) as Record<string, unknown>;
               const discord = restored?.discord as Record<string, unknown> | undefined;
               if (!discord?.token) throw new Error("缺少必要欄位 discord.token");
+              // S17 守門：safety.enabled / selfProtect 禁止寫為 false
+              const safetyBlk = restored?.safety as Record<string, unknown> | undefined;
+              if (safetyBlk?.enabled === false) {
+                throw new Error("safety.enabled 禁止設為 false（S17 守門），請維持開啟");
+              }
+              if (safetyBlk?.selfProtect === false) {
+                throw new Error("safety.selfProtect 禁止設為 false（S17 守門），請維持開啟");
+              }
               backupConfig(cp);
               const tmp = cp + ".tmp";
               writeFileSync(tmp, JSON.stringify(restored, null, 2), "utf-8");
