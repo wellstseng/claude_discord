@@ -453,7 +453,11 @@ export async function handleCliBridgeReply(
 
       // ── tool_result ──
       if (evt.type === "tool_result") {
-        if (showToolCalls === "all") {
+        if (evt.error) {
+          // 工具失敗（逾時等）→ 不論 showToolCalls 設定，一律通知
+          const shortErr = evt.error.length > 200 ? evt.error.slice(0, 200) + "…" : evt.error;
+          await sendText(`❌ \`${evt.title}\` 失敗：${shortErr}`);
+        } else if (showToolCalls === "all") {
           const durStr = evt.duration_ms ? ` (${Math.round(evt.duration_ms / 1000)}s)` : "";
           await sendText(`✅ \`${evt.title}\`${durStr}`);
         }

@@ -61,7 +61,7 @@ export type CliBridgeEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_call"; title: string }
-  | { type: "tool_result"; title: string; duration_ms?: number }
+  | { type: "tool_result"; title: string; duration_ms?: number; error?: string }
   | { type: "session_init"; sessionId: string }
   | { type: "result"; is_error: boolean; text?: string; session_id?: string }
   | { type: "error"; message: string }

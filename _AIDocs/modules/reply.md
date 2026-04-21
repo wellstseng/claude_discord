@@ -152,6 +152,7 @@ const MEDIA_RE = /\bMEDIA:\s*`?([^\n`]+)`?/gi;
 | `text_delta` | 先 flush thinkingBuffer（如有）；累積到 buffer + totalText；超過 threshold 進入 fileMode；≥2000 立即 flush，否則 scheduleFlush(3s) |
 | `thinking_delta` | `showThinking` 開啟時累積到 thinkingBuffer → scheduleFlush(3s) |
 | `tool_call` | `"all"` → cancelFlushTimer + flush(true) + 傳 `🔧 使用工具：{title}`；`"summary"` → 首次 tool_call 傳 `⏳ 處理中...`（後續靜默）；`"none"` → 完全不輸出 |
+| `tool_result` | 有 error → 不論 showToolCalls 設定一律傳 `❌ {title} 失敗：{error}`；成功 + `"all"` → 傳 `✅ {title} (Ns)` |
 | `done` | cancelFlushTimer + stopTyping → extractMediaTokens → flush 或 sendFile → uploadMediaFile |
 | `error` | cancelFlushTimer + stopTyping → flush(true) → 傳 `⚠️ 發生錯誤：{message}`（截斷至 TEXT_LIMIT） |
 | `status` | 靜默忽略 |
@@ -220,6 +221,7 @@ export async function handleAgentLoopReply(
 | `text_delta` | streaming：`streamEditTextDelta()`；chunk：累積 buffer + scheduleFlush |
 | `thinking` | `showThinking` 開啟時累積 thinkingBuffer |
 | `tool_start` | `"all"` → finalize + 傳 `🔧 使用工具：{name}`；`"summary"` → 首次傳 `⏳ 處理中...` |
+| `tool_result` | 有 error 且 toolMode !== "none" → finalize + 傳 `❌ {name} 失敗：{error}`（截斷 200 字）；成功時靜默 |
 | `tool_blocked` | toolMode !== "none" → finalize + 傳 `🚫 工具被阻擋：{name} — {reason}` |
 | `done` | finalize → extractMediaTokens → fileMode 分支處理 → 上傳 MEDIA 附件 |
 | `error` | stopTyping → 若 editMsg 空（placeholder）直接 edit 為錯誤訊息；否則 finalize + send |

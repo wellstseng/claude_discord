@@ -371,7 +371,9 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
     // ── tool_use_summary：工具結果摘要 ──
     if (type === "tool_use_summary") {
       const name = (obj["tool_name"] ?? obj["name"] ?? "unknown") as string;
-      return { type: "tool_result", title: name };
+      const error = obj["error"] as string | undefined;
+      const durationMs = typeof obj["duration_ms"] === "number" ? obj["duration_ms"] as number : undefined;
+      return { type: "tool_result", title: name, duration_ms: durationMs, error: error || undefined };
     }
 
     // ── control_request：權限請求 ──

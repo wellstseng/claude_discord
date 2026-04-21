@@ -366,6 +366,17 @@ export async function handleAgentLoopReply(
           if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); pendingSegmentReset = true; }
         }
 
+      } else if (event.type === "tool_result") {
+        // 工具執行完成：有 error 時（特別是逾時）主動通知使用者
+        if (event.error && toolMode !== "none") {
+          if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); pendingSegmentReset = true; }
+          else { cancelFlushTimer(); if (!fileMode) await flush(true); }
+          const shortErr = event.error.length > 200 ? event.error.slice(0, 200) + "…" : event.error;
+          await send(`❌ ${event.name} 失敗：${shortErr}`);
+          if (isFirst) stopTyping();
+          isFirst = false;
+        }
+
       } else if (event.type === "tool_blocked") {
         if (toolMode !== "none") {
           if (useStreamEdit) { cancelEditTimer(); await finalizeStreamEdit(); pendingSegmentReset = true; }
