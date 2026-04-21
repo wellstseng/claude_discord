@@ -490,6 +490,27 @@ function assessReversibility(toolName: string, params: Record<string, unknown>):
 
 // ── before_tool_call hook 鏈 ──────────────────────────────────────────────────
 
+/** 取 tool 呼叫的 args 特徵（用於迴圈偵測的「相似度」比較） */
+function argsSignature(name: string, params: Record<string, unknown>): string {
+  if (name === "run_command" && typeof params["command"] === "string") {
+    return String(params["command"]).trim().slice(0, 30);
+  }
+  const p = String(params["path"] ?? params["file_path"] ?? "");
+  if (p) return p;
+  return JSON.stringify(params).slice(0, 60);
+}
+
+/** 判斷 tool 執行結果是否失敗（用於迴圈偵測的「失敗」計數） */
+function isFailingResult(result: unknown, error: string | undefined): boolean {
+  if (error) return true;
+  if (!result || typeof result !== "object") return false;
+  const r = result as Record<string, unknown>;
+  if (typeof r.exitCode === "number" && r.exitCode !== 0) return true;
+  if (r.error) return true;
+  if (r.isError === true) return true;
+  return false;
+}
+
 type BeforeToolResult =
   | { blocked: true; needsApproval?: boolean; reason: string }
   | { blocked: false; params: Record<string, unknown>; warning?: string };
@@ -556,11 +577,19 @@ async function runBeforeToolCall(
       return { blocked: true, reason: `偵測到工具迴圈：${call.name} 以相同參數連續呼叫 ${identicalCount} 次` };
     }
   }
-  // 4b. 寬鬆防線：同 tool 不同參數，但最近 10 次有 8 次都是同一 tool → 疑似無效重試
+  // 4b. 寬鬆防線：同 tool 最近 10 次中 ≥8 次、其中 ≥5 次「失敗且 args 與當前相似」→ 疑似無效重試
+  // 只看 tool name count 會把探索性呼叫（不同指令）誤擋，必須同時檢查 args 相似度 + result 失敗
   const last10 = ctx.recentCalls.slice(-10);
-  const sameName10 = last10.filter(c => c.name === call.name).length;
-  if (last10.length >= 10 && sameName10 >= 8) {
-    return { blocked: true, reason: `${call.name} 在最近 10 次呼叫中出現 ${sameName10} 次，疑似無效重試` };
+  const sameName10 = last10.filter(c => c.name === call.name);
+  if (last10.length >= 10 && sameName10.length >= 8) {
+    const curSig = argsSignature(call.name, call.params);
+    const failingSimilar = sameName10.filter(c =>
+      isFailingResult(c.result, c.error) &&
+      argsSignature(c.name, c.params as Record<string, unknown>) === curSig
+    ).length;
+    if (failingSimilar >= 5) {
+      return { blocked: true, reason: `${call.name} 在最近 10 次中有 ${failingSimilar} 次失敗且 args 相似，疑似無效重試` };
+    }
   }
 
   // 4b. Alternating Tool Cycle Detection（period-2：A→B→A→B→A…）
