@@ -7,3 +7,4 @@ signal/
 .signal/
 .env
 .claude/memory/personal/
+.claude/memory/episodic/
