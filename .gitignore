@@ -6,3 +6,4 @@ data/
 signal/
 .signal/
 .env
+.claude/memory/personal/

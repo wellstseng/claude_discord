@@ -165,7 +165,8 @@ export class InboundHistoryStore {
       const files = readdirSync(this.storeDir).filter(f => f.endsWith(".jsonl"));
       for (const f of files) {
         // 檔名格式：discord_{channelId}_{scope}.jsonl 或舊格式 discord_{channelId}.jsonl
-        const m = f.match(/^discord_(.+?)(?:_([^.]+))?\.jsonl$/);
+        // channelId 是純數字；scope 以非數字開頭（main/agent_xxx/bridge_xxx）
+        const m = f.match(/^discord_(\d+?)(?:_([a-zA-Z][^.]*))?\.jsonl$/);
         if (!m) continue;
         const channelId = m[1]!;
         const scope = m[2] ?? "main";

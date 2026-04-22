@@ -4786,11 +4786,10 @@ export class DashboardServer {
       if (url.startsWith("/api/inbound-history") && method === "GET") {
         const store = getInboundHistoryStore();
         if (!store) { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ channels: [] })); return; }
-        const chMatch = url.match(/[?&]channelId=([^&]+)/);
-        if (chMatch) {
-          const channelId = decodeURIComponent(chMatch[1]!);
-          const scopeMatch = url.match(/[?&]scope=([^&]+)/);
-          const scope = scopeMatch ? decodeURIComponent(scopeMatch[1]!) : "main";
+        const channelIdParam = urlParams.get("channelId");
+        if (channelIdParam) {
+          const channelId = channelIdParam;
+          const scope = urlParams.get("scope") || "main";
           const entries = store.readEntries(channelId, scope);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ channelId, entries }));
