@@ -1,6 +1,6 @@
 # CatClaw _AIDocs 知識庫索引
 
-> 建立日期：2026-03-18 | 最近更新：2026-04-21 | 專案：catclaw
+> 建立日期：2026-03-18 | 最近更新：2026-04-23 | 專案：catclaw
 
 ## 專案簡介
 
@@ -42,7 +42,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Computer Use MCP | `mcp/computer-use/` | 獨立 MCP Server：螢幕截圖（等比縮放+座標自動換算）/鍵鼠操控（拖曳插值）/視窗管理/測試框架（9 tools） |
 | Playwright MCP | `mcp/playwright/` | 獨立 MCP Server：headless 瀏覽器自動化（封裝 @playwright/mcp，不佔用螢幕鍵鼠） |
 | Vector | `src/vector/` | Ollama embedding + LanceDB 向量搜尋 |
-| Discord Entry | `src/discord.ts` | Discord Client、訊息過濾、debounce、message-pipeline 呼叫、agent-loop 啟動 |
+| Discord Entry | `src/discord.ts` | Discord Client、訊息過濾、debounce、messageUpdate 編輯感知、message-pipeline 呼叫、agent-loop 啟動 |
 | History | `src/history.ts` | 訊息歷史記錄（NDJSON append-only） |
 | Slash Commands | `src/slash.ts` | Discord Slash Commands 管理介面（管理員直接執行，繞過 AI） |
 
@@ -74,7 +74,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | [modules/tool-registry.md](modules/tool-registry.md) | `src/tools/` | Tool 註冊 + 25 builtin tools | 2026-04-15 |
 | [modules/message-trace.md](modules/message-trace.md) | `src/core/message-trace.ts` | 7 階段訊息追蹤 + TraceStore + ContextStore | 2026-04-06 |
 | [modules/config.md](modules/config.md) | `src/core/config.ts` | JSON 設定載入 | 2026-04-05 |
-| [modules/discord.md](modules/discord.md) | `src/discord.ts` + `src/discord/` | Discord 入口 + Bot Circuit Breaker | 2026-04-13 |
+| [modules/discord.md](modules/discord.md) | `src/discord.ts` + `src/discord/` | Discord 入口 + messageUpdate 編輯感知 + Bot Circuit Breaker | 2026-04-23 |
 | [modules/providers.md](modules/providers.md) | `src/providers/` | LLM Provider 系統 | 2026-04-05 |
 | [modules/skills.md](modules/skills.md) | `src/skills/` | Skill 系統 | 2026-04-05 |
 | [modules/session.md](modules/session.md) | `src/core/session.ts` | SessionManager | 2026-04-05 |

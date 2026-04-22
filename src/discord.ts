@@ -82,6 +82,9 @@ const debounceImages = new Map<string, Array<{ data: string; mimeType: string; n
 /** debounce key → 觸發 debounce 的第一則訊息（用於 reply） */
 const debounceMessages = new Map<string, Message>();
 
+/** message ID → { debounceKey, index } 用於 messageUpdate 時替換 debounce buffer 內容 */
+const debounceMessageIndex = new Map<string, { key: string; idx: number }>();
+
 // ── Debounce 函式 ────────────────────────────────────────────────────────────
 
 /**
@@ -109,6 +112,7 @@ function debounce(
 
   // 累積訊息文字（多則用換行合併）
   const lines = debounceBuffers.get(key) ?? [];
+  debounceMessageIndex.set(message.id, { key, idx: lines.length });
   lines.push(text);
   debounceBuffers.set(key, lines);
 
@@ -133,11 +137,58 @@ function debounce(
     debounceBuffers.delete(key);
     debounceImages.delete(key);
     debounceMessages.delete(key);
+    // 清理 messageId → debounce index 映射
+    for (const [mid, ref] of debounceMessageIndex) {
+      if (ref.key === key) debounceMessageIndex.delete(mid);
+    }
 
     onFire(combinedText, firstMessage, allImages);
   }, config.debounceMs);
 
   debounceTimers.set(key, timer);
+}
+
+// ── 訊息編輯處理 ─────────────────────────────────────────────────────────────
+
+/**
+ * 處理 Discord messageUpdate 事件
+ * A. 若訊息還在 debounce buffer 內 → 直接替換內容
+ * B. 若已離開 debounce（已 dispatch）→ 透過 CLI Bridge 注入編輯通知
+ */
+async function handleMessageEdit(message: Message, config: BridgeConfig): Promise<void> {
+  // 忽略 bot 自身
+  if (message.author.id === message.client.user?.id) return;
+  const newContent = message.content?.trim();
+  if (!newContent) return;
+
+  // A. Debounce 窗口內：替換 buffer 內容
+  const ref = debounceMessageIndex.get(message.id);
+  if (ref) {
+    const lines = debounceBuffers.get(ref.key);
+    if (lines && ref.idx < lines.length) {
+      const oldText = lines[ref.idx];
+      // strip mention prefix（同 handleMessage 邏輯）
+      const botId = message.client.user?.id;
+      const stripped = botId ? newContent.replace(new RegExp(`<@!?${botId}>\\s*`, "g"), "").trim() : newContent;
+      lines[ref.idx] = stripped;
+      log.info(`[discord] messageUpdate：debounce 內替換 msgId=${message.id} old="${oldText?.slice(0, 40)}" → new="${stripped.slice(0, 40)}"`);
+      return;
+    }
+  }
+
+  // B. 已離開 debounce → 注入編輯通知到 CLI Bridge
+  try {
+    const { getCliBridge } = await import("./cli-bridge/index.js");
+    const cliBridge = getCliBridge(message.channelId);
+    if (cliBridge && cliBridge.status === "busy") {
+      const editNotice = `[訊息編輯] ${message.author.displayName ?? message.author.username} 將訊息修改為：\n${newContent}`;
+      cliBridge.send(editNotice, "discord", { user: message.author.tag, sourceChannelId: message.channelId });
+      log.info(`[discord] messageUpdate：注入編輯通知到 CLI Bridge ${cliBridge.label} msgId=${message.id}`);
+      return;
+    }
+  } catch { /* CLI Bridge 未初始化 → 忽略 */ }
+
+  log.debug(`[discord] messageUpdate：msgId=${message.id} 無對應 debounce 或 active bridge，忽略`);
 }
 
 // ── 附件下載 ─────────────────────────────────────────────────────────────────
@@ -224,6 +275,15 @@ export function createBot(): Client {
   client.on("messageCreate", (message: Message) => {
     // 每次都讀最新的全域 config，支援 hot-reload
     void handleMessage(message, config);
+  });
+
+  client.on("messageUpdate", (_oldMessage, newMessage) => {
+    // partial message → 需要 fetch 完整內容
+    if (newMessage.partial) {
+      newMessage.fetch().then(full => void handleMessageEdit(full, config)).catch(() => {});
+    } else {
+      void handleMessageEdit(newMessage as Message, config);
+    }
   });
 
   // SUB-5：持久子 agent Discord 通知 + thread 建立用
