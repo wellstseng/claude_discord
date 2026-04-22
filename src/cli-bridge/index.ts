@@ -390,6 +390,23 @@ export function getCliBridgeBotUserIds(): Set<string> {
   return ids;
 }
 
+/**
+ * 寫回單一 channel 的 autoNameSuffix 到 cli-bridges.json。
+ * 先更新 `_lastConfigJson` snapshot 以 pre-empt hot-reload 比對，避免引發多餘 rebuild。
+ */
+export function persistChannelAutoNameSuffix(channelId: string, suffix: string | null): void {
+  const all = loadAllCliBridgeConfigs();
+  const cfg = all.find(c => c.channels[channelId]);
+  if (!cfg) return;
+  const chCfg = cfg.channels[channelId];
+  if (!chCfg) return;
+  if ((chCfg.autoNameSuffix ?? null) === (suffix ?? null)) return;
+  chCfg.autoNameSuffix = suffix;
+  _lastConfigJson.set(channelId, configSnapshotJson(cfg, channelId));
+  saveCliBridgeConfigs(all);
+  log.debug(`[cli-bridge] persistChannelAutoNameSuffix: channel=${channelId} suffix=${suffix}`);
+}
+
 // ── Hot-reload ──────────────────────────────────────────────────────────────
 
 let _watching = false;

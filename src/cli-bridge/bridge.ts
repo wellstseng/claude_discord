@@ -122,6 +122,9 @@ export class CliBridge {
       // ── 補處理 inbound history（離線期間累積的訊息）──
       // 排在「已上線」之後 fire；Discord 先看到 ✅ 再看到 CLI 處理離線訊息
       void this.drainInboundHistoryOnStartup();
+
+      // ── 依 workingDir 自動更新頻道 / 討論串名稱（fire-and-forget）──
+      void this.applyAutoChannelName();
     } catch (err) {
       log.error(`[cli-bridge:${this.label}] start failed: ${err instanceof Error ? err.message : String(err)}`);
       // 進入自動重啟迴路（session ID 衝突等暫態問題可自動恢復）
@@ -501,6 +504,17 @@ export class CliBridge {
       log.debug(`[cli-bridge:${this.label}] 上線通知已送出`);
     } catch (err) {
       log.debug(`[cli-bridge:${this.label}] 上線通知失敗: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // ── 依 workingDir 自動更新頻道名 ────────────────────────────────────────
+  private async applyAutoChannelName(): Promise<void> {
+    if (!this._sender) return;
+    try {
+      const { applyAutoChannelName } = await import("./channel-naming.js");
+      await applyAutoChannelName(this, this._sender);
+    } catch (err) {
+      log.debug(`[cli-bridge:${this.label}] auto-name 失敗: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

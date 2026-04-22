@@ -80,6 +80,8 @@ export interface CliBridgeChannelConfig {
   dangerouslySkipPermissions?: boolean;
   /** 需要 @mention 才回覆（預設 false） */
   requireMention?: boolean;
+  /** 最近一次自動附加到頻道名的尾綴（下次變更時用於移除舊尾綴，避免累加） */
+  autoNameSuffix?: string | null;
 }
 
 /** 單一 CLI Bridge 實例設定 */
