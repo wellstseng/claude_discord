@@ -202,6 +202,9 @@ export async function startAllBridges(discordClient: Client): Promise<void> {
   startIdleScanner();
 }
 
+// 跨頻道 mention 防重複：同一則訊息只讓一個 bridge 處理
+const _crossChannelClaimed = new Set<string>();
+
 /**
  * 獨立 bot messageCreate handler
  */
@@ -229,9 +232,20 @@ function handleIndependentBotMessage(bridge: CliBridge, msg: Message): void {
   const hasMentionedAnyBot = mentionedBotIds.size > 0 || mentionedExternalBot;
   const iAmMentioned = myBotId ? mentionedBotIds.has(myBotId) : false;
 
-  // 非綁定頻道：只有被 mention 才處理
+  // 非綁定頻道：只有被 mention 才處理，且同一則訊息只讓一個 bridge 回應
   if (!isHomeChannel) {
     if (!iAmMentioned) return;
+    // 搶佔：第一個 bridge 拿到就處理，其餘跳過
+    if (_crossChannelClaimed.has(msg.id)) {
+      log.debug(`[cli-bridge] ${bridge.label} 跳過跨頻道 mention（已被其他 bridge 搶佔）：msgId=${msg.id}`);
+      return;
+    }
+    _crossChannelClaimed.add(msg.id);
+    // 清理舊 ID（避免記憶體洩漏）
+    if (_crossChannelClaimed.size > 100) {
+      const ids = Array.from(_crossChannelClaimed);
+      for (let i = 0; i < ids.length - 50; i++) _crossChannelClaimed.delete(ids[i]!);
+    }
     log.info(`[cli-bridge] ${bridge.label} 跨頻道 mention：channel=${msg.channelId}`);
   }
 
