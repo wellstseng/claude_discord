@@ -206,6 +206,128 @@ export async function startAllBridges(discordClient: Client): Promise<void> {
 const _crossChannelClaimed = new Set<string>();
 
 /**
+ * 跨頻道 mention 路由：
+ * 1. 該頻道已有 bridge → 由該 bridge 處理（isHomeChannel=true，不走這裡）
+ * 2. 優先找 suspended 的 bridge
+ * 3. 沒有 suspended → auto-spawn 新 bridge 綁定該頻道
+ * 4. 完全沒有 bridge → 回傳 null（fallback agent loop）
+ */
+function findOrSpawnBridgeForChannel(channelId: string, msg: Message): CliBridge | null {
+  // 已有綁定 bridge
+  const existing = bridges.get(channelId);
+  if (existing) return existing;
+
+  // 優先找 suspended 的 bridge
+  for (const b of bridges.values()) {
+    if (b.status === "suspended") {
+      log.info(`[cli-bridge] 跨頻道 mention 路由到 suspended bridge：${b.label} → channel=${channelId}`);
+      return b;
+    }
+  }
+
+  // 沒有 suspended → auto-spawn
+  const templateBridge = Array.from(bridges.values())[0];
+  if (!templateBridge) return null; // 完全沒有 bridge
+
+  void autoSpawnBridge(channelId, templateBridge, msg);
+  return null; // auto-spawn 是 async，本次訊息由 spawn 後的 bridge 處理
+}
+
+/**
+ * Auto-spawn：以模板 bridge 建立新 bridge 綁定到指定頻道，並持久化到 cli-bridges.json。
+ */
+async function autoSpawnBridge(channelId: string, template: CliBridge, triggerMsg: Message): Promise<void> {
+  if (bridges.has(channelId)) return; // 防止重複 spawn
+
+  const templateConfig = template.getBridgeConfig();
+  const ch = triggerMsg.channel;
+  const channelName = ch.isTextBased() && !ch.isDMBased() && "name" in ch
+    ? (ch as { name: string }).name : channelId;
+  const label = `auto-${channelName}-${channelId.slice(-6)}`;
+
+  const newChannelConfig: CliBridgeChannelConfig = {
+    label,
+    requireMention: true,
+    dangerouslySkipPermissions: false,
+  };
+
+  const newConfig: CliBridgeConfig = {
+    ...templateConfig,
+    label,
+    channels: { [channelId]: newChannelConfig },
+  };
+
+  // 建立 bridge
+  const bridge = new CliBridge(label, channelId, newConfig, newChannelConfig);
+  bridges.set(channelId, bridge);
+  bridgesByLabel.set(label, bridge);
+  log.info(`[cli-bridge] auto-spawn bridge: ${label} → channel ${channelId}`);
+
+  // 初始化 sender
+  try {
+    const sender = createBridgeSender(_discordClient!, { botToken: templateConfig.botToken });
+    await sender.init(channelId);
+    bridge.setSender(sender);
+
+    if (sender.mode === "independent-bot") {
+      sender.onMessage((m: Message) => {
+        handleIndependentBotMessage(bridge, m);
+      });
+    }
+
+    // 啟動並處理觸發訊息
+    await bridge.ensureAlive();
+    const { handleCliBridgeReply, extractAttachments } = await import("./reply.js");
+    const { text: attachmentText, imageBlocks } = await extractAttachments(triggerMsg);
+    let fullText = triggerMsg.content.replace(/<@!?\d+>/g, "").trim() + attachmentText;
+
+    log.info(`[cli-bridge] auto-spawn 路由：${label} channel=${channelId}`);
+    void handleCliBridgeReply(bridge, fullText, triggerMsg, {
+      showToolCalls: "none",
+    } as Parameters<typeof handleCliBridgeReply>[3], newConfig, imageBlocks);
+
+    // 持久化到 cli-bridges.json
+    const allConfigs = loadAllCliBridgeConfigs();
+    allConfigs.push({ ...newConfig, enabled: true });
+    saveCliBridgeConfigs(allConfigs);
+    log.info(`[cli-bridge] auto-spawn 已持久化：${label}`);
+  } catch (err) {
+    log.error(`[cli-bridge] auto-spawn 失敗：${err instanceof Error ? err.message : String(err)}`);
+    bridges.delete(channelId);
+    bridgesByLabel.delete(label);
+  }
+}
+
+/**
+ * 跨頻道路由：將訊息交給指定 bridge 處理（suspended bridge 復活後處理）
+ */
+function handleCrossChannelRoute(bridge: CliBridge, msg: Message): void {
+  void (async () => {
+    try {
+      await bridge.ensureAlive();
+      const { handleCliBridgeReply, extractAttachments } = await import("./reply.js");
+      const { text: attachmentText, imageBlocks } = await extractAttachments(msg);
+      let fullText = msg.content.replace(/<@!?\d+>/g, "").trim() + attachmentText;
+      const bridgeConfig = bridge.getBridgeConfig();
+
+      const sender = bridge.getSender();
+      let senderOverride: import("./discord-sender.js").BridgeSender | undefined;
+      const ch = msg.channel;
+      if (ch.isTextBased() && !ch.isDMBased()) {
+        senderOverride = sender.withChannel(ch as import("discord.js").GuildTextBasedChannel);
+      }
+
+      log.info(`[cli-bridge] 跨頻道路由執行：${bridge.label} → channel=${msg.channelId}`);
+      void handleCliBridgeReply(bridge, fullText, msg, {
+        showToolCalls: "none",
+      } as Parameters<typeof handleCliBridgeReply>[3], bridgeConfig, imageBlocks, senderOverride, msg.channelId);
+    } catch (err) {
+      log.error(`[cli-bridge] 跨頻道路由失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  })();
+}
+
+/**
  * 獨立 bot messageCreate handler
  */
 function handleIndependentBotMessage(bridge: CliBridge, msg: Message): void {
@@ -232,19 +354,29 @@ function handleIndependentBotMessage(bridge: CliBridge, msg: Message): void {
   const hasMentionedAnyBot = mentionedBotIds.size > 0 || mentionedExternalBot;
   const iAmMentioned = myBotId ? mentionedBotIds.has(myBotId) : false;
 
-  // 非綁定頻道：只有被 mention 才處理，且同一則訊息只讓一個 bridge 回應
+  // 非綁定頻道：跨頻道 mention 路由
   if (!isHomeChannel) {
     if (!iAmMentioned) return;
-    // 搶佔：第一個 bridge 拿到就處理，其餘跳過
-    if (_crossChannelClaimed.has(msg.id)) {
-      log.debug(`[cli-bridge] ${bridge.label} 跳過跨頻道 mention（已被其他 bridge 搶佔）：msgId=${msg.id}`);
-      return;
-    }
+    // 防重複：同一則訊息只處理一次
+    if (_crossChannelClaimed.has(msg.id)) return;
     _crossChannelClaimed.add(msg.id);
-    // 清理舊 ID（避免記憶體洩漏）
     if (_crossChannelClaimed.size > 100) {
       const ids = Array.from(_crossChannelClaimed);
       for (let i = 0; i < ids.length - 50; i++) _crossChannelClaimed.delete(ids[i]!);
+    }
+
+    // 路由到最適合的 bridge 或 auto-spawn
+    const target = findOrSpawnBridgeForChannel(msg.channelId, msg);
+    if (!target) {
+      // auto-spawn 已觸發（async），或完全沒有 bridge → fallback agent loop
+      log.info(`[cli-bridge] 跨頻道 mention：channel=${msg.channelId} → ${bridges.size > 0 ? "auto-spawn" : "fallback agent loop"}`);
+      return;
+    }
+    if (target !== bridge) {
+      // 路由到另一個 bridge（suspended 的那個）
+      log.info(`[cli-bridge] 跨頻道 mention 轉交：${bridge.label} → ${target.label} channel=${msg.channelId}`);
+      handleCrossChannelRoute(target, msg);
+      return;
     }
     log.info(`[cli-bridge] ${bridge.label} 跨頻道 mention：channel=${msg.channelId}`);
   }
