@@ -1784,6 +1784,12 @@ const _mcpPresets = {
     command: 'node', args: ['./mcp/playwright/dist/index.js'],
     env: { PLAYWRIGHT_HEADLESS: 'true', PLAYWRIGHT_BROWSER: 'chromium', PLAYWRIGHT_VIEWPORT: '1280x720' },
     tier: 'elevated'
+  },
+  'unity-mcp': {
+    icon: '🎮', label: 'Unity MCP',
+    command: 'uvx', args: ['--from', 'mcpforunityserver', 'mcp-for-unity', '--transport', 'stdio'],
+    env: {},
+    tier: 'elevated'
   }
 };
 
@@ -2361,7 +2367,8 @@ function _traceRowHtml(t) {
   let html = '<tr data-trace-id="' + t.traceId + '" style="border-bottom:1px solid var(--border);cursor:pointer;' + liveStyle + errorStyle + '" onclick="showTraceDetail(\\'' + t.traceId + '\\')">';
   html += '<td style="padding:4px;color:var(--fg2)">' + ts + '</td>';
   const agentBadge = t.agentId ? ' <span style="background:#7c3aed;color:#fff;font-size:0.6rem;padding:0 3px;border-radius:3px">' + t.agentId + '</span>' : '';
-  html += '<td style="padding:4px">…' + ch + agentBadge + '</td>';
+  const copyBtn = '<span title="複製 Trace ID" style="cursor:pointer;font-size:0.7rem;margin-right:2px;opacity:0.5" onclick="event.stopPropagation();navigator.clipboard.writeText(\\'' + t.traceId + '\\').then(()=>{this.textContent=\\'✅\\';setTimeout(()=>this.textContent=\\'📋\\',800)})">📋</span>';
+  html += '<td style="padding:4px">' + copyBtn + '…' + ch + agentBadge + '</td>';
   html += '<td style="padding:4px;text-align:right">' + dur + '</td>';
   html += '<td style="padding:4px;text-align:right">' + (t.effectiveInputTokens ?? t.totalInputTokens ?? 0).toLocaleString() + '</td>';
   html += '<td style="padding:4px;text-align:right">' + (t.totalOutputTokens ?? 0).toLocaleString() + '</td>';

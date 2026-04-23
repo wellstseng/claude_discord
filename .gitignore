@@ -8,3 +8,4 @@ signal/
 .env
 .claude/memory/personal/
 .claude/memory/episodic/
+.claude/memory/feedback_*.md
