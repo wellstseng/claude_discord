@@ -4110,10 +4110,12 @@ export class DashboardServer {
 
       // GET /api/tool-log?session=<safeKey>&turn=<N>
       // 讀整個 turn 的完整 tool log（未截斷的 params/result）— 給 trace 的 click-to-expand 用
-      if (url.startsWith("/api/tool-log")) {
-        const qs = new URLSearchParams(url.slice(url.indexOf("?") + 1));
-        const session = qs.get("session") ?? "";
-        const turnStr = qs.get("turn") ?? "";
+      if (url === "/api/tool-log") {
+        // 注意：`url` 已經是 urlObj.pathname（沒有 query），query 要從 urlParams 拿，
+        // 第一版用 url.slice(url.indexOf("?")+1) 去 parse 結果永遠吃到 "/api/tool-log"
+        // 本身當成 query string，session/turn 全拿不到
+        const session = urlParams.get("session") ?? "";
+        const turnStr = urlParams.get("turn") ?? "";
         const turn = parseInt(turnStr, 10);
         if (!session || !Number.isFinite(turn)) {
           res.writeHead(400, { "Content-Type": "application/json" });
