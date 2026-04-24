@@ -1298,7 +1298,8 @@ export async function* agentLoop(
           const lastMsgPreview = lastMsg
             ? `role=${lastMsg.role} contentType=${Array.isArray(lastMsg.content) ? `array[${lastMsg.content.length}]` : "string"}`
             : "none";
-          log.warn(`[agent-loop] [loop=${loopCount}] EMPTY RESPONSE: msgs=${messages.length} tools=${toolDefs.length} prevDeferred=[${prevIterDeferredActivated.join(",")}] lastMsg=${lastMsgPreview}`);
+          const toolNames = toolDefs.map(d => d.name).join(",");
+          log.warn(`[agent-loop] [loop=${loopCount}] EMPTY RESPONSE: msgs=${messages.length} tools=${toolDefs.length} prevDeferred=[${prevIterDeferredActivated.join(",")}] lastMsg=${lastMsgPreview} toolNames=[${toolNames}]`);
         }
         // Deferred Tool Nudge：上一 iter 活化 deferred tool + 本 iter 空回應 → 注入中性續接
         // 文案改中性（去「[系統提示]」前綴）避開 Anthropic Common cause #1（tool_result 後加 text 強化 end_turn）
@@ -1724,15 +1725,24 @@ export async function* agentLoop(
         };
       }
 
-      // ── Deferred Tool Activation：tool_search 呼叫後，將匹配的 deferred tool 加入 toolDefs ──
+      // ── Deferred Tool Activation：tool_search 呼叫後，依**實際返回的 tool 名單**活化 ──
+      // 不再從 query 字串 fuzzy 推導——這會導致 `_navigate` 被查到時，`_navigate_back` 也因
+      // 子字串匹配被活化，造成 Claude API 空回應 end_turn（見 trace 9cc832ce，tools=18）。
+      // 正解：tool_search 自己已經做過 exact/keyword 匹配，直接信任它的 result，取 name 陣列。
       for (const call of streamResult.toolCalls) {
         if (call.name !== "tool_search") continue;
-        // 從 tool_search 查詢結果找出匹配的 deferred tool 名稱
-        const query = String((call.params as Record<string, unknown>)["query"] ?? "");
-        const names = query.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+        const rec = tracker.toolCalls.find(tc => tc.name === "tool_search");
+        if (!rec || rec.error) continue;
+        const matchedNames = new Set<string>();
+        if (Array.isArray(rec.result)) {
+          for (const item of rec.result as Array<{ name?: unknown }>) {
+            if (item && typeof item.name === "string") matchedNames.add(item.name);
+          }
+        }
+        if (matchedNames.size === 0) continue;
         for (const def of deferredDefs) {
           if (loadedDeferredNames.has(def.name)) continue;
-          if (names.includes(def.name.toLowerCase()) || names.some(n => def.name.toLowerCase().includes(n) || def.description.toLowerCase().includes(n))) {
+          if (matchedNames.has(def.name)) {
             toolDefs.push(def);
             loadedDeferredNames.add(def.name);
             deferredJustActivated.push(def.name);
