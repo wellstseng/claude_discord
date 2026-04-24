@@ -1815,19 +1815,26 @@ export async function* agentLoop(
   // 不讓使用者以為 bot 消失 — 把現況補進 response，讓 Discord 端至少有訊息、可用「繼續」追
   const maxLoopsReached = loopCount > loopCap;
   let fullResponse = tracker.getFullResponse();
+  // 關鍵：reply-handler 從 text_delta 事件串流累積 Discord 訊息，不讀 done.text
+  // → 在 loop 後直接 append 到 fullResponse 的通知 **永遠不會上 Discord**
+  // 修法：算出 notice 後，yield 一個 text_delta 事件讓 Discord 端收得到
+  let bailNotice: string | null = null;
   if (maxLoopsReached) {
     const toolsRun = tracker.toolCalls.length;
     const lastTools = tracker.toolCalls.slice(-3).map(tc => tc.name).join(" → ") || "（無）";
     const extended = loopCap > BASE_LOOPS ? `（已自適應延長到 ${loopCap}）` : "";
-    const notice = `\n\n⚠️ 已達工具呼叫上限 ${loopCap} 輪${extended}（執行了 ${toolsRun} 個工具，最後 3 個：${lastTools}），自動中止本輪。任務可能未完成 — 若要繼續請回覆「繼續」或補充指示。`;
-    fullResponse = fullResponse.trim() ? fullResponse + notice : notice.trimStart();
+    bailNotice = `\n\n⚠️ 已達工具呼叫上限 ${loopCap} 輪${extended}（執行了 ${toolsRun} 個工具，最後 3 個：${lastTools}），自動中止本輪。任務可能未完成 — 若要繼續請回覆「繼續」或補充指示。`;
     log.warn(`[agent-loop] loop cap 觸頂：sessionKey=${sessionKey} cap=${loopCap} tools=${toolsRun}`);
   } else if (deferredNudgeExhausted) {
     // 不是 loop cap 觸頂，而是 Anthropic API 在 tool_search 後連續空回應 end_turn
     // nudge 已經注入 3 次還是沒用 → 提醒使用者，不讓模型看起來裝死
-    const notice = `\n\n⚠️ 模型在工具查詢後連續 ${MAX_DEFERRED_NUDGES + 1} 次空回應（Anthropic API 已知 quirk），自動中止。若要繼續請回覆「繼續」，或重述需求更具體一點。`;
-    fullResponse = fullResponse.trim() ? fullResponse + notice : notice.trimStart();
+    bailNotice = `\n\n⚠️ 模型在工具查詢後連續 ${MAX_DEFERRED_NUDGES + 1} 次空回應（Anthropic API 已知 quirk），自動中止。若要繼續請回覆「繼續」，或重述需求更具體一點。`;
     log.warn(`[agent-loop] deferred nudge 耗盡：sessionKey=${sessionKey}`);
+  }
+  if (bailNotice) {
+    fullResponse = fullResponse.trim() ? fullResponse + bailNotice : bailNotice.trimStart();
+    // 讓 reply-handler 把 notice 送到 Discord（會 append 到 totalText + progressMsg）
+    yield { type: "text_delta", text: bailNotice };
   }
 
   // Tool Log Store：儲存 tool 執行記錄，session history 加索引摘要
