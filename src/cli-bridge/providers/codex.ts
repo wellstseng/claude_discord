@@ -149,7 +149,7 @@ export class CodexProvider implements CliProvider {
   async postSpawn(io: ProcessIO, ctx: ProviderContext): Promise<void> {
     this.rpc = new CodexJsonRpcClient(io, this.label);
     this.rpc.onNotification((method, params) => this.handleNotification(method, params, ctx));
-    this.rpc.onServerRequest((id, method, params) => this.handleServerRequest(id, method, params));
+    this.rpc.onServerRequest((id, method, params) => this.handleServerRequest(id, method, params, ctx));
 
     // 1. initialize handshake
     await this.rpc.request("initialize", {
@@ -284,13 +284,16 @@ CATCLAW_BRIDGE_LABEL = "${escape(config.label)}"
       }
     }
 
-    // Phase 2：信任模式（trust）
-    // Phase 3 會改成 "on-request" + workspaceWrite 並接 Discord 按鈕審批
+    // Phase 3：有 askUser callback → 用 on-request + workspaceWrite，codex 發 approval request 時走 Discord 按鈕
+    //        沒 askUser callback → 退回信任模式（never + dangerFullAccess）
+    const useButtonApproval = typeof ctx.askUser === "function";
     void this.rpc.request("turn/start", {
       threadId: this.threadId,
       input,
-      approvalPolicy: "never",
-      sandboxPolicy: { type: "dangerFullAccess" },
+      approvalPolicy: useButtonApproval ? "on-request" : "never",
+      sandboxPolicy: useButtonApproval
+        ? { type: "workspaceWrite", networkAccess: "restricted" }
+        : { type: "dangerFullAccess" },
     }).catch((err: unknown) => {
       const msg = typeof err === "object" && err !== null && "message" in err
         ? String((err as { message: unknown }).message)
@@ -425,12 +428,100 @@ CATCLAW_BRIDGE_LABEL = "${escape(config.label)}"
     }
   }
 
-  // ── Server-request handler（Phase 2 信任模式 auto-approve）─────────────
+  // ── Server-request handler（Phase 3：依 askUser 有無決定走 Discord 按鈕審批 or 信任 auto-approve）
 
-  private async handleServerRequest(_id: number | string, method: string, _params: unknown): Promise<unknown> {
-    log.info(`[cli-bridge:${this.label}] codex server-request auto-approved (Phase 2 trust mode): ${method}`);
-    // Phase 3 會改成依 method 走 Discord 按鈕審批
-    return { decision: "approved", approved: true, allow: true, allowed: true };
+  private async handleServerRequest(_id: number | string, method: string, params: unknown, ctx: ProviderContext): Promise<unknown> {
+    // 沒 askUser callback → 退回信任模式（自動 approve）
+    if (typeof ctx.askUser !== "function") {
+      log.info(`[cli-bridge:${this.label}] codex server-request auto-approved (no askUser): ${method}`);
+      return this.buildApprovalResponse(method, true);
+    }
+
+    const summary = this.describeApprovalRequest(method, params);
+    log.info(`[cli-bridge:${this.label}] codex server-request → Discord button: ${method} tool=${summary.tool}`);
+
+    try {
+      const result = await ctx.askUser({
+        tool: summary.tool,
+        description: summary.description,
+        detail: summary.detail,
+      });
+      return this.buildApprovalResponse(method, result.allowed, result.reason);
+    } catch (err) {
+      log.warn(`[cli-bridge:${this.label}] askUser 失敗（auto-deny）: ${err instanceof Error ? err.message : String(err)}`);
+      return this.buildApprovalResponse(method, false, "askUser internal error");
+    }
+  }
+
+  /**
+   * 把 codex server-request 的 method + params 整理成使用者看得懂的審批描述。
+   */
+  private describeApprovalRequest(method: string, params: unknown): { tool: string; description: string; detail?: string } {
+    const p = (params ?? {}) as Record<string, unknown>;
+    switch (method) {
+      case "execCommandApproval":
+      case "item/commandExecution/requestApproval": {
+        const cmd = p["command"];
+        const cmdStr = Array.isArray(cmd) ? (cmd as string[]).join(" ") : String(cmd ?? "");
+        const cwd = p["cwd"] as string | undefined;
+        return {
+          tool: "shell:exec",
+          description: cwd ? `執行 shell 命令（cwd=${cwd}）` : "執行 shell 命令",
+          detail: cmdStr,
+        };
+      }
+      case "applyPatchApproval":
+      case "item/fileChange/requestApproval": {
+        const files = p["files"] ?? p["changes"];
+        const filesList = Array.isArray(files) ? (files as Array<{ path?: string }>).map(f => f?.path ?? "?").join("\n") : "";
+        return {
+          tool: "patch:apply",
+          description: `套用 patch（修改檔案）`,
+          detail: filesList || JSON.stringify(p).slice(0, 1000),
+        };
+      }
+      case "item/permissions/requestApproval": {
+        const perms = p["permissions"] ?? p["permission"];
+        return {
+          tool: "permissions:grant",
+          description: "codex 要求額外權限",
+          detail: JSON.stringify(perms ?? p).slice(0, 1000),
+        };
+      }
+      case "mcpServer/elicitation/request":
+      case "item/tool/requestUserInput": {
+        return {
+          tool: `elicit:${method}`,
+          description: "codex 或 MCP server 請求使用者輸入（第一版當審批處理）",
+          detail: JSON.stringify(p).slice(0, 1000),
+        };
+      }
+      default:
+        return {
+          tool: method,
+          description: `codex server-request: ${method}`,
+          detail: JSON.stringify(p).slice(0, 1000),
+        };
+    }
+  }
+
+  /**
+   * 依 method 產生對應的 response schema。
+   * 第一版大多用 generic decision 欄位；若 codex 嚴格校驗某些 method 的 response shape，再依 schema 補。
+   */
+  private buildApprovalResponse(method: string, allowed: boolean, _reason?: string): unknown {
+    const decision = allowed ? "approved" : "denied";
+    // applyPatchApproval / execCommandApproval 已驗證 probe 可接受 generic decision 格式
+    // 若未來某 method 嚴格要求特定欄位，在這裡加 switch case
+    switch (method) {
+      case "execCommandApproval":
+      case "applyPatchApproval":
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+      case "item/permissions/requestApproval":
+      default:
+        return { decision, approved: allowed, allow: allowed, allowed };
+    }
   }
 
   // ── 圖片暫存 ──────────────────────────────────────────────────────────────

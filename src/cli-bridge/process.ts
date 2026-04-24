@@ -14,7 +14,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { log } from "../logger.js";
 import type { CliProcessConfig, StdinImageBlock, CliBridgeEvent } from "./types.js";
-import type { CliProvider, ProcessIO, ProviderContext } from "./providers/provider.js";
+import type { CliProvider, ProcessIO, ProviderContext, AskUserCallback } from "./providers/provider.js";
 
 // ── CliProcess ──────────────────────────────────────────────────────────────────
 
@@ -52,10 +52,15 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
     return {
       emit: (evt: CliBridgeEvent) => this.emit("event", evt),
       sessionId: this.config.sessionId,
+      askUser: this.askUser,
     };
   }
 
-  constructor(private config: CliProcessConfig, private provider: CliProvider) {
+  constructor(
+    private config: CliProcessConfig,
+    private provider: CliProvider,
+    private askUser?: AskUserCallback,
+  ) {
     super();
   }
 

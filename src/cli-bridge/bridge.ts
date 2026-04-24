@@ -618,6 +618,55 @@ export class CliBridge {
     return `<channel ${attrs.join(" ")}>\n<!-- ${hint} -->\n${text}\n</channel>`;
   }
 
+  // ── Codex 審批 Discord 按鈕（Phase 3）──────────────────────────────────────
+  //
+  // CodexProvider 在 handleServerRequest 會呼叫 ctx.askUser() 詢問使用者；
+  // 這裡透過 bridge 的 sender 在頻道發一則訊息 + Approve/Deny 按鈕，等使用者按下後回應。
+  // 共用 Claude bridge 的 mcp__catclaw-bridge-discord__request_permission 風格 UI。
+  private async askUserForApproval(req: { tool: string; description: string; detail?: string }): Promise<{ allowed: boolean; reason?: string }> {
+    if (!this._sender) {
+      log.warn(`[cli-bridge:${this.label}] askUserForApproval: sender 未就緒，自動拒絕`);
+      return { allowed: false, reason: "bridge sender not ready" };
+    }
+
+    const timeoutMs = 5 * 60_000; // 5 分鐘沒回 → 拒絕
+    const detailSection = req.detail ? `\n\`\`\`\n${req.detail.slice(0, 1500)}\n\`\`\`` : "";
+    const content = `🔐 **權限請求** (bridge: \`${this.label}\`)\n工具：\`${req.tool}\`\n${req.description}${detailSection}`.slice(0, 1900);
+
+    const discordJs = await import("discord.js");
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = discordJs;
+    const nonce = randomUUID().slice(0, 8);
+    const row = new ActionRowBuilder<InstanceType<typeof ButtonBuilder>>().addComponents(
+      new ButtonBuilder().setCustomId(`codex-approval-allow-${nonce}`).setLabel("✅ Approve").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`codex-approval-deny-${nonce}`).setLabel("❌ Deny").setStyle(ButtonStyle.Danger),
+    );
+
+    let promptMsg: Awaited<ReturnType<BridgeSender["sendComponents"]>>;
+    try {
+      promptMsg = await this._sender.sendComponents({ content, components: [row] });
+    } catch (err) {
+      log.warn(`[cli-bridge:${this.label}] askUserForApproval: 送審批訊息失敗: ${err instanceof Error ? err.message : String(err)}`);
+      return { allowed: false, reason: "failed to send approval prompt" };
+    }
+
+    try {
+      const interaction = await promptMsg.awaitMessageComponent({
+        componentType: ComponentType.Button,
+        filter: (i) => !i.user.bot && i.customId.endsWith(nonce),
+        time: timeoutMs,
+      });
+      const approved = interaction.customId.startsWith("codex-approval-allow-");
+      await interaction.update({
+        content: content + `\n\n→ ${approved ? "✅ Approved" : "❌ Denied"} by ${interaction.user.username}`,
+        components: [],
+      });
+      return { allowed: approved, reason: approved ? undefined : `denied by ${interaction.user.username}` };
+    } catch {
+      await promptMsg.edit({ content: content + `\n\n→ ⏰ Timeout (${Math.round(timeoutMs / 1000)}s，自動拒絕)`, components: [] }).catch(() => {});
+      return { allowed: false, reason: "approval timeout" };
+    }
+  }
+
   // ── 內部：process 建立 ────────────────────────────────────────────────────
 
   private async spawnProcess(): Promise<void> {
@@ -639,7 +688,7 @@ export class CliBridge {
     const provider: CliProvider = providerName === "codex"
       ? new CodexProvider()
       : new ClaudeProvider();
-    this.process = new CliProcess(procConfig, provider);
+    this.process = new CliProcess(procConfig, provider, (req) => this.askUserForApproval(req));
     this._lastSpawnTime = Date.now();
 
     // 綁定事件

@@ -25,12 +25,26 @@ export interface ProcessIO {
   signal(sig: NodeJS.Signals): void;
 }
 
+/** askUser callback — codex approval 等情境用 */
+export interface AskUserRequest {
+  /** 工具 / 操作名（例：exec_command、apply_patch） */
+  tool: string;
+  /** 人類可讀的摘要（會顯示到 Discord button 訊息） */
+  description: string;
+  /** 額外細節（例：要執行的 shell command 全文、要 apply 的 patch 內容） */
+  detail?: string;
+}
+
+export type AskUserCallback = (req: AskUserRequest) => Promise<{ allowed: boolean; reason?: string }>;
+
 /** Provider 在 init / parse 時可用的 context */
 export interface ProviderContext {
   /** Emit CliBridgeEvent 給 bridge */
   emit(evt: CliBridgeEvent): void;
   /** 當前 session ID（若有） */
   sessionId?: string;
+  /** 向使用者詢問審批（Discord 按鈕）；codex 的 execCommandApproval 等用 */
+  askUser?: AskUserCallback;
 }
 
 /**
