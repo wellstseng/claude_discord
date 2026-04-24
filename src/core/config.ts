@@ -312,9 +312,8 @@ export interface MemoryConfig {
   extract: {
     enabled: boolean;
     perTurn: boolean;
-    onSessionEnd: boolean;
+    /** 單次 flush 最多萃取幾條（累積制下一次 flush 可涵蓋多 turn） */
     maxItemsPerTurn: number;
-    maxItemsSessionEnd: number;
     /** 累積制：字元閾值（累積超過此值觸發萃取） */
     accumCharThreshold: number;
     /** 累積制：turn 數閾值 */
@@ -1134,9 +1133,7 @@ function defaultMemoryConfig(raw: Partial<MemoryConfig> | undefined, workspaceDi
     extract: {
       enabled: r.extract?.enabled ?? true,
       perTurn: r.extract?.perTurn ?? true,
-      onSessionEnd: r.extract?.onSessionEnd ?? true,
       maxItemsPerTurn: r.extract?.maxItemsPerTurn ?? 3,
-      maxItemsSessionEnd: r.extract?.maxItemsSessionEnd ?? 5,
       accumCharThreshold: r.extract?.accumCharThreshold ?? 200,
       accumTurnThreshold: r.extract?.accumTurnThreshold ?? 5,
       cooldownMs: r.extract?.cooldownMs ?? 120_000,

@@ -161,16 +161,6 @@ export class MemoryEngine {
     );
   }
 
-  /** 全量掃描萃取（session end） */
-  async extractFullScan(
-    response: string,
-    opts: import("./extract.js").ExtractOpts
-  ): Promise<import("./extract.js").KnowledgeItem[]> {
-    if (!this.cfg.extract.enabled || !this.cfg.extract.onSessionEnd) return [];
-    const { extractFullScan } = await import("./extract.js");
-    return extractFullScan(response, { ...opts, maxItems: this.cfg.extract.maxItemsSessionEnd });
-  }
-
   // ── Write Gate ────────────────────────────────────────────────────────────────
 
   async checkWrite(

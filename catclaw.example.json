@@ -211,9 +211,7 @@
     "extract": {
       "enabled": true,
       "perTurn": true,
-      "onSessionEnd": true,
       "maxItemsPerTurn": 3,
-      "maxItemsSessionEnd": 5,
       "accumCharThreshold": 200,
       "accumTurnThreshold": 5,
       "cooldownMs": 120000

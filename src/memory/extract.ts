@@ -325,29 +325,6 @@ export function extractPerTurn(
   });
 }
 
-/**
- * 全量掃描萃取（E2）
- * 用於 session:idle / platform:shutdown
- */
-export async function extractFullScan(
-  fullResponse: string,
-  opts: ExtractOpts
-): Promise<KnowledgeItem[]> {
-  const truncated = fullResponse.slice(0, 20000);
-  if (truncated.length < 200) return [];
-
-  return doExtract({
-    response: truncated,
-    accountId: opts.accountId,
-    projectId: opts.projectId,
-    intent: opts.sessionIntent ?? "general",
-    namespace: opts.namespace ?? (opts.projectId ? `project/${opts.projectId}` : `account/${opts.accountId}`),
-    maxItems: opts.maxItems ?? 5,
-    resolve: () => {},
-    reject: () => {},
-  });
-}
-
 /** 重置 extract cooldown（測試用）；傳入 namespace 僅清除該 session，不傳則清全部 */
 export function resetExtractCooldown(namespace?: string): void {
   if (namespace) {

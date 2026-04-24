@@ -298,9 +298,7 @@ Session 持久化設定。
   "extract": {
     "enabled": true,
     "perTurn": true,
-    "onSessionEnd": true,
     "maxItemsPerTurn": 3,
-    "maxItemsSessionEnd": 5,
     "accumCharThreshold": 200,
     "accumTurnThreshold": 5,
     "cooldownMs": 120000
@@ -330,7 +328,6 @@ Session 持久化設定。
 | `recall.vectorMinScore` | `0.65` |
 | `recall.vectorTopK` | `10` |
 | `extract.maxItemsPerTurn` | `3` |
-| `extract.maxItemsSessionEnd` | `5` |
 | `extract.accumCharThreshold` | `200` |
 | `extract.accumTurnThreshold` | `5` |
 | `extract.cooldownMs` | `120000` |

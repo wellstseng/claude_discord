@@ -2089,8 +2089,7 @@ interface CatClawEvents {
       "vectorMinScore": 0.65, "vectorTopK": 10
     },
     "extract": {
-      "enabled": true, "perTurn": true, "onSessionEnd": true,
-      "maxItemsPerTurn": 3, "maxItemsSessionEnd": 5,
+      "enabled": true, "perTurn": true, "maxItemsPerTurn": 3,
       "accumCharThreshold": 200, "accumTurnThreshold": 5, "cooldownMs": 120000
     },
     "consolidate": {

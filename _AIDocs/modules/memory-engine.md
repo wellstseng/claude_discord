@@ -100,12 +100,6 @@ extractPerTurn(
   newText: string,
   opts: ExtractOpts
 ): Promise<KnowledgeItem[]>
-
-/** 全量掃描萃取（session end） */
-extractFullScan(
-  response: string,
-  opts: ExtractOpts
-): Promise<KnowledgeItem[]>
 ```
 
 ### 寫入閘門
@@ -196,10 +190,8 @@ Step 3 embed 或 Step 4 vector search 失敗時，自動退化為純 keyword 路
 | `recall.vectorMinScore` | 0.65 | 向量最低相關度 |
 | `recall.vectorTopK` | 10 | 向量 top-K |
 | `extract.enabled` | true | 萃取功能開關 |
-| `extract.perTurn` | true | 每輪自動萃取 |
-| `extract.onSessionEnd` | true | Session 結束時全量掃描萃取 |
-| `extract.maxItemsPerTurn` | 3 | 每輪最多萃取數 |
-| `extract.maxItemsSessionEnd` | 5 | Session 結束時最多萃取數 |
+| `extract.perTurn` | true | 累積 flush 時是否跑萃取（關閉 = 全面停用） |
+| `extract.maxItemsPerTurn` | 3 | 單次 flush 最多萃取幾條（非每 turn） |
 | `extract.accumCharThreshold` | 200 | 累積字元閾值（達到後觸發萃取） |
 | `extract.accumTurnThreshold` | 5 | 累積 turn 閾值 |
 | `extract.cooldownMs` | 120000 | 同 session 萃取冷卻時間（ms） |
