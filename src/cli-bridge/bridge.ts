@@ -16,6 +16,8 @@ import { log } from "../logger.js";
 import { resolveCatclawDir } from "../core/config.js";
 import { CliProcess } from "./process.js";
 import { ClaudeProvider } from "./providers/claude.js";
+import { CodexProvider } from "./providers/codex.js";
+import type { CliProvider } from "./providers/provider.js";
 import { StdoutLogger } from "./stdout-log.js";
 import type {
   CliBridgeConfig,
@@ -620,9 +622,9 @@ export class CliBridge {
 
   private async spawnProcess(): Promise<void> {
     const providerName = this.bridgeConfig.provider ?? "claude";
-    const cliBin = providerName === "claude"
-      ? (this.bridgeConfig.claudeBin ?? "claude")
-      : "claude"; // Phase 2 才會加 codex 分支
+    const cliBin = providerName === "codex"
+      ? (this.bridgeConfig.codexBin ?? "codex")
+      : (this.bridgeConfig.claudeBin ?? "claude");
     const procConfig: CliProcessConfig = {
       provider: providerName,
       cliBin,
@@ -634,7 +636,9 @@ export class CliBridge {
       channelId: this.channelId,
     };
 
-    const provider = new ClaudeProvider(); // Phase 2 才會依 providerName 切換
+    const provider: CliProvider = providerName === "codex"
+      ? new CodexProvider()
+      : new ClaudeProvider();
     this.process = new CliProcess(procConfig, provider);
     this._lastSpawnTime = Date.now();
 

@@ -205,6 +205,10 @@ export class ClaudeProvider implements CliProvider {
     }));
   }
 
+  interrupt(io: ProcessIO, _ctx: ProviderContext): void {
+    io.signal("SIGINT");
+  }
+
   // ── stdout 解析 ────────────────────────────────────────────────────────────
 
   resetStreamState(): void {

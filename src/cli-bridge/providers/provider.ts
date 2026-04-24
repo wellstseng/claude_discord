@@ -21,6 +21,8 @@ export interface ProviderSpawnSpec {
 export interface ProcessIO {
   /** 寫一行 JSON 到 CLI stdin（包含換行） */
   writeStdinLine(line: string): void;
+  /** 發訊號給 child process（Claude interrupt 用 SIGINT） */
+  signal(sig: NodeJS.Signals): void;
 }
 
 /** Provider 在 init / parse 時可用的 context */
@@ -68,6 +70,11 @@ export interface CliProvider {
    * Claude 用 stdin control_response；Codex 第一版可 noop。
    */
   sendControlResponse(io: ProcessIO, requestId: string, allowed: boolean): void;
+
+  /**
+   * 中斷當前 turn（Claude: io.signal("SIGINT")；Codex: turn/interrupt RPC）
+   */
+  interrupt(io: ProcessIO, ctx: ProviderContext): void;
 
   /**
    * 解析一行 stdout JSON，emit 出 0-N 個 CliBridgeEvent。

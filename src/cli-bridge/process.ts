@@ -42,6 +42,9 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
       this.proc.stdin.write(line + "\n");
       log.debug(`[cli-bridge:${this.config.label}] stdin: ${line.slice(0, 100)}`);
     },
+    signal: (sig: NodeJS.Signals) => {
+      this.killProcess(sig);
+    },
   };
 
   /** 提供給 provider 的 context（會在 emit / sessionId 等動態綁定） */
@@ -176,8 +179,8 @@ export class CliProcess extends EventEmitter<CliProcessEvents> {
 
   sendInterrupt(): void {
     if (!this.proc || this.proc.killed) return;
-    log.info(`[cli-bridge:${this.config.label}] sending SIGINT`);
-    this.killProcess("SIGINT");
+    log.info(`[cli-bridge:${this.config.label}] sending interrupt (provider=${this.provider.name})`);
+    this.provider.interrupt(this.io, this.providerCtx);
   }
 
   // ── 健康檢查 ──────────────────────────────────────────────────────────────

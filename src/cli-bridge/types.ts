@@ -85,17 +85,19 @@ export interface CliBridgeChannelConfig {
 }
 
 /** Provider 類型（決定 spawn 哪個 CLI binary 與用什麼 protocol） */
-export type CliProviderName = "claude";
+export type CliProviderName = "claude" | "codex";
 
 /** 單一 CLI Bridge 實例設定 */
 export interface CliBridgeConfig {
   enabled: boolean;
   /** 識別標籤（全域唯一） */
   label: string;
-  /** CLI provider 類型（預設 "claude" 向後相容；Phase 2 會擴增 codex） */
+  /** CLI provider 類型（預設 "claude" 向後相容） */
   provider?: CliProviderName;
   /** Claude CLI binary 路徑（預設 "claude"，僅 provider=claude 用到） */
   claudeBin?: string;
+  /** Codex CLI binary 路徑（預設 "codex"，僅 provider=codex 用到） */
+  codexBin?: string;
   /** CLI 工作目錄 */
   workingDir: string;
   /** 日誌目錄 */
