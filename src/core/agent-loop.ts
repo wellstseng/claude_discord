@@ -903,19 +903,22 @@ export async function* agentLoop(
     systemPrompt = systemPrompt ? `${systemPrompt}\n\n${planNotice}` : planNotice;
   }
 
-  // ── 4a. Deferred Tool Listing（system prompt 注入 deferred tool 名稱+描述）──
-  if (deferredDefs.length > 0) {
-    const listing = deferredDefs
-      .map(d => `- ${d.name}: ${d.description.split("\n")[0]}`)
-      .join("\n");
-    const deferredBlock = [
+  // ── 4a. Deferred Tool Listing（改為每 iter 動態重組）──
+  // 避免：若 listing 在 turn 外靜態組裝，deferred tool 活化後仍在 listing 中，
+  // Claude 同時看到「X 在 deferred 清單」+「X 已在 tools array」的矛盾 state → 空回應 end_turn
+  const buildDeferredBlock = (): string => {
+    const pending = deferredDefs.filter(d => !loadedDeferredNames.has(d.name));
+    if (pending.length === 0) return "";
+    const listing = pending.map(d => `- ${d.name}: ${d.description.split("\n")[0]}`).join("\n");
+    return [
       "The following deferred tools are available via tool_search:",
       listing,
       "Usage rule: Call tool_search to load a deferred tool's schema only when you intend to USE it next.",
       "**In the same turn**, after tool_search returns, you MUST either (a) call the actual tool you looked up, or (b) ask the user for missing info / explain why you can't proceed.",
       "Do NOT end your turn immediately after tool_search just because you loaded the schema — that leaves the user waiting with nothing done.",
     ].join("\n");
-    systemPrompt = systemPrompt ? `${systemPrompt}\n\n${deferredBlock}` : deferredBlock;
+  };
+  if (deferredDefs.length > 0) {
     log.debug(`[agent-loop] deferred tools: ${deferredDefs.map(d => d.name).join(", ")}`);
   }
 
@@ -1193,11 +1196,16 @@ export async function* agentLoop(
       }
 
       const llmCallStartMs = Date.now();
+      // 每 iter 重組 systemPrompt：base + 當前 pending 的 deferred listing（已活化的不會再列）
+      const deferredBlockNow = buildDeferredBlock();
+      const currentSystemPrompt = deferredBlockNow
+        ? (systemPrompt ? `${systemPrompt}\n\n${deferredBlockNow}` : deferredBlockNow)
+        : systemPrompt;
       let streamResult;
       try {
         streamResult = await callWithRetry(
           () => provider.stream(messages, {
-            systemPrompt: systemPrompt || undefined,
+            systemPrompt: currentSystemPrompt || undefined,
             tools: toolDefs.length > 0 ? toolDefs.map(d => ({
               name: d.name,
               description: d.description,
@@ -1232,8 +1240,11 @@ export async function* agentLoop(
       }
 
       // ── 5b. 消費串流事件 ───────────────────────────────────────────────────
+      // iter 級 text 累積（turn 級的 tracker 會跨 iter 累積；送回 messages 時只要本 iter 的）
+      let iterText = "";
       for await (const event of streamResult.events as AsyncIterable<ProviderEvent>) {
         if (event.type === "text_delta") {
+          iterText += event.text;
           tracker.appendText(event.text);
           yield { type: "text_delta", text: event.text };
         } else if (event.type === "thinking_delta") {
@@ -1278,19 +1289,26 @@ export async function* agentLoop(
 
       if (controller.signal.aborted) break;
       if (streamResult.stopReason === "end_turn") {
-        // Deferred Tool Nudge：上一 iter 剛用 tool_search 活化 deferred tool，
-        // 但本 iter 空回應（output=0 + estimated）直接 end_turn → 強烈懷疑 LLM 斷流
-        // 或誤把 tool_search 當「任務完成」。注入 continuation 再跑一次。
         // 本 iter 是否空回應：output=0 + estimated=true 代表 provider 沒收到任何 event
         // （Claude API events 陣列為空 → fallback 預設 end_turn + estimated usage，見 claude-api.ts:336）
         const outputEmpty = streamResult.usage.output === 0 && (streamResult.usage.estimated ?? false);
+        if (outputEmpty) {
+          // Debug dump：空回應時印出關鍵 state，方便排查 root cause
+          const lastMsg = messages[messages.length - 1];
+          const lastMsgPreview = lastMsg
+            ? `role=${lastMsg.role} contentType=${Array.isArray(lastMsg.content) ? `array[${lastMsg.content.length}]` : "string"}`
+            : "none";
+          log.warn(`[agent-loop] [loop=${loopCount}] EMPTY RESPONSE: msgs=${messages.length} tools=${toolDefs.length} prevDeferred=[${prevIterDeferredActivated.join(",")}] lastMsg=${lastMsgPreview}`);
+        }
+        // Deferred Tool Nudge：上一 iter 活化 deferred tool + 本 iter 空回應 → 注入中性續接
+        // 文案改中性（去「[系統提示]」前綴）避開 Anthropic Common cause #1（tool_result 後加 text 強化 end_turn）
         if (prevIterDeferredActivated.length > 0 && outputEmpty && !deferredNudgeUsed) {
           deferredNudgeUsed = true;
           const loaded = prevIterDeferredActivated.join(", ");
           log.warn(`[agent-loop] [loop=${loopCount}] tool_search 後空回應 end_turn，自動注入 continuation（已載入 ${loaded}）`);
           messages.push({
             role: "user",
-            content: `[系統提示] 已載入工具 schema：${loaded}。請繼續完成使用者原本的請求——若需要，直接呼叫該工具；若不需要，請以自然語言回應說明。不要再次呼叫 tool_search 查同樣的工具。`,
+            content: `Tools now available: ${loaded}.`,
           });
           continue;
         }
@@ -1321,15 +1339,19 @@ export async function* agentLoop(
       log.debug(`[agent-loop] [loop=${loopCount}] 執行 ${streamResult.toolCalls.length} 個 tool: ${streamResult.toolCalls.map(t => t.name).join(", ")}`);
       const toolResults: Array<{ tool_use_id: string; content: string | Array<{ type: string; [key: string]: unknown }>; is_error: boolean }> = [];
 
-      // 先把 assistant 的 tool_use 加入 messages（B: 標記 token 數）
+      // 先把 assistant 的 text + tool_use 加入 messages（B: 標記 token 數）
+      // 關鍵：Anthropic 規範 assistant content 應包含 LLM 本 iter 所有 blocks（text 在前、tool_use 在後）。
+      // 若只 push tool_use 會讓下一 iter 看到殘缺 state，容易觸發空回應 end_turn。
+      const assistantContent: ContentBlock[] = [];
+      if (iterText.trim().length > 0) {
+        assistantContent.push({ type: "text", text: iterText });
+      }
+      for (const tc of streamResult.toolCalls) {
+        assistantContent.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.params as object });
+      }
       messages.push({
         role: "assistant",
-        content: streamResult.toolCalls.map(tc => ({
-          type: "tool_use" as const,
-          id: tc.id,
-          name: tc.name,
-          input: tc.params as object,
-        })),
+        content: assistantContent,
         tokens: streamResult.usage.output > 0 ? streamResult.usage.output : undefined,
       });
 
