@@ -738,11 +738,13 @@ const RECALL_CACHE_OVERLAP_THRESHOLD = 0.7
 ### Extract 管線
 
 ```
-Input: assistant response + session context
+Input: user input + assistant response（累積制）
 
-  → 長度檢查（minNewChars 500）
+  → 累積 buffer（accumCharThreshold 200 / accumTurnThreshold 5）
+  → flush 觸發：達閾值 / context 壓縮 / session 結束
+  → per-session cooldown（cooldownMs 120000）
   → Ollama generate（think mode, num_predict 8192）
-  → 萃取 prompt: 可操作性標準 + 6 知識類型 + JSON
+  → 萃取 prompt: user input + assistant response + 6 知識類型 + JSON
   → 解析 → KnowledgeItem[]
   → 目標決定（per-request）：
       群組頻道 → 用當前說話者的 project（或頻道 boundProject）
@@ -2088,7 +2090,8 @@ interface CatClawEvents {
     },
     "extract": {
       "enabled": true, "perTurn": true, "onSessionEnd": true,
-      "maxItemsPerTurn": 3, "maxItemsSessionEnd": 5, "minNewChars": 500
+      "maxItemsPerTurn": 3, "maxItemsSessionEnd": 5,
+      "accumCharThreshold": 200, "accumTurnThreshold": 5, "cooldownMs": 120000
     },
     "consolidate": {
       "autoPromoteThreshold": 20,

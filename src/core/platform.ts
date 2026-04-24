@@ -199,7 +199,7 @@ export async function initPlatform(
     contextBudgetRatio: { global: 0.3, project: 0.4, account: 0.3 },
     writeGate: { enabled: true, dedupThreshold: 0.80 },
     recall: { triggerMatch: true, vectorSearch: false, relatedEdgeSpreading: true, vectorMinScore: 0.65, vectorTopK: 5 },
-    extract: { enabled: true, perTurn: true, onSessionEnd: false, maxItemsPerTurn: 3, maxItemsSessionEnd: 5, minNewChars: 500 },
+    extract: { enabled: true, perTurn: true, onSessionEnd: false, maxItemsPerTurn: 3, maxItemsSessionEnd: 5, accumCharThreshold: 200, accumTurnThreshold: 5, cooldownMs: 120_000 },
     consolidate: { autoPromoteThreshold: 20, suggestPromoteThreshold: 8, decay: { enabled: false, halfLifeDays: 30, archiveThreshold: 0.1 } },
     episodic: { enabled: false, ttlDays: 24 },
     rutDetection: { enabled: false, windowSize: 14, minOccurrences: 2 },
@@ -298,6 +298,7 @@ export async function initPlatform(
     process.cwd(),
     agentsDir,
     config.fileWatcher,
+    config.memory.extract,
   );
 
   // ── 10b. Failure Recall Cache（非同步，不阻塞啟動）────────────────────────

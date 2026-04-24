@@ -301,7 +301,9 @@ Session 持久化設定。
     "onSessionEnd": true,
     "maxItemsPerTurn": 3,
     "maxItemsSessionEnd": 5,
-    "minNewChars": 200
+    "accumCharThreshold": 200,
+    "accumTurnThreshold": 5,
+    "cooldownMs": 120000
   },
   "consolidate": {
     "autoPromoteThreshold": 3,
@@ -329,7 +331,9 @@ Session 持久化設定。
 | `recall.vectorTopK` | `10` |
 | `extract.maxItemsPerTurn` | `3` |
 | `extract.maxItemsSessionEnd` | `5` |
-| `extract.minNewChars` | `200` |
+| `extract.accumCharThreshold` | `200` |
+| `extract.accumTurnThreshold` | `5` |
+| `extract.cooldownMs` | `120000` |
 | `consolidate.autoPromoteThreshold` | `3` |
 | `consolidate.decay.halfLifeDays` | `14` |
 | `episodic.ttlDays` | `24` |
@@ -808,7 +812,9 @@ File Watcher 設定（監聽外部檔案變更）。
 | `memory.recall.vectorMinScore` | `0.65` | |
 | `memory.recall.vectorTopK` | `10` | |
 | `memory.extract.maxItemsPerTurn` | `3` | |
-| `memory.extract.minNewChars` | `200` | |
+| `memory.extract.accumCharThreshold` | `200` | 累積字元閾值 |
+| `memory.extract.accumTurnThreshold` | `5` | 累積 turn 閾值 |
+| `memory.extract.cooldownMs` | `120000` | 同 session 萃取冷卻 |
 | `memory.episodic.ttlDays` | `24` | |
 | `ollama.failover` | `true` | |
 | `ollama.numPredict` | `8192` | |

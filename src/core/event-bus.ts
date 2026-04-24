@@ -118,6 +118,9 @@ export interface CatClawEvents {
   // ── 帳號 ──
   "account:created":     [accountId: string];
   "account:linked":      [accountId: string, platform: string];
+
+  // ── Context Engineering ──
+  "context:compressed":  [sessionKey: string];
 }
 
 // ── EventBus 實作 ─────────────────────────────────────────────────────────

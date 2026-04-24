@@ -315,7 +315,12 @@ export interface MemoryConfig {
     onSessionEnd: boolean;
     maxItemsPerTurn: number;
     maxItemsSessionEnd: number;
-    minNewChars: number;
+    /** 累積制：字元閾值（累積超過此值觸發萃取） */
+    accumCharThreshold: number;
+    /** 累積制：turn 數閾值 */
+    accumTurnThreshold: number;
+    /** 萃取冷卻時間（ms） */
+    cooldownMs: number;
   };
   consolidate: {
     autoPromoteThreshold: number;
@@ -1132,7 +1137,9 @@ function defaultMemoryConfig(raw: Partial<MemoryConfig> | undefined, workspaceDi
       onSessionEnd: r.extract?.onSessionEnd ?? true,
       maxItemsPerTurn: r.extract?.maxItemsPerTurn ?? 3,
       maxItemsSessionEnd: r.extract?.maxItemsSessionEnd ?? 5,
-      minNewChars: r.extract?.minNewChars ?? 200,
+      accumCharThreshold: r.extract?.accumCharThreshold ?? 200,
+      accumTurnThreshold: r.extract?.accumTurnThreshold ?? 5,
+      cooldownMs: r.extract?.cooldownMs ?? 120_000,
     },
     consolidate: r.consolidate ?? {
       autoPromoteThreshold: 3, suggestPromoteThreshold: 4,

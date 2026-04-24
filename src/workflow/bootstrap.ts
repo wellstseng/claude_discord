@@ -18,7 +18,7 @@ import { initAidocsManager } from "./aidocs-manager.js";
 import { initMemoryExtractor } from "./memory-extractor.js";
 import { scheduleConsolidate } from "./consolidate-scheduler.js";
 import { initMemoryVectorSync } from "./memory-vector-sync.js";
-import type { FileWatcherConfig } from "../core/config.js";
+import type { FileWatcherConfig, MemoryConfig } from "../core/config.js";
 
 export interface WorkflowConfig {
   enabled?: boolean;
@@ -44,6 +44,7 @@ export function initWorkflow(
   projectRoot?: string,
   agentsDir?: string,
   fileWatcherConfig?: FileWatcherConfig,
+  memoryExtractCfg?: MemoryConfig["extract"],
 ): void {
   if (config?.enabled === false) {
     log.info("[workflow] 已停用（config.workflow.enabled=false）");
@@ -83,7 +84,11 @@ export function initWorkflow(
     }
 
     // ── 8. Memory Extractor
-    initMemoryExtractor(eventBus);
+    initMemoryExtractor(eventBus, memoryExtractCfg ? {
+      accumCharThreshold: memoryExtractCfg.accumCharThreshold,
+      accumTurnThreshold: memoryExtractCfg.accumTurnThreshold,
+      cooldownMs: memoryExtractCfg.cooldownMs,
+    } : undefined);
 
     // ── 9. Consolidate Scheduler
     scheduleConsolidate();

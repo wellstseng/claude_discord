@@ -1487,7 +1487,9 @@ const CFG_SCHEMA = [
       {k:'onSessionEnd',t:'bool',l:'On Session End',d:'Session 結束時萃取'},
       {k:'maxItemsPerTurn',t:'num',l:'Max Items Per Turn',d:'每 turn 最多萃取幾條記憶，預設 3'},
       {k:'maxItemsSessionEnd',t:'num',l:'Max Items Session End',d:'Session 結束時最多萃取幾條，預設 5'},
-      {k:'minNewChars',t:'num',l:'Min New Chars',d:'對話累積至少多少新字元才觸發萃取，預設 500'},
+      {k:'accumCharThreshold',t:'num',l:'累積字元閾值',d:'累積多少字元觸發萃取，預設 200'},
+      {k:'accumTurnThreshold',t:'num',l:'累積 Turn 閾值',d:'累積幾個 turn 觸發萃取，預設 5'},
+      {k:'cooldownMs',t:'num',l:'Cooldown (ms)',d:'同 session 萃取冷卻時間，預設 120000'},
     ]},
     {k:'memory.consolidate',l:'Consolidate',fields:[
       {k:'autoPromoteThreshold',t:'num',l:'Auto Promote Threshold',d:'命中超過此次數自動晉升信心等級，預設 20'},

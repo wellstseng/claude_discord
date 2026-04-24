@@ -761,6 +761,7 @@ export async function* agentLoop(
         tokensBefore: ceBd.tokensBeforeCE ?? ceBd.estimatedTokens,
         tokensAfter: ceBd.tokensAfterCE ?? ceBd.estimatedTokens,
       };
+      eventBus.emit("context:compressed", sessionKey);
     }
   } else {
     processedHistory = rawHistory;

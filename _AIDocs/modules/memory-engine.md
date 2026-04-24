@@ -95,7 +95,7 @@ ContextPayload：
 ### 萃取
 
 ```typescript
-/** 逐輪萃取（fire-and-forget）— engine 自動注入 maxItems + minNewChars from config */
+/** 逐輪萃取（fire-and-forget）— engine 自動注入 maxItems + cooldownMs from config */
 extractPerTurn(
   newText: string,
   opts: ExtractOpts
@@ -200,7 +200,9 @@ Step 3 embed 或 Step 4 vector search 失敗時，自動退化為純 keyword 路
 | `extract.onSessionEnd` | true | Session 結束時全量掃描萃取 |
 | `extract.maxItemsPerTurn` | 3 | 每輪最多萃取數 |
 | `extract.maxItemsSessionEnd` | 5 | Session 結束時最多萃取數 |
-| `extract.minNewChars` | 200 | 逐輪萃取最低新增字元門檻 |
+| `extract.accumCharThreshold` | 200 | 累積字元閾值（達到後觸發萃取） |
+| `extract.accumTurnThreshold` | 5 | 累積 turn 閾值 |
+| `extract.cooldownMs` | 120000 | 同 session 萃取冷卻時間（ms） |
 | `memoryPipeline.extraction.model` | (from ollama config) | 萃取用 LLM 模型（extract.ts doExtract 讀取此值傳給 Ollama） |
 
 ## 全域單例

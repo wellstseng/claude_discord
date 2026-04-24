@@ -2,7 +2,7 @@
  * @file memory/extract.ts
  * @description 知識萃取 — 從 assistant response 提取可操作知識
  *
- * E1: 逐輪增量萃取（turn:after）— minNewChars 500
+ * E1: 累積制萃取（turn:after）— accumCharThreshold 200
  * E2: 全量掃描（session:idle / platform:shutdown）
  * E3: 萃取 prompt + 6 知識類型 + JSON format
  * E4: 情境感知（session intent 調整 prompt）
@@ -45,18 +45,25 @@ export interface KnowledgeItem {
 
 function buildExtractPrompt(
   response: string,
-  crossSessionContext?: string
+  crossSessionContext?: string,
+  userInput?: string,
 ): string {
   const crossCtx = crossSessionContext
     ? `\n# Existing knowledge (avoid duplicates)\n${crossSessionContext}\n`
     : "";
 
-  return `Extract 0-3 reusable knowledge items from this response.
+  const userCtx = userInput
+    ? `\n# User Input\n${userInput.slice(0, 5000)}\n`
+    : "";
+
+  return `Extract 0-3 reusable knowledge items from this conversation.
+Pay attention to BOTH user input and assistant response.
+User input often contains: personal info, preferences, decisions, context, requirements, deadlines, team dynamics.
 Types: fact (what is true), decision (why this choice), preference (user habit/style)
 Tier: company | project | personal
 Output JSON only: [{"type":"fact","tier":"project","content":"...","triggers":["..."]}]
-Empty array [] if nothing worth remembering.${crossCtx}
-# Response
+Empty array [] if nothing worth remembering.${crossCtx}${userCtx}
+# Assistant Response
 ${response.slice(0, 20000)}`;
 }
 
@@ -104,20 +111,48 @@ const TYPE_MAP: Record<string, KnowledgeType> = {
   preference: "preference",
 };
 
+/**
+ * 用括號深度計數找到外層 JSON array 的精確範圍。
+ * 正確處理字串內 `"[...]"` 與轉義 `\"`；避免被尾巴多餘的 `]` 或補充說明干擾。
+ * 找不到匹配 `]` 時回 null（可能被截斷）。
+ */
+function findOuterArrayRange(raw: string): { start: number; end: number } | null {
+  const start = raw.indexOf("[");
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let escape = false;
+  for (let i = start; i < raw.length; i++) {
+    const c = raw[i];
+    if (escape) { escape = false; continue; }
+    if (c === "\\") { escape = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "[") depth++;
+    else if (c === "]") {
+      depth--;
+      if (depth === 0) return { start, end: i + 1 };
+    }
+  }
+  return null;
+}
+
 function parseExtractResult(raw: string): KnowledgeItem[] {
-  // 找 JSON array（non-greedy 優先，greedy fallback）
-  let match = raw.match(/\[[\s\S]*?\]/);
-  if (!match) match = raw.match(/\[[\s\S]*\]/);
-  if (!match) {
+  // 用括號深度找精確的外層 array（避免 Ollama 在 JSON 後加補充說明 / 尾巴多餘 `]`）
+  const range = findOuterArrayRange(raw);
+  const fallbackFirst = raw.indexOf("[");
+  if (fallbackFirst < 0) {
     log.info(`[extract] JSON parse 失敗 — 無 array。raw(200): ${raw.slice(0, 200)}`);
     return [];
   }
 
   try {
-    let jsonStr = match[0];
-    // 修復被截斷的 JSON array：嘗試補上缺少的 `]`
+    let jsonStr = range
+      ? raw.slice(range.start, range.end)
+      : raw.slice(fallbackFirst); // 未封口（被截斷）— 進 fallback 嘗試修補
+
     try { JSON.parse(jsonStr); } catch {
-      // 移除最後一個不完整的物件，補上 ]
+      // 修補被截斷的 JSON array：回溯到最後一個完整的 `},` 補 `]`
       const lastComplete = jsonStr.lastIndexOf("},");
       if (lastComplete > 0) {
         jsonStr = jsonStr.slice(0, lastComplete + 1) + "]";
@@ -157,6 +192,7 @@ function parseExtractResult(raw: string): KnowledgeItem[] {
 
 interface ExtractTask {
   response: string;
+  userInput?: string;
   accountId: string;
   projectId?: string;
   intent: string;
@@ -217,7 +253,7 @@ async function doExtract(task: ExtractTask): Promise<KnowledgeItem[]> {
       return [];
     }
     const provider = getExtractionProvider();
-    const prompt = buildExtractPrompt(task.response, crossCtx);
+    const prompt = buildExtractPrompt(task.response, crossCtx, task.userInput);
     raw = await provider.generate(prompt, { maxTokens: 2048 });
   } catch (err) {
     log.debug(`[extract] 萃取 LLM 不可用，跳過：${err instanceof Error ? err.message : String(err)}`);
@@ -242,10 +278,12 @@ export interface ExtractOpts {
   /** 向量搜尋 namespace（用於跨 session 觀察） */
   namespace?: string;
   maxItems?: number;
-  /** 最少新增字元數（低於此跳過萃取） */
-  minNewChars?: number;
   /** false = fire-and-forget；true = 等待結果 */
   await?: boolean;
+  /** 使用者原始輸入（萃取時同時分析） */
+  userInput?: string;
+  /** 覆寫 cooldown（ms），預設 EXTRACT_COOLDOWN_MS */
+  cooldownMs?: number;
 }
 
 /**
@@ -256,16 +294,10 @@ export function extractPerTurn(
   newText: string,
   opts: ExtractOpts
 ): Promise<KnowledgeItem[]> {
-  const minChars = opts.minNewChars ?? 200;
-  if (newText.length < minChars) {
-    log.info(`[extract] 新增文字 ${newText.length} < ${minChars} 字元，跳過`);
-    return Promise.resolve([]);
-  }
-
   // per-session cooldown（以 namespace 為 key）
   const cooldownKey = opts.namespace ?? opts.accountId;
   const lastAt = _cooldownMap.get(cooldownKey) ?? 0;
-  if (Date.now() - lastAt < EXTRACT_COOLDOWN_MS) {
+  if (Date.now() - lastAt < (opts.cooldownMs ?? EXTRACT_COOLDOWN_MS)) {
     log.info(`[extract] cooldown 中，跳過（key=${cooldownKey}）`);
     return Promise.resolve([]);
   }
@@ -274,6 +306,7 @@ export function extractPerTurn(
   return new Promise<KnowledgeItem[]>((resolve, reject) => {
     _queue.push({
       response: newText,
+      userInput: opts.userInput,
       accountId: opts.accountId,
       projectId: opts.projectId,
       intent: opts.sessionIntent ?? "general",
