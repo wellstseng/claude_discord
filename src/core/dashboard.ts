@@ -3551,7 +3551,9 @@ async function clearChatSession() {
 const _cbDefaults = {
   enabled: true,
   label: '',
+  provider: 'claude',
   claudeBin: 'claude',
+  codexBin: 'codex',
   workingDir: '',
   logDir: '~/.catclaw/data/cli-bridge',
   botToken: '',
@@ -3599,7 +3601,9 @@ function _cbRenderBridge(idx, cfg) {
   html += '<div style="text-align:right;margin-bottom:6px"><button class="btn btn-sm btn-red" onclick="cbRemoveBridge(' + idx + ')">✕ 移除此 Bridge</button></div>';
   html += _cbField(p+'enabled', '啟用', 'bool', cfg.enabled);
   html += _cbField(p+'label', 'Label（全域唯一）', 'text', cfg.label);
-  html += _cbField(p+'claudeBin', 'Claude Binary', 'text', cfg.claudeBin || _cbDefaults.claudeBin);
+  html += _cbField(p+'provider', 'Provider', 'select', cfg.provider || _cbDefaults.provider, ['claude','codex']);
+  html += _cbField(p+'claudeBin', 'Claude Binary（provider=claude 才用）', 'text', cfg.claudeBin || _cbDefaults.claudeBin);
+  html += _cbField(p+'codexBin', 'Codex Binary（provider=codex 才用）', 'text', cfg.codexBin || _cbDefaults.codexBin);
   html += _cbField(p+'workingDir', 'Working Directory', 'text', cfg.workingDir);
   html += _cbField(p+'logDir', 'Log Directory', 'text', cfg.logDir || _cbDefaults.logDir);
   html += _cbField(p+'botToken', 'Bot Token（獨立 bot）', 'password', cfg.botToken || '');
@@ -3639,7 +3643,9 @@ function _cbCollectForm() {
     const cfg = {
       enabled: !!g(p+'enabled'),
       label: g(p+'label') || '',
+      provider: g(p+'provider') || 'claude',
       claudeBin: g(p+'claudeBin') || 'claude',
+      codexBin: g(p+'codexBin') || 'codex',
       workingDir: g(p+'workingDir') || '',
       logDir: g(p+'logDir') || '',
       botToken: g(p+'botToken') || undefined,
