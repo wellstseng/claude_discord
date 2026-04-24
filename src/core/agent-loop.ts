@@ -1330,13 +1330,17 @@ export async function* agentLoop(
           const toolNames = toolDefs.map(d => d.name).join(",");
           log.warn(`[agent-loop] [loop=${loopCount}] EMPTY RESPONSE: msgs=${messages.length} tools=${toolDefs.length} prevDeferred=[${prevIterDeferredActivated.join(",")}] lastMsg=${lastMsgPreview} toolNames=[${toolNames}]`);
         }
-        // Deferred Tool Nudge：上一 iter 活化 deferred tool + 本 iter 空回應 → 注入中性續接
+        // Deferred Tool Nudge：deferred tool 已活化過 + 本 iter 空回應 → 注入中性續接
         // 文案改中性（去「[系統提示]」前綴）避開 Anthropic Common cause #1（tool_result 後加 text 強化 end_turn）
-        // 上限 3 次：單次 nudge 不一定救得回來（觀察過連續 2 次 nudge 才啟動的 case），
-        // 但也不能無限，不然真的卡死的 case 會燒 cost
-        if (prevIterDeferredActivated.length > 0 && outputEmpty && deferredNudgeCount < MAX_DEFERRED_NUDGES) {
+        //
+        // 用 loadedDeferredNames（累積載入的 deferred tool 集合，跨 iter 持久）判斷，
+        // 不用 prevIterDeferredActivated（只看上一 iter 活化）—— 後者在 nudge 之後會變空
+        // （nudge iter 沒新活化任何 tool），導致第 2 次續接條件 false、break 放棄
+        //
+        // 上限 3 次：單次 nudge 不一定救得回來（觀察過連續 2 次 nudge 才啟動），但也不能無限
+        if (outputEmpty && loadedDeferredNames.size > 0 && deferredNudgeCount < MAX_DEFERRED_NUDGES) {
           deferredNudgeCount++;
-          const loaded = prevIterDeferredActivated.join(", ");
+          const loaded = Array.from(loadedDeferredNames).join(", ");
           log.warn(`[agent-loop] [loop=${loopCount}] tool_search 後空回應 end_turn，自動注入 continuation ${deferredNudgeCount}/${MAX_DEFERRED_NUDGES}（已載入 ${loaded}）`);
           messages.push({
             role: "user",
@@ -1345,7 +1349,7 @@ export async function* agentLoop(
           continue;
         }
         // 如果 nudge 用完還在 empty end_turn → 標記，讓最終 response 補通知給使用者
-        if (prevIterDeferredActivated.length > 0 && outputEmpty && deferredNudgeCount >= MAX_DEFERRED_NUDGES) {
+        if (outputEmpty && loadedDeferredNames.size > 0 && deferredNudgeCount >= MAX_DEFERRED_NUDGES) {
           deferredNudgeExhausted = true;
           log.warn(`[agent-loop] [loop=${loopCount}] deferred nudge 用完仍空回應，放棄 turn`);
         }
@@ -1827,13 +1831,17 @@ export async function* agentLoop(
   }
 
   // Tool Log Store：儲存 tool 執行記錄，session history 加索引摘要
+  // 注意：session.turnCount 此時是「本輪尚未計入」的值（addMessages 下面才 ++）
+  // 必須把這個「本輪」值同時給 tool-log 的檔名和 trace 的 turnIndex，否則兩邊差 1
+  // → dashboard click-to-expand 會讀到下一輪的 tool log
+  const savedTurnIndex = session.turnCount;
   const toolLogStore = getToolLogStore();
   let toolLogPath: string | null = null;
   const extraMessages: Message[] = [];
   if (toolLogStore && tracker.toolCalls.length > 0) {
     toolLogPath = toolLogStore.save(
       sessionKey,
-      session.turnCount,
+      savedTurnIndex,
       tracker.toolCalls.map(tc => ({
         id: Math.random().toString(36).slice(2),
         name: tc.name,
@@ -1914,8 +1922,8 @@ export async function* agentLoop(
     trace.recordResponse(fullResponse, Date.now() - turnStartMs);
 
     // TurnAuditLog 遷移欄位：turnIndex, phase, contextBreakdown, toolDurations
-    const sessionAfterTrace = sessionManager.get(sessionKey) ?? session;
-    trace.setTurnIndex(sessionAfterTrace?.turnCount ?? 0);
+    // 原本用 post-increment 的 turnCount，導致 trace.turnIndex 與 tool-log 檔名（pre-increment）差 1
+    trace.setTurnIndex(savedTurnIndex);
     trace.setPhase({
       inboundReceivedMs: turnStartMs,
       completedMs: Date.now(),
