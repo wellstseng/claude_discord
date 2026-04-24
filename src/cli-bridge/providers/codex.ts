@@ -14,7 +14,7 @@
  * Phase 2：approval 第一版用 generic auto-approve（信任模式）；Phase 3 改接 Discord 按鈕。
  */
 
-import { writeFileSync, mkdirSync, existsSync, unlinkSync, lstatSync, symlinkSync, readdirSync, statSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, unlinkSync, lstatSync, symlinkSync, readdirSync, statSync, readFileSync } from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
@@ -183,17 +183,23 @@ export class CodexProvider implements CliProvider {
     }
   }
 
-  // ── CODEX_HOME 寫入（per-bridge 隔離 + MCP 注入）─────────────────────────
+  // ── CODEX_HOME 寫入（per-bridge 隔離 + 全域 config 繼承 + MCP 注入）─────
 
   /**
-   * 建立 per-bridge codex home，並寫 config.toml 內含 catclaw-bridge-discord MCP server。
+   * 建立 per-bridge codex home，模擬使用者直接跑 codex 時看到的環境，但加上 catclaw 的 MCP 注入。
+   *
    * 結構：
    *   $CATCLAW_CONFIG_DIR/runtime/bridges/<label>.codex/
-   *     ├── auth.json (symlink → ~/.codex/auth.json)
-   *     ├── sessions  (symlink → ~/.codex/sessions)
-   *     └── config.toml (含 mcp_servers.catclaw_bridge_discord)
+   *     ├── auth.json   (symlink → ~/.codex/auth.json)         # ChatGPT 登入
+   *     ├── sessions    (symlink → ~/.codex/sessions)          # thread .jsonl
+   *     ├── skills      (symlink → ~/.codex/skills)   if exists # user 自訂 skills
+   *     ├── memories    (symlink → ~/.codex/memories) if exists # user 全域 memories
+   *     ├── profiles    (symlink → ~/.codex/profiles) if exists # codex profiles
+   *     └── config.toml (= ~/.codex/config.toml 內容 + catclaw 的 mcp_servers 區塊)
    *
-   * 沒有 botToken 或 channelId → 不注入 MCP，但仍建立 home（讓 codex 不會用全域 config）
+   * 行為與「直接跑 codex」幾乎一致；唯一額外的就是多一個 catclaw_bridge_discord MCP server。
+   *
+   * 沒有 botToken 或 channelId → 不注入 MCP，仍 symlink config.toml 等讓 user 全域設定生效。
    */
   private writeCodexHome(config: CliProcessConfig): string | null {
     const label = config.label;
@@ -204,15 +210,19 @@ export class CodexProvider implements CliProvider {
     }
 
     const homeDir = join(catclawDir, "runtime", "bridges", `${label}.codex`);
+    const userCodexHome = join(homedir(), ".codex");
     try {
       mkdirSync(homeDir, { recursive: true });
 
-      // Symlink auth.json + sessions（保留全域 codex login + thread .jsonl）
-      this.ensureSymlink(join(homedir(), ".codex", "auth.json"), join(homeDir, "auth.json"));
-      this.ensureSymlink(join(homedir(), ".codex", "sessions"), join(homeDir, "sessions"));
+      // Symlink 使用者全域 codex 的所有 user-level 資產（auth / sessions / skills / memories / profiles）
+      // → bridge 內 codex 看到的東西跟使用者裸跑 codex 一樣
+      const linkTargets = ["auth.json", "sessions", "skills", "memories", "profiles"];
+      for (const name of linkTargets) {
+        this.ensureSymlink(join(userCodexHome, name), join(homeDir, name));
+      }
 
-      // 寫 config.toml
-      const configToml = this.buildCodexConfigToml(config);
+      // config.toml = 使用者全域 config（若有）+ catclaw 的 mcp_servers 區塊
+      const configToml = this.buildCodexConfigToml(config, userCodexHome);
       writeFileSync(join(homeDir, "config.toml"), configToml, "utf-8");
       log.debug(`[cli-bridge:${label}] codex home 已寫入 ${homeDir}`);
       return homeDir;
@@ -237,22 +247,31 @@ export class CodexProvider implements CliProvider {
     }
   }
 
-  private buildCodexConfigToml(config: CliProcessConfig): string {
-    if (!config.botToken || !config.channelId) {
-      // 沒 token / channel → 空 config（仍用獨立 home，但不裝 MCP）
-      return "# catclaw bridge codex home (no MCP — missing botToken or channelId)\n";
+  private buildCodexConfigToml(config: CliProcessConfig, userCodexHome: string): string {
+    // 1) 讀取使用者全域 ~/.codex/config.toml（若有）
+    let userConfig = "";
+    const userConfigPath = join(userCodexHome, "config.toml");
+    if (existsSync(userConfigPath)) {
+      try {
+        userConfig = readFileSync(userConfigPath, "utf-8").trimEnd();
+      } catch (err) {
+        log.warn(`[cli-bridge:${config.label}] 讀取 ~/.codex/config.toml 失敗：${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
-    // discord-server.js 相對於 dist/cli-bridge/providers/ 位置
-    const serverPath = resolvePath(__dirname, "..", "..", "mcp", "discord-server.js");
+    const header = `# catclaw bridge codex home — auto-generated, do not edit by hand\n# label: ${config.label}\n# 內容 = 使用者 ~/.codex/config.toml + catclaw 注入的 mcp_servers.catclaw_bridge_discord 區塊\n`;
 
-    // 用 TOML basic string + escape 雙引號 / backslash（最保險）
+    // 2) 沒 token / channel → 不注入 MCP，只把 user config 抄一份
+    if (!config.botToken || !config.channelId) {
+      return `${header}\n${userConfig}\n`;
+    }
+
+    // 3) 注入 catclaw 的 MCP server（discord-server.js 相對於 dist/cli-bridge/providers/ 位置）
+    const serverPath = resolvePath(__dirname, "..", "..", "mcp", "discord-server.js");
+    // TOML basic string escape：backslash / 雙引號
     const escape = (v: string): string => v.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
 
-    return `# catclaw bridge codex home — auto-generated, do not edit by hand
-# label: ${config.label}
-
-[mcp_servers.catclaw_bridge_discord]
+    const mcpBlock = `[mcp_servers.catclaw_bridge_discord]
 command = "node"
 args = ["${escape(serverPath)}"]
 
@@ -261,6 +280,10 @@ DISCORD_TOKEN = "${escape(config.botToken)}"
 DISCORD_CHANNEL_ID = "${escape(config.channelId)}"
 CATCLAW_BRIDGE_LABEL = "${escape(config.label)}"
 `;
+
+    // 注意：若使用者 config.toml 自己已有 [mcp_servers.catclaw_bridge_discord] 區塊，TOML 解析會因
+    // duplicate key 報錯。第一版接受這個風險（catclaw_bridge_discord 是我們專屬命名，使用者不太可能撞）。
+    return `${header}\n${userConfig}\n\n${mcpBlock}`;
   }
 
   // ── stdin encode ──────────────────────────────────────────────────────────

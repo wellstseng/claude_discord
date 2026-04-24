@@ -281,6 +281,35 @@ export class ClaudeApiProvider implements LLMProvider {
         : "";
     log.debug(`[claude:${this.id}] POST model=${this.modelId} msgs=${messages.length} tools=${context.tools?.length ?? 0} profile=${activeProfileId ?? "token"} ~inputTokens=${estInputTokens} lastUser="${lastUserText}"`);
 
+    // ── Debug Dump：偵測到 playwright tool 時 dump 完整 payload 到 /tmp 供排查空回應 ──
+    // （一次性診斷，找到根因後移除）
+    if (context.tools?.some(t => t.name.includes("playwright"))) {
+      try {
+        const fs = await import("node:fs");
+        const dumpPath = `/tmp/catclaw-claude-payload-${Date.now()}.json`;
+        fs.writeFileSync(dumpPath, JSON.stringify({
+          model: this.modelId,
+          systemPromptLen: context.systemPrompt?.length ?? 0,
+          systemPromptPreview: context.systemPrompt?.slice(-2000),
+          messagesCount: context.messages.length,
+          messages: context.messages.map(m => ({
+            role: m.role,
+            content: typeof m.content === "string"
+              ? { type: "string", preview: (m.content as string).slice(0, 500) }
+              : { type: "blocks", blocks: (m.content as unknown[]).map(b => {
+                  const block = b as Record<string, unknown>;
+                  return { type: block.type, preview: JSON.stringify(b).slice(0, 300) };
+                }) },
+          })),
+          toolsCount: context.tools.length,
+          tools: context.tools.map(t => ({ name: t.name, schemaKeys: Object.keys((t.parameters ?? {}) as object) })),
+        }, null, 2));
+        log.warn(`[claude:${this.id}] 🔍 DEBUG DUMP: ${dumpPath}`);
+      } catch (e) {
+        log.warn(`[claude:${this.id}] debug dump failed: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
     // ── 事件收集 ──────────────────────────────────────────────────────────────
     const events: ProviderEvent[] = [];
     const toolCalls: ToolCall[] = [];
@@ -298,7 +327,11 @@ export class ClaudeApiProvider implements LLMProvider {
         ...(opts.thinking ? { reasoning: opts.thinking } : {}),
       });
 
+      let rawEventCount = 0;
+      const rawEventTypes: string[] = [];
       for await (const event of stream) {
+        rawEventCount++;
+        rawEventTypes.push(event.type);
         const pev = this._convertEvent(event, toolCalls);
         if (pev) events.push(pev);
       }
@@ -309,6 +342,11 @@ export class ClaudeApiProvider implements LLMProvider {
         finalText = lastEvent.text;
         finalStopReason = lastEvent.stopReason;
         finalUsage = lastEvent.usage;
+      }
+
+      // Debug：若 events 陣列為空（導致 estimated fallback），log 實際收到的 raw events
+      if (events.length === 0) {
+        log.warn(`[claude:${this.id}] ⚠ 收到 0 個 converted events，raw=${rawEventCount} rawTypes=[${rawEventTypes.join(",")}] — 可能 stream 靜默失敗`);
       }
 
     } catch (err) {
