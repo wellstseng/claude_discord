@@ -23,3 +23,5 @@
 | feedback-docs-sync | feedback_docs_sync.md | 文件同步, README, WIKI, _AIDocs, 知識庫, 腳本異動, 雙語 | [固] |
 | feedback-no-overinterpret | feedback_no_overinterpret_commands.md | 指令辨識, 過度推測, 認錯系統, CatClaw混淆, 直接執行 | [固] |
 | feedback-no-self-restart | feedback_no_self_restart.md | pm2 restart, 重啟, 殺自己, catclaw 重啟, bridge 斷線, parent process | [固] |
+| user-terminology-vault | user_terminology_vault.md | vault, obsidian, 傳到 vault, 記到 vault | [固] |
+| feedback-implementation-discipline | feedback_implementation_discipline.md | 大型實作, 架構, 多階段, refactor, 抽象層, plan, provider, 開工, 改檔 | [固] |
