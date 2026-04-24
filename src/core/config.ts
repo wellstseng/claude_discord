@@ -705,7 +705,7 @@ export interface BridgeConfig {
   /** 模式設定（一般/精密/自訂） */
   modes?: ModeConfig;
   /** Token Usage Dashboard 設定 */
-  dashboard?: { enabled: boolean; port: number; token?: string };
+  dashboard?: { enabled: boolean; port: number; token?: string; errorNotifyChannel?: string };
   /** Prompt Assembler 模組設定 */
   promptAssembler?: PromptAssemblerConfig;
   /**
@@ -853,7 +853,7 @@ interface RawConfig {
   homeClaudeCode?: Partial<HomeClaudeCodeConfig>;
   defaultAgent?: string;
   agents?: AgentsConfig;
-  dashboard?: { enabled?: boolean; port?: number; token?: string };
+  dashboard?: { enabled?: boolean; port?: number; token?: string; errorNotifyChannel?: string };
   contextEngineering?: ContextEngineeringConfig;
   inboundHistory?: InboundHistoryConfig;
   subagents?: Partial<SubagentsConfig>;
@@ -1416,6 +1416,7 @@ function loadConfig(): BridgeConfig {
       enabled: true,
       port: raw.dashboard.port ?? 8088,
       token: raw.dashboard.token,
+      errorNotifyChannel: raw.dashboard.errorNotifyChannel,
     } : undefined,
     contextEngineering: raw.contextEngineering,
     inboundHistory: raw.inboundHistory,

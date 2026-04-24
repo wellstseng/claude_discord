@@ -26,10 +26,20 @@ import { initPlatform } from "./core/platform.js";
 import type { BridgeConfig as CoreBridgeConfig } from "./core/config.js";
 import { parseAgentArg, loadAgentBootConfig } from "./core/agent-loader.js";
 import { startAllBridges, shutdownAllBridges } from "./cli-bridge/index.js";
+import { recordStartup, recordShutdown, recordUncaughtException, getPendingReason } from "./core/restart-history.js";
 
 // 在其他模組開始 log 前設定層級
 setLogLevel(config.logLevel);
 log.info(`[catclaw] 啟動`)
+
+// 記錄啟動（會偵測上次是否為 unexpected_termination）
+try {
+  const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+  const version = existsSync(pkgPath) ? (JSON.parse(readFileSync(pkgPath, "utf-8")).version as string | undefined) : undefined;
+  recordStartup({ version });
+} catch (err) {
+  log.warn(`[catclaw] recordStartup 失敗：${err instanceof Error ? err.message : String(err)}`);
+}
 
 // ── Crash Log 路徑 ──────────────────────────────────────────────────────────
 const _crashLogPath = join(
@@ -50,6 +60,7 @@ process.on("uncaughtException", (err) => {
       type: "uncaughtException",
     }), "utf-8");
   } catch { /* 靜默 */ }
+  try { recordUncaughtException(err); } catch { /* 靜默 */ }
   process.exit(1);
 });
 
@@ -109,7 +120,7 @@ watchConfig();
 // Slash command 事件綁定（在 login 前綁，確保 ready 前就 listening）
 setupSlashCommands(bot);
 
-bot.once("clientReady", (c) => {
+bot.once("clientReady", async (c) => {
   log.info(`[bridge] Bot 上線：${c.user.tag}`);
   log.info(`  DM：${config.discord.dm.enabled ? "啟用" : "停用"}`);
   const guildCount = Object.keys(config.discord.guilds).length;
@@ -177,6 +188,41 @@ bot.once("clientReady", (c) => {
     } catch { /* 靜默 */ }
   }
 
+  // ── Log Error Monitor → Discord 通知 ────────────────────────────────────
+  {
+    const { eventBus } = await import("./core/event-bus.js");
+    // 預設取 agent loop 第一個 allow 的頻道；可用 dashboard.errorNotifyChannel 覆寫
+    let _errorNotifyChannel: string | undefined = config.dashboard?.errorNotifyChannel;
+    if (!_errorNotifyChannel) {
+      for (const gcfg of Object.values(config.discord.guilds)) {
+        const channels = (gcfg as Record<string, unknown>).channels as Record<string, { allow?: boolean }> | undefined;
+        if (!channels) continue;
+        for (const [chId, chCfg] of Object.entries(channels)) {
+          if (chCfg.allow !== false) { _errorNotifyChannel = chId; break; }
+        }
+        if (_errorNotifyChannel) break;
+      }
+    }
+    eventBus.on("log:error", (snapshot) => {
+      const notifyChannelId = _errorNotifyChannel;
+      if (!notifyChannelId) return;
+      bot.channels.fetch(notifyChannelId).then(async (ch) => {
+        if (!ch?.isTextBased() || !("send" in ch)) return;
+        const shortCtx = snapshot.context.length > 800
+          ? snapshot.context.slice(-800)
+          : snapshot.context;
+        await ch.send(
+          `🚨 **Log Error 偵測**\n` +
+          `時間：${snapshot.timestamp}\n` +
+          `\`\`\`\n${shortCtx}\n\`\`\`\n` +
+          `Snapshot: \`${snapshot.snapshotPath}\``
+        );
+      }).catch((err: unknown) => {
+        log.debug(`[log-error-monitor] Discord 通知失敗：${err instanceof Error ? err.message : String(err)}`);
+      });
+    });
+  }
+
   // V1 crash recovery（scanAndCleanActiveTurns）已移除 — V2 走 agentLoop，不寫 active-turns
 });
 
@@ -199,6 +245,7 @@ async function shutdown(signal: string): Promise<void> {
     log.error(`[bridge] shutdownAllBridges 失敗：${err instanceof Error ? err.message : String(err)}`);
   }
   bot.destroy();
+  try { recordShutdown(getPendingReason() ?? signal, signal); } catch { /* 靜默 */ }
   dbg("exit");
   process.exit(0);
 }

@@ -287,6 +287,12 @@ export async function initPlatform(
     initDashboard(config.dashboard.port ?? 8088, config.dashboard.token);
   }
 
+  // ── 9.9 Log Error Monitor ──────────────────────────────────────────────────
+  {
+    const { initLogErrorMonitor } = await import("./log-error-monitor.js");
+    initLogErrorMonitor();
+  }
+
   // ── 10. Workflow Engine ─────────────────────────────────────────────────────
   const workflowDataDir = join(wsDir, "data", "workflow");
   const memoryDir = join(bootAgentDir, "memory");

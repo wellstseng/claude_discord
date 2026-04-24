@@ -121,6 +121,9 @@ export interface CatClawEvents {
 
   // ── Context Engineering ──
   "context:compressed":  [sessionKey: string];
+
+  // ── Log Monitor ──
+  "log:error":           [snapshot: { timestamp: string; message: string; context: string; snapshotPath: string }];
 }
 
 // ── EventBus 實作 ─────────────────────────────────────────────────────────

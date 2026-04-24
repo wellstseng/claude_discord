@@ -12,7 +12,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, writeFileSync, readdirSync, unlinkSync, renameSync, existsSync, mkdirSync, statSync, watchFile, unwatchFile } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, unlinkSync, renameSync, existsSync, mkdirSync, statSync, watchFile, unwatchFile, createReadStream } from "node:fs";
 import { dirname, basename, join, join as pathJoin, resolve } from "node:path";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
@@ -475,10 +475,19 @@ label.cfg-toggle { min-width: 36px; }
 <div id="pane-logs" class="pane">
   <div class="card">
     <h2>PM2 日誌（即時串流）
-      <button class="btn btn-sm" style="float:right" onclick="connectLogStream()">↻ 重新連線</button>
+      <button class="btn btn-sm" style="float:right;margin-left:6px" onclick="connectLogStream()">↻ 重新連線</button>
+      <button class="btn btn-sm" style="float:right" onclick="exportLogs()">⬇ 匯出</button>
     </h2>
     <textarea id="log-area" rows="30" readonly></textarea>
   </div>
+  <div class="card" style="margin-top:12px">
+    <h2>Error Snapshots
+      <button class="btn btn-sm" style="float:right" onclick="loadErrorSnapshots()">↻ 載入</button>
+    </h2>
+    <div id="error-snapshots-list" style="font-size:0.85rem;color:var(--fg2)">按 ↻ 載入</div>
+    <pre id="error-snapshot-detail" style="display:none;margin-top:8px;padding:8px;background:var(--bg2);border-radius:4px;max-height:400px;overflow:auto;font-size:0.8rem;white-space:pre-wrap"></pre>
+  </div>
+
 </div>
 
 <!-- 操作 -->
@@ -494,6 +503,12 @@ label.cfg-toggle { min-width: 36px; }
     <div class="card">
       <h2>Active Subagents</h2>
       <div id="subagents-list"></div>
+    </div>
+    <div class="card">
+      <h2>最近重啟
+        <button class="btn btn-sm" style="float:right" onclick="loadRestartHistory()">↻</button>
+      </h2>
+      <div id="restart-history-list"><p style="color:#888;font-size:0.8rem">載入中...</p></div>
     </div>
   </div>
 </div>
@@ -909,9 +924,9 @@ function switchTab(id, el) {
   if (id === 'sessions') { loadSessions(); _sessAutoRefresh = setInterval(loadSessions, 10000); }
   if (id === 'inbound') { loadInboundHistory(); }
   if (id === 'chat') { refreshChatSessions(); }
-  if (id === 'logs') connectLogStream();
+  if (id === 'logs') { connectLogStream(); loadErrorSnapshots(); }
   if (id !== 'logs') disconnectLogStream();
-  if (id === 'ops') { loadSubagents(); }
+  if (id === 'ops') { loadSubagents(); loadRestartHistory(); }
   if (id === 'tasks') { loadTasks(); }
   if (id === 'auth') { loadModelsConfig(); loadAuthProfiles(); }
   if (id === 'traces') { loadTraces(); _traceAutoRefresh = setInterval(loadTraces, 5000); }
@@ -1291,6 +1306,44 @@ function disconnectLogStream() {
 async function loadLogs() { connectLogStream(); }
 function startLogRefresh() { connectLogStream(); }
 
+function exportLogs() {
+  const url = '/api/logs/export' + (_authToken ? '?token=' + encodeURIComponent(_authToken) : '');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ── Error Snapshots ──────────────────────────────────────────────────────────
+async function loadErrorSnapshots() {
+  const el = document.getElementById('error-snapshots-list');
+  try {
+    const d = await authFetch('/api/error-snapshots').then(r => r.json());
+    if (!d.snapshots || d.snapshots.length === 0) {
+      el.innerHTML = '<span style="color:var(--fg3)">無 error snapshot</span>';
+      return;
+    }
+    el.innerHTML = '<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:4px">時間</th><th style="text-align:left;padding:4px">Error</th><th style="padding:4px">大小</th></tr></thead><tbody>' +
+      d.snapshots.map(s =>
+        '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="viewErrorSnapshot(\\'' + s.name + '\\')">' +
+        '<td style="padding:4px;white-space:nowrap">' + s.time + '</td>' +
+        '<td style="padding:4px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (s.error || s.name) + '</td>' +
+        '<td style="padding:4px;text-align:right">' + s.size + '</td></tr>'
+      ).join('') + '</tbody></table>';
+  } catch(e) { el.textContent = '載入失敗：' + e; }
+}
+
+async function viewErrorSnapshot(name) {
+  const el = document.getElementById('error-snapshot-detail');
+  try {
+    const text = await authFetch('/api/error-snapshots/' + encodeURIComponent(name)).then(r => r.text());
+    el.textContent = text;
+    el.style.display = 'block';
+  } catch(e) { el.textContent = '讀取失敗：' + e; el.style.display = 'block'; }
+}
+
 // ── 操作 ─────────────────────────────────────────────────────────────────────
 async function doRestart() {
   if (!confirm('確定重啟 Bot？')) return;
@@ -1300,6 +1353,46 @@ async function doRestart() {
     el.className = 'msg ' + (d.success ? 'ok' : 'err');
     el.textContent = d.success ? '✓ 重啟信號已送出' : '錯誤：' + d.error;
   } catch(e) { const el = document.getElementById('ops-msg'); el.className='msg err'; el.textContent='失敗：'+e; }
+}
+
+async function loadRestartHistory() {
+  const host = document.getElementById('restart-history-list');
+  if (!host) return;
+  try {
+    const d = await authFetch('/api/restart-history?limit=5').then(r => r.json());
+    const entries = Array.isArray(d.entries) ? d.entries : [];
+    if (entries.length === 0) { host.innerHTML = '<p style="color:#888;font-size:0.8rem">（無紀錄）</p>'; return; }
+    const fmtDur = (ms) => {
+      if (!ms || ms < 0) return '-';
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's';
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + 'm' + (s % 60) + 's';
+      const h = Math.floor(m / 60);
+      return h + 'h' + (m % 60) + 'm';
+    };
+    const reasonStyle = (e) => {
+      if (!e.clean) return 'color:#e66;font-weight:bold';
+      if (e.reason === 'api_restart' || e.reason === 'manual_restart') return 'color:#fa0';
+      return 'color:#6c6';
+    };
+    const rows = entries.map((e) => {
+      const started = e.startedAt ? e.startedAt.replace('T', ' ').slice(0, 19) : '-';
+      const stopped = e.stoppedAt ? e.stoppedAt.replace('T', ' ').slice(0, 19) : '(running)';
+      const dur = fmtDur(e.uptimeMs);
+      const note = e.note ? '<div style="color:#888;font-size:0.7rem;margin-top:2px">' + e.note + '</div>' : '';
+      const stack = e.stack ? '<details style="margin-top:4px"><summary style="cursor:pointer;font-size:0.7rem;color:#888">stack</summary><pre style="font-size:0.68rem;color:#aaa;white-space:pre-wrap;max-height:120px;overflow:auto">' + (e.stack ?? '').replace(/</g, '&lt;') + '</pre></details>' : '';
+      return '<tr>' +
+        '<td style="padding:4px 8px;font-size:0.78rem">' + started + '</td>' +
+        '<td style="padding:4px 8px;font-size:0.78rem">' + stopped + '</td>' +
+        '<td style="padding:4px 8px;font-size:0.78rem">' + dur + '</td>' +
+        '<td style="padding:4px 8px;font-size:0.78rem;' + reasonStyle(e) + '">' + e.reason + (e.signal ? ' (' + e.signal + ')' : '') + note + stack + '</td>' +
+      '</tr>';
+    }).join('');
+    host.innerHTML = '<table style="width:100%;border-collapse:collapse"><thead><tr style="text-align:left;border-bottom:1px solid var(--border)"><th style="padding:4px 8px;font-size:0.72rem;color:#888">啟動</th><th style="padding:4px 8px;font-size:0.72rem;color:#888">關閉</th><th style="padding:4px 8px;font-size:0.72rem;color:#888">Uptime</th><th style="padding:4px 8px;font-size:0.72rem;color:#888">原因</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  } catch (e) {
+    host.innerHTML = '<p style="color:#e66;font-size:0.8rem">載入失敗：' + e + '</p>';
+  }
 }
 
 async function loadSubagents() {
@@ -1609,6 +1702,7 @@ const CFG_SCHEMA = [
     {k:'dashboard.enabled',t:'bool',l:'啟用',d:'Dashboard 監控面板開關'},
     {k:'dashboard.port',t:'num',l:'Port',d:'Dashboard HTTP 服務埠號，預設 8088'},
     {k:'dashboard.token',t:'pw',l:'Auth Token',d:'存取認證 token，設定後需帶 ?token=xxx 才能進入'},
+    {k:'dashboard.errorNotifyChannel',t:'str',l:'Error Notify Channel',d:'Log 錯誤通知 Discord 頻道 ID（留空則用第一個 allow 頻道）'},
   ]},
   // CLI Bridge 設定已移至獨立檔案 cli-bridges.json，透過 CLI Bridge tab 管理
   { key:'botCircuitBreaker', label:'Bot Circuit Breaker', fields:[
@@ -3919,6 +4013,31 @@ export class DashboardServer {
         return;
       }
 
+      // GET /api/logs/export — 匯出完整 log 檔案下載
+      if (url.startsWith("/api/logs/export") && method === "GET") {
+        const logPath = findLogFile();
+        if (!logPath) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "log file not found" }));
+          return;
+        }
+        try {
+          const stat = statSync(logPath);
+          const ts = new Date().toISOString().slice(0, 10);
+          const fileName = `catclaw-${ts}.log`;
+          res.writeHead(200, {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${fileName}"`,
+            "Content-Length": stat.size,
+          });
+          createReadStream(logPath).pipe(res);
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+        return;
+      }
+
       // GET /api/logs
       if (url.startsWith("/api/logs") && method === "GET") {
         const linesMatch = url.match(/[?&]lines=(\d+)/);
@@ -3928,13 +4047,120 @@ export class DashboardServer {
         return;
       }
 
+      // GET /api/error-snapshots
+      if (url === "/api/error-snapshots" && method === "GET") {
+        const snapshotDir = join(
+          process.env.CATCLAW_WORKSPACE ?? join(homedir(), ".catclaw", "workspace"),
+          "data", "error-snapshots",
+        );
+        try {
+          if (!existsSync(snapshotDir)) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ snapshots: [] }));
+            return;
+          }
+          const files = readdirSync(snapshotDir)
+            .filter(f => f.endsWith(".log"))
+            .sort()
+            .reverse()
+            .slice(0, 50);
+          const snapshots = files.map(f => {
+            const st = statSync(join(snapshotDir, f));
+            // 從檔名解析時間和 error 摘要
+            const match = f.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})_(.+)\.log$/);
+            const time = match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]}` : f;
+            return { name: f, time, error: match?.[5] ?? "", size: st.size > 1024 ? `${(st.size / 1024).toFixed(1)}KB` : `${st.size}B` };
+          });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ snapshots }));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+        return;
+      }
+
+      // GET /api/error-snapshots/:name
+      if (url.startsWith("/api/error-snapshots/") && method === "GET") {
+        const name = decodeURIComponent(url.slice("/api/error-snapshots/".length));
+        const snapshotDir = join(
+          process.env.CATCLAW_WORKSPACE ?? join(homedir(), ".catclaw", "workspace"),
+          "data", "error-snapshots",
+        );
+        const filePath = join(snapshotDir, name);
+        // 防止 path traversal
+        if (!filePath.startsWith(snapshotDir) || !existsSync(filePath)) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "not found" }));
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(readFileSync(filePath, "utf-8"));
+        return;
+      }
+
+      // GET /api/error-notify-channel
+      if (url === "/api/error-notify-channel" && method === "GET") {
+        try {
+          const configPath = join(process.env.CATCLAW_HOME ?? join(homedir(), ".catclaw"), "catclaw.json");
+          const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ channelId: raw.dashboard?.errorNotifyChannel ?? "" }));
+        } catch {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ channelId: "" }));
+        }
+        return;
+      }
+
+      // POST /api/error-notify-channel
+      if (url === "/api/error-notify-channel" && method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+        req.on("end", () => {
+          try {
+            const { channelId } = JSON.parse(body) as { channelId: string };
+            // 讀取原始 JSON，更新 dashboard.errorNotifyChannel
+            const configPath = join(process.env.CATCLAW_HOME ?? join(homedir(), ".catclaw"), "catclaw.json");
+            const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+            if (!raw.dashboard) raw.dashboard = {};
+            raw.dashboard.errorNotifyChannel = channelId || undefined;
+            writeFileSync(configPath, JSON.stringify(raw, null, 2), "utf-8");
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: true }));
+          } catch (err) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: String(err) }));
+          }
+        });
+        return;
+      }
+
       // POST /api/restart
       if (url === "/api/restart" && method === "POST") {
         const ok = touchRestart();
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(ok ? { success: true } : { success: false, error: "signal/RESTART not found" }));
         // 不依賴 PM2 file watch — 發 SIGTERM 走 graceful shutdown，PM2 autorestart 拉起
+        void import("./restart-history.js").then(m => m.setPendingReason?.("api_restart")).catch(() => {});
         setTimeout(() => { process.kill(process.pid, "SIGTERM"); }, 500);
+        return;
+      }
+
+      // GET /api/restart-history
+      if (url.startsWith("/api/restart-history") && method === "GET") {
+        void (async () => {
+          try {
+            const { getRecentRestarts } = await import("./restart-history.js");
+            const limitMatch = url.match(/[?&]limit=(\d+)/);
+            const limit = limitMatch ? parseInt(limitMatch[1]!, 10) : 5;
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ entries: getRecentRestarts(limit) }));
+          } catch (err) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+          }
+        })();
         return;
       }
 
