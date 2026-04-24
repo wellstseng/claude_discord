@@ -475,9 +475,11 @@ label.cfg-toggle { min-width: 36px; }
 <div id="pane-logs" class="pane">
   <div class="card">
     <h2>PM2 日誌（即時串流）
+      <button class="btn btn-sm btn-red" style="float:right;margin-left:6px" onclick="clearLogs()">🗑 清除</button>
       <button class="btn btn-sm" style="float:right;margin-left:6px" onclick="connectLogStream()">↻ 重新連線</button>
       <button class="btn btn-sm" style="float:right" onclick="exportLogs()">⬇ 匯出</button>
     </h2>
+    <div id="log-clear-msg" class="msg" style="font-size:0.72rem"></div>
     <textarea id="log-area" rows="30" readonly></textarea>
   </div>
   <div class="card" style="margin-top:12px">
@@ -1314,6 +1316,26 @@ function exportLogs() {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+async function clearLogs() {
+  if (!confirm('清除 PM2 日誌檔（out + error）？\n注意：此操作會 truncate 檔案，無法復原。')) return;
+  const msg = document.getElementById('log-clear-msg');
+  try {
+    const d = await authFetch('/api/logs/clear', { method: 'POST' }).then(r => r.json());
+    if (d.success) {
+      msg.className = 'msg ok';
+      msg.textContent = '✓ 已清除 ' + (d.cleared || []).join(', ') + ' (' + (d.totalBytes || 0) + ' bytes)';
+      document.getElementById('log-area').value = '';
+      setTimeout(() => connectLogStream(), 500);
+    } else {
+      msg.className = 'msg err';
+      msg.textContent = '失敗：' + (d.error || 'unknown');
+    }
+  } catch (e) {
+    msg.className = 'msg err';
+    msg.textContent = '失敗：' + e;
+  }
 }
 
 // ── Error Snapshots ──────────────────────────────────────────────────────────
@@ -4042,6 +4064,40 @@ export class DashboardServer {
         const lines = linesMatch ? parseInt(linesMatch[1]!, 10) : 100;
         res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
         res.end(tailLog(lines));
+        return;
+      }
+
+      // POST /api/logs/clear — truncate PM2 out/error log
+      if (url === "/api/logs/clear" && method === "POST") {
+        const targets = [
+          pathJoin(homedir(), ".pm2", "logs", "catclaw-out.log"),
+          pathJoin(homedir(), ".pm2", "logs", "catclaw-error.log"),
+          pathJoin(homedir(), ".pm2", "logs", "catclaw-test-out.log"),
+          pathJoin(homedir(), ".pm2", "logs", "catclaw-test-error.log"),
+        ];
+        const cleared: string[] = [];
+        let totalBytes = 0;
+        const errors: string[] = [];
+        for (const p of targets) {
+          if (!existsSync(p)) continue;
+          try {
+            const sz = statSync(p).size;
+            writeFileSync(p, "", "utf-8");
+            cleared.push(p.split("/").pop() ?? p);
+            totalBytes += sz;
+          } catch (err) {
+            errors.push(`${p}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        // 重置 SSE watcher 的 last size，否則下一次 append 會算錯 offset
+        _logLastSize = 0;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        if (errors.length > 0 && cleared.length === 0) {
+          res.end(JSON.stringify({ success: false, error: errors.join("; ") }));
+        } else {
+          res.end(JSON.stringify({ success: true, cleared, totalBytes, errors: errors.length ? errors : undefined }));
+        }
+        log.info(`[dashboard] logs cleared: ${cleared.join(", ")} (${totalBytes} bytes)`);
         return;
       }
 
