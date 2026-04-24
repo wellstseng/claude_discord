@@ -911,7 +911,9 @@ export async function* agentLoop(
     const deferredBlock = [
       "The following deferred tools are available via tool_search:",
       listing,
-      "Call tool_search with the tool name(s) to get full parameter schema before using them.",
+      "Usage rule: Call tool_search to load a deferred tool's schema only when you intend to USE it next.",
+      "**In the same turn**, after tool_search returns, you MUST either (a) call the actual tool you looked up, or (b) ask the user for missing info / explain why you can't proceed.",
+      "Do NOT end your turn immediately after tool_search just because you loaded the schema — that leaves the user waiting with nothing done.",
     ].join("\n");
     systemPrompt = systemPrompt ? `${systemPrompt}\n\n${deferredBlock}` : deferredBlock;
     log.debug(`[agent-loop] deferred tools: ${deferredDefs.map(d => d.name).join(", ")}`);
@@ -1075,6 +1077,10 @@ export async function* agentLoop(
   const tracker = new TurnTracker();
   let loopCount = 0;
   let continuationCount = 0;  // Output Token Recovery 續接計數
+  // Deferred Tool Nudge：tool_search 後 LLM 空回應 end_turn 時自動注入續接提示
+  let deferredJustActivated: string[] = [];   // 本 iteration 剛活化的 deferred tool 名稱
+  let prevIterDeferredActivated: string[] = []; // 上一 iteration 活化的（供本 iter 判斷用）
+  let deferredNudgeUsed = false;              // 每 turn 最多 nudge 一次
   const turnStartMs = Date.now();
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -1147,6 +1153,10 @@ export async function* agentLoop(
 
   try {
     while (loopCount++ < MAX_LOOPS) {
+      // 把「本 iter 剛活化」移到「上一 iter 活化」槽，供本 iter end_turn 判斷
+      prevIterDeferredActivated = deferredJustActivated;
+      deferredJustActivated = [];
+
       // ── abort 快速出口（/stop 或 timeout 觸發後，下一輪不再呼叫 LLM）────
       if (controller.signal.aborted) break;
 
@@ -1267,7 +1277,25 @@ export async function* agentLoop(
       });
 
       if (controller.signal.aborted) break;
-      if (streamResult.stopReason === "end_turn") break;
+      if (streamResult.stopReason === "end_turn") {
+        // Deferred Tool Nudge：上一 iter 剛用 tool_search 活化 deferred tool，
+        // 但本 iter 空回應（output=0 + estimated）直接 end_turn → 強烈懷疑 LLM 斷流
+        // 或誤把 tool_search 當「任務完成」。注入 continuation 再跑一次。
+        // 本 iter 是否空回應：output=0 + estimated=true 代表 provider 沒收到任何 event
+        // （Claude API events 陣列為空 → fallback 預設 end_turn + estimated usage，見 claude-api.ts:336）
+        const outputEmpty = streamResult.usage.output === 0 && (streamResult.usage.estimated ?? false);
+        if (prevIterDeferredActivated.length > 0 && outputEmpty && !deferredNudgeUsed) {
+          deferredNudgeUsed = true;
+          const loaded = prevIterDeferredActivated.join(", ");
+          log.warn(`[agent-loop] [loop=${loopCount}] tool_search 後空回應 end_turn，自動注入 continuation（已載入 ${loaded}）`);
+          messages.push({
+            role: "user",
+            content: `[系統提示] 已載入工具 schema：${loaded}。請繼續完成使用者原本的請求——若需要，直接呼叫該工具；若不需要，請以自然語言回應說明。不要再次呼叫 tool_search 查同樣的工具。`,
+          });
+          continue;
+        }
+        break;
+      }
 
       // ── Output Token Recovery：截斷偵測 + 自動續接 ────────────────────────
       if (streamResult.stopReason === "max_tokens") {
@@ -1685,6 +1713,7 @@ export async function* agentLoop(
           if (names.includes(def.name.toLowerCase()) || names.some(n => def.name.toLowerCase().includes(n) || def.description.toLowerCase().includes(n))) {
             toolDefs.push(def);
             loadedDeferredNames.add(def.name);
+            deferredJustActivated.push(def.name);
             log.debug(`[agent-loop] deferred tool activated: ${def.name}`);
           }
         }
