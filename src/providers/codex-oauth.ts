@@ -19,7 +19,7 @@
  * }
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { log } from "../logger.js";
@@ -106,6 +106,9 @@ export class CodexOAuthProvider implements LLMProvider {
   private authStore?: AuthProfileStore;
   private cachedToken: string | null = null;
   private tokenExpiresAt = 0;  // epoch ms
+  // 追蹤 auth.json mtime，避免外部進程（Codex CLI 也用同一份 auth.json）refresh 後
+  // catclaw 還用 cached 舊 token → 401。每次發請求前比對 mtime，有變動就重讀。
+  private cachedFileMtime = 0;
 
   constructor(id: string, entry: ProviderEntry, authStore?: AuthProfileStore) {
     this.id = id;
@@ -128,9 +131,17 @@ export class CodexOAuthProvider implements LLMProvider {
   async getAccessToken(): Promise<string> {
     const now = Date.now();
 
-    // 仍有效 → 直接回傳
+    // 仍有效 → 還要確認 auth.json 沒被外部進程改寫
+    // 沒這層檢查時，Codex CLI（也用同一個 ~/.codex/auth.json）refresh 後，
+    // catclaw 仍用記憶體裡的舊 token → 401 → 看起來像「過期」
     if (this.cachedToken && now < this.tokenExpiresAt - REFRESH_BUFFER_MS) {
-      return this.cachedToken;
+      try {
+        const stat = statSync(this.tokenPath);
+        if (stat.mtimeMs === this.cachedFileMtime) {
+          return this.cachedToken;
+        }
+        log.info(`[codex-oauth] auth.json 被外部進程更新（mtime ${this.cachedFileMtime} → ${stat.mtimeMs}），重讀 token`);
+      } catch { /* stat 失敗 → 走下面 re-read */ }
     }
 
     // 讀取 auth.json
@@ -142,8 +153,10 @@ export class CodexOAuthProvider implements LLMProvider {
     }
 
     let auth: CodexAuthJson;
+    let fileMtime = 0;
     try {
       auth = JSON.parse(readFileSync(this.tokenPath, "utf-8")) as CodexAuthJson;
+      fileMtime = statSync(this.tokenPath).mtimeMs;
     } catch (err) {
       throw new Error(`[codex-oauth] 解析 auth.json 失敗：${err instanceof Error ? err.message : String(err)}`);
     }
@@ -153,6 +166,7 @@ export class CodexOAuthProvider implements LLMProvider {
     if (auth.access_token && now < expiresAtMs - REFRESH_BUFFER_MS) {
       this.cachedToken = auth.access_token;
       this.tokenExpiresAt = expiresAtMs;
+      this.cachedFileMtime = fileMtime;
       return auth.access_token;
     }
 
@@ -164,9 +178,10 @@ export class CodexOAuthProvider implements LLMProvider {
     log.info(`[codex-oauth] token 過期，刷新中...`);
     const newAuth = await this._refresh(auth.refresh_token);
 
-    // 寫回 auth.json
+    // 寫回 auth.json，並把 mtime 同步起來（避免下次自己讀又以為「外部更新」白工 re-read）
     try {
       writeFileSync(this.tokenPath, JSON.stringify(newAuth, null, 2), "utf-8");
+      this.cachedFileMtime = statSync(this.tokenPath).mtimeMs;
     } catch (err) {
       log.warn(`[codex-oauth] 寫回 auth.json 失敗：${err instanceof Error ? err.message : String(err)}`);
     }
@@ -174,6 +189,13 @@ export class CodexOAuthProvider implements LLMProvider {
     this.cachedToken = newAuth.access_token;
     this.tokenExpiresAt = (newAuth.expires_at ?? 0) * 1000;
     return newAuth.access_token;
+  }
+
+  /** 強制丟棄記憶體 cache，下次 getAccessToken 會重讀 auth.json（用於 401 回應後重試） */
+  invalidateCache(): void {
+    this.cachedToken = null;
+    this.tokenExpiresAt = 0;
+    this.cachedFileMtime = 0;
   }
 
   private async _refresh(refreshToken: string): Promise<CodexAuthJson> {
@@ -213,8 +235,9 @@ export class CodexOAuthProvider implements LLMProvider {
     const pick = this.authStore?.pickForProvider("openai-codex");
     const activeProfileId = pick?.profileId;
 
-    const token = await this.getAccessToken();
-    const accountId = extractAccountId(token);
+    let token = await this.getAccessToken();
+    let accountId = extractAccountId(token);
+    let triedRefresh = false;
     const controller = new AbortController();
     if (opts.abortSignal) {
       opts.abortSignal.addEventListener("abort", () => controller.abort());
@@ -253,19 +276,34 @@ export class CodexOAuthProvider implements LLMProvider {
     const codexUrl = resolveCodexUrl(this.baseUrl);
     log.debug(`[codex-oauth:${this.id}] POST ${codexUrl} model=${this.modelId} msgs=${messages.length}`);
 
-    const response = await fetch(codexUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "accept": "text/event-stream",
-        "Authorization": `Bearer ${token}`,
-        "chatgpt-account-id": accountId,
-        "OpenAI-Beta": "responses=experimental",
-        "originator": "pi",
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+    // 401 retry：Codex CLI（共用 auth.json）剛好在我們發送的瞬間 refresh 過 → server 認新 token
+    // → 我們手上的舊 token 直接被吊銷 → 401。這時丟掉 cache 重讀檔再試一次。
+    let response: Response;
+    while (true) {
+      response = await fetch(codexUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "accept": "text/event-stream",
+          "Authorization": `Bearer ${token}`,
+          "chatgpt-account-id": accountId,
+          "OpenAI-Beta": "responses=experimental",
+          "originator": "pi",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (response.status === 401 && !triedRefresh) {
+        triedRefresh = true;
+        log.warn(`[codex-oauth:${this.id}] 401 偵測：可能 Codex CLI 已 refresh 過 auth.json，丟 cache 重讀後重試`);
+        this.invalidateCache();
+        token = await this.getAccessToken();
+        accountId = extractAccountId(token);
+        continue;
+      }
+      break;
+    }
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
