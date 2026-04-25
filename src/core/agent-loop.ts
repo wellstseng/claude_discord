@@ -120,6 +120,9 @@ const LOOP_CAP_CEILING = 80;
 const MAX_CONTINUATIONS = 3;  // Output Token Recovery：max_tokens 截斷時最多自動續接次數
 const MAX_DEFERRED_NUDGES = 3;  // Deferred tool 活化後空回應 → 注入續接提示的最大次數
 const ACTIVATE_PER_ITER_LIMIT = 3;  // 每輪最多活化幾個 deferred tool（防 Anthropic 批次活化空回應 quirk）
+const MAX_SAME_TOOL_PER_TURN = 5;  // 同 tool 在 turn 內最多 5 次（防散彈式重複，trace a1cfb101）
+const ZERO_PROGRESS_BAIL = 5;  // 連續 N iter「0 tool + 短文本」→ 中止 turn（防 11 輪乾打草稿）
+const ZERO_PROGRESS_TEXT_THRESHOLD = 50;  // 一個 iter 的 output 字元少於此即視為「沒進展」
 const DEFAULT_RESULT_TOKEN_CAP = 0;   // 0 = 不截斷（讓上游/per-tool 自行控制）
 
 // ── Tool result 智慧截斷 ──────────────────────────────────────────────────────
@@ -660,6 +663,14 @@ async function runBeforeToolCall(
     }
   }
 
+  // 4c. 散彈式重複：同 tool 在本 turn 內被叫過 ≥ MAX_SAME_TOOL_PER_TURN 次（不論連續、不論成功）
+  // 補上面三層的盲點：trace a1cfb101 內 mcp_playwright_browser_close 被穿插呼叫 6 次都成功，
+  // 沒一條 detection 接得住。對話類 turn 不該對同 tool 反覆使用。
+  const sameNameTotal = ctx.recentCalls.filter(c => c.name === call.name).length;
+  if (sameNameTotal >= MAX_SAME_TOOL_PER_TURN) {
+    return { blocked: true, reason: `${call.name} 在本輪已呼叫 ${sameNameTotal} 次（上限 ${MAX_SAME_TOOL_PER_TURN}），疑似散彈式重複，請改用其他方式或回覆使用者` };
+  }
+
   // 5. Reversibility Assessment
   const reversibility = assessReversibility(call.name, call.params);
   const reversibilityThreshold = config.safety?.reversibility?.threshold ?? 2;
@@ -1146,6 +1157,8 @@ export async function* agentLoop(
   let prevIterDeferredActivated: string[] = []; // 上一 iteration 活化的（供本 iter 判斷用）
   let deferredNudgeCount = 0;                 // Deferred tool 活化後的空回應續接次數
   let deferredNudgeExhausted = false;         // nudge 用完還在空轉 → 給使用者通知
+  let zeroProgressIters = 0;                  // 連續「0 tool + 短文本」iter 計數（防乾打草稿）
+  let zeroProgressBailed = false;             // 為 0-progress 中止 → 走 post-loop notice 分支
   const turnStartMs = Date.now();
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -1874,6 +1887,22 @@ export async function* agentLoop(
       // 把 tool results 加入 messages
       messages.push(makeToolResultMessage(toolResults));
 
+      // ── 0-progress 偵測（C）：連續 N iter「0 tool + 短文本」→ 中止 turn ──────
+      //   trace a1cfb101 的 loops 11-21 連續 11 個 LLM call、0 tool、output 都 18 token —
+      //   模型卡在乾打草稿，沒實質進展。早一點停止比讓它跑完 cap 省 token。
+      const iterHasTools = streamResult.toolCalls.length > 0;
+      const iterHasText = iterText.trim().length >= ZERO_PROGRESS_TEXT_THRESHOLD;
+      if (!iterHasTools && !iterHasText) {
+        zeroProgressIters++;
+        if (zeroProgressIters >= ZERO_PROGRESS_BAIL) {
+          log.warn(`[agent-loop] [loop=${loopCount}] 0-progress 中止：連續 ${zeroProgressIters} 個 iter 沒 tool + 文本 < ${ZERO_PROGRESS_TEXT_THRESHOLD} 字`);
+          zeroProgressBailed = true;
+          break;
+        }
+      } else {
+        zeroProgressIters = 0;
+      }
+
       // ── 自適應 loop cap：接近上限 + 進展健康 → 延長 ─────────────────────────
       //   「接近」：剩 ≤2 輪時判斷（避免太早擴展讓 buggy case 也被放寬）
       //   「健康」：近 5 輪全部成功 + tool_search 不超過 2 次（tool_search 多 = 空轉訊號）
@@ -1920,6 +1949,10 @@ export async function* agentLoop(
     // nudge 已經注入 3 次還是沒用 → 提醒使用者，不讓模型看起來裝死
     bailNotice = `\n\n⚠️ 模型在工具查詢後連續 ${MAX_DEFERRED_NUDGES + 1} 次空回應（Anthropic API 已知 quirk），自動中止。若要繼續請回覆「繼續」，或重述需求更具體一點。`;
     log.warn(`[agent-loop] deferred nudge 耗盡：sessionKey=${sessionKey}`);
+  } else if (zeroProgressBailed) {
+    // 0-progress 中止（防乾打草稿）
+    bailNotice = `\n\n⏹️ 偵測到模型連續 ${ZERO_PROGRESS_BAIL} 輪沒實質進展（無工具呼叫且文本 < ${ZERO_PROGRESS_TEXT_THRESHOLD} 字），自動中止本輪以省 token。請補充更具體的指示再試。`;
+    log.warn(`[agent-loop] 0-progress 中止：sessionKey=${sessionKey}`);
   }
   if (bailNotice) {
     fullResponse = fullResponse.trim() ? fullResponse + bailNotice : bailNotice.trimStart();
