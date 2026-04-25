@@ -212,6 +212,23 @@ function truncateRunCommand(text: string, lines: string[], totalLines: number, c
   return `${notice}\n${tail}`;
 }
 
+/**
+ * Playwright / computer-use 截斷：
+ * 這類 tool 的 result 是 YAML accessibility tree / DOM snapshot，
+ * LLM 通常只看 input/button/link 等可互動元素 + 少量上下文。
+ * 保留前 N 行（含 Page URL、Open tabs 等 metadata）+ 精選 head + 截斷提示。
+ */
+function truncatePlaywrightSnapshot(text: string, lines: string[], totalLines: number, charCap: number): string {
+  const headLines = Math.max(20, Math.floor(charCap / 4 / 50));  // 每行 ~50 chars
+  const head = lines.slice(0, headLines).join("\n");
+  const omitted = totalLines - headLines;
+  if (omitted <= 0) return head;
+  const notice = `\n[⚠️ CatClaw 已截斷 Playwright/桌面 snapshot：原始 ${totalLines} 行 → 僅顯示前 ${headLines} 行。`
+    + ` 完整 snapshot 通常包含整棵 DOM/視窗樹，多半不需要 — 若要找特定元素，先用 ref 點擊互動或縮小範圍。`
+    + ` 真要看完整內容請呼叫 read_file 讀對應的 .playwright-mcp/page-*.png 等截圖檔]`;
+  return head + notice;
+}
+
 /** tool-specific 截斷策略表 */
 const TRUNCATION_STRATEGIES: Record<string, (text: string, lines: string[], totalLines: number, charCap: number) => string> = {
   read_file: truncateReadFile,
@@ -219,6 +236,15 @@ const TRUNCATION_STRATEGIES: Record<string, (text: string, lines: string[], tota
   glob: truncateSearchResult,
   web_search: truncateSearchResult,
   run_command: truncateRunCommand,
+  // Playwright / computer-use heavy tools：snapshot/screenshot 等 YAML/text 重型 result
+  mcp_playwright_browser_snapshot: truncatePlaywrightSnapshot,
+  mcp_playwright_browser_take_screenshot: truncatePlaywrightSnapshot,
+  mcp_playwright_browser_run_code: truncatePlaywrightSnapshot,
+  mcp_playwright_browser_tabs: truncatePlaywrightSnapshot,
+  "mcp_computer-use_computer_screenshot": truncatePlaywrightSnapshot,
+  "mcp_computer-use_computer_history": truncatePlaywrightSnapshot,
+  "mcp_computer-use_computer_test": truncatePlaywrightSnapshot,
+  "mcp_computer-use_computer_windows": truncatePlaywrightSnapshot,
 };
 
 /**

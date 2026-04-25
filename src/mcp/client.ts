@@ -270,16 +270,24 @@ export class McpClient {
     // 對話類 input 也看見一堆桌面控制 tool → 模型亂用（見 trace a1cfb101）。
     // 改回 deferred 由 LLM tool_search 才活化；用 agent-loop 端的 tool 重複/0-progress 守門擋失控。
     const deferred = this.cfg.deferred !== false; // 預設 true
+
+    // Per-tool token cap：playwright snapshot / screenshot / computer-use 的 result 動輒 5-15k tokens
+    // （YAML accessibility tree、base64 image hint 等）。設較緊的 cap 強制截斷 + 加「想看完整去哪」hint，
+    // 讓 LLM 第一輪先抓重點，需要時才 follow-up。原本套 default truncation 沒法針對重型 tool 提早收手。
+    const HEAVY_TOOL_NAME_PATTERNS = [/^mcp_playwright_browser_(snapshot|take_screenshot|run_code|tabs)$/, /^mcp_computer-use_computer_(screenshot|history|test|windows)$/];
+    const HEAVY_TOOL_CAP = 2000;  // tokens
     for (const mcpTool of this.tools) {
       const toolName = `mcp_${this.serverName}_${mcpTool.name}`;
       const client = this;
       const schema = mcpTool.inputSchema;
 
+      const isHeavy = HEAVY_TOOL_NAME_PATTERNS.some(p => p.test(toolName));
       this.registry.register({
         name: toolName,
         description: mcpTool.description ?? `MCP tool ${mcpTool.name} from ${this.serverName}`,
         tier,
         deferred,
+        ...(isHeavy ? { resultTokenCap: HEAVY_TOOL_CAP } : {}),
         parameters: (schema ?? { type: "object", properties: {} }) as import("../tools/types.js").JsonSchema,
         async execute(params) {
           try {

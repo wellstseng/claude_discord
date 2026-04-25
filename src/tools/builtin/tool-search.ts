@@ -14,7 +14,7 @@ import type { Tool, ToolContext, ToolResult } from "../types.js";
 
 export const tool: Tool = {
   name: "tool_search",
-  description: "查詢可用 tool 的完整 schema。傳入精確名稱（逗號分隔）或關鍵字搜尋。用於取得 deferred tool 的參數定義。",
+  description: "查詢可用 tool。預設返回精簡描述（name/desc/required params）— 約 50 tokens/tool。要看完整 input_schema 加 verbose=true（~500 tokens/tool）。",
   tier: "public",
   concurrencySafe: true,
   parameters: {
@@ -24,12 +24,17 @@ export const tool: Tool = {
         type: "string",
         description: "精確名稱（如 \"web_search,spawn_subagent\"）或關鍵字搜尋",
       },
+      verbose: {
+        type: "boolean",
+        description: "是否返回完整 input_schema。預設 false（精簡模式），活化 deferred tool 後 tools array 會自動帶完整 schema，所以一般情境不用 verbose。",
+      },
     },
     required: ["query"],
   },
 
   async execute(params: Record<string, unknown>, _ctx: ToolContext): Promise<ToolResult> {
     const query = String(params["query"] ?? "").trim();
+    const verbose = params["verbose"] === true;
     if (!query) return { error: "query 不能為空" };
 
     const registry = getToolRegistry();
@@ -57,16 +62,31 @@ export const tool: Tool = {
       return { result: { message: "沒有符合的 tool", query } };
     }
 
+    // 預設精簡格式：name + description + required + optional 欄位名清單
+    // 完整 schema 只在 verbose=true 才返回
+    // 理由：tool 一旦被活化，下一輪 LLM call 在 tools array 已經有完整 input_schema，
+    //   tool_search 沒必要再重複給一份（重複的 4-30 個 schema 是 token 大戶，trace b4bef97e 量化過）
     const definitions = matched.map(t => {
       const def = toDefinition(t);
+      if (verbose) {
+        return { name: def.name, description: def.description, input_schema: def.input_schema };
+      }
+      // 精簡：抽出 required + optional 欄位名
+      const props = (def.input_schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+      const required = (def.input_schema as { required?: string[] } | undefined)?.required ?? [];
+      const optional = Object.keys(props).filter(k => !required.includes(k));
       return {
         name: def.name,
         description: def.description,
-        input_schema: def.input_schema,
+        params: {
+          required: required.length > 0 ? required : undefined,
+          optional: optional.length > 0 ? optional : undefined,
+        },
+        hint: "完整 schema 會在 tool 被活化後自動進入 tools array，不需另外查；要強制看 schema 再查一次帶 verbose=true",
       };
     });
 
-    log.debug(`[tool-search] query="${query}" → ${definitions.length} matches: ${definitions.map(d => d.name).join(", ")}`);
+    log.debug(`[tool-search] query="${query}" verbose=${verbose} → ${definitions.length} matches: ${definitions.map(d => d.name).join(", ")}`);
 
     return { result: definitions };
   },
