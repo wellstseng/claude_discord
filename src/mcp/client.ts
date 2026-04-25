@@ -264,12 +264,22 @@ export class McpClient {
 
   private _registerTools(): void {
     const tier = this.cfg.tier ?? "elevated";
-    const deferred = this.cfg.deferred !== false; // 預設 true
+    // Deferred default：對 deferred 機制本身有問題的 MCP（playwright、MCPControl 這類「一次互動會連續呼叫多個 tool」的）
+    // 強制 eager 載入，避免 mid-turn tool 加入觸發 Anthropic API 空回應 quirk。
+    // 這類 MCP 即使省了 token，也會在第一次 tool_search 後因 quirk 卡住整個 turn，得不償失。
+    // 已驗證：default agent + wendy agent 都會中招（trace 82aa1fec、e8c55181、0a557a74），
+    // 跟 atom 內容無關，是 deferred-activation 與 streamAnthropic 互動的固有問題。
+    const ALWAYS_EAGER_SERVERS = new Set(["playwright", "MCPControl", "computer-use"]);
+    const forcedEager = ALWAYS_EAGER_SERVERS.has(this.serverName);
+    const deferred = forcedEager ? false : (this.cfg.deferred !== false); // 預設 true，但被 forcedEager 覆寫
     for (const mcpTool of this.tools) {
       const toolName = `mcp_${this.serverName}_${mcpTool.name}`;
       const client = this;
       const schema = mcpTool.inputSchema;
 
+      if (forcedEager) {
+        log.info(`[mcp:${this.serverName}] tool ${toolName} 強制 eager（避免 deferred-activation quirk）`);
+      }
       this.registry.register({
         name: toolName,
         description: mcpTool.description ?? `MCP tool ${mcpTool.name} from ${this.serverName}`,

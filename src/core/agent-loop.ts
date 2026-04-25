@@ -1272,6 +1272,7 @@ export async function* agentLoop(
       // ── 5b. 消費串流事件 ───────────────────────────────────────────────────
       // iter 級 text 累積（turn 級的 tracker 會跨 iter 累積；送回 messages 時只要本 iter 的）
       let iterText = "";
+      let providerError: string | null = null;  // 捕捉 provider 端 stream 錯誤（pi-ai 會 emit type=error）
       for await (const event of streamResult.events as AsyncIterable<ProviderEvent>) {
         if (event.type === "text_delta") {
           iterText += event.text;
@@ -1279,6 +1280,12 @@ export async function* agentLoop(
           yield { type: "text_delta", text: event.text };
         } else if (event.type === "thinking_delta") {
           yield { type: "thinking", thinking: event.thinking };
+        } else if (event.type === "error") {
+          // pi-ai 在 streamAnthropic 內部 catch 任何錯誤後 emit `{type: "error"}` 而不 throw，
+          // 之前 agent-loop 沒處理這個事件 → 錯誤被吞掉，呈現為「outputEmpty + estimated=true」
+          // 假裝是 Anthropic 空回應 quirk。實際可能是真的 API error（429 / 413 / 5xx / network）。
+          providerError = event.message;
+          log.warn(`[agent-loop] [loop=${loopCount}] provider stream error: ${event.message}`);
         }
       }
 
@@ -1318,6 +1325,17 @@ export async function* agentLoop(
       });
 
       if (controller.signal.aborted) break;
+
+      // ── 5b-1. Provider stream 錯誤優先處理（pi-ai 會 emit error 事件而不 throw）──
+      // 之前完全沒處理 → 錯誤被吞掉，呈現為「outputEmpty + estimated=true」假裝是空回應 quirk
+      if (providerError) {
+        const errMsg = `\n\n❌ LLM provider 錯誤：${providerError}\n（已記入 trace，若反覆出現請貼 trace 給 wells 看）`;
+        yield { type: "text_delta", text: errMsg };
+        tracker.appendText(errMsg);
+        log.warn(`[agent-loop] [loop=${loopCount}] 終止 turn — provider error 已通知使用者`);
+        break;
+      }
+
       if (streamResult.stopReason === "end_turn") {
         // 本 iter 是否空回應：output=0 + estimated=true 代表 provider 沒收到任何 event
         // （Claude API events 陣列為空 → fallback 預設 end_turn + estimated usage，見 claude-api.ts:336）
