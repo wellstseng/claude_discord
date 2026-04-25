@@ -89,20 +89,67 @@ function normalizeLocalPath(rawPath: string): string {
   return rawPath.replace(/^([A-Za-z]):[\\/](?=[A-Za-z]:[\\/])/, "");
 }
 
+/** 由副檔名推斷 mime type（Discord attachment 預期有 type，用 octet-stream fallback） */
+function guessMimeType(filename: string): string {
+  const ext = filename.toLowerCase().split(".").pop() ?? "";
+  switch (ext) {
+    case "png": return "image/png";
+    case "jpg": case "jpeg": return "image/jpeg";
+    case "gif": return "image/gif";
+    case "webp": return "image/webp";
+    case "svg": return "image/svg+xml";
+    case "mp4": return "video/mp4";
+    case "mov": return "video/quicktime";
+    case "webm": return "video/webm";
+    case "mp3": return "audio/mpeg";
+    case "wav": return "audio/wav";
+    case "ogg": return "audio/ogg";
+    case "pdf": return "application/pdf";
+    case "json": return "application/json";
+    case "txt": case "md": case "log": return "text/plain";
+    case "html": case "htm": return "text/html";
+    case "css": return "text/css";
+    case "js": case "mjs": case "cjs": return "application/javascript";
+    case "ts": case "tsx": return "application/typescript";
+    case "zip": return "application/zip";
+    default: return "application/octet-stream";
+  }
+}
+
 async function discordUpload(channelId: string, rawPath: string, content?: string): Promise<void> {
   const filePath = normalizeLocalPath(rawPath);
   const buf = readFileSync(filePath);
   const filename = filePath.replace(/\\/g, "/").split("/").pop() ?? "file";
+  const mime = guessMimeType(filename);
   const form = new FormData();
   if (content) form.append("payload_json", JSON.stringify({ content }));
-  form.append("files[0]", new Blob([buf]), filename);
+  // 給 Blob 顯式 type — Discord 對某些 channel/權限會檢查 attachment content-type
+  form.append("files[0]", new Blob([buf], { type: mime }), filename);
+
+  // 用 Headers 物件包 Authorization：node fetch (undici) 在 multipart 路徑有時會吞掉
+  // 純物件形式的 header；用 Headers 物件可確保不被覆寫。Content-Type 不指定，讓
+  // fetch 自動帶 multipart boundary。
+  const headers = new Headers();
+  headers.set("Authorization", `Bot ${TOKEN}`);
+  headers.set("User-Agent", "CatClaw/1.0");
+
   const res = await fetch(`${API}/channels/${channelId}/messages`, {
     method: "POST",
-    headers: { Authorization: `Bot ${TOKEN}`, "User-Agent": "CatClaw/1.0" },
+    headers,
     body: form,
   });
-  const data = await res.json() as unknown;
-  if (!res.ok) throw new Error(`Discord upload ${res.status}: ${JSON.stringify(data)}`);
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+    // 上傳失敗時印詳細 debug 資訊，方便排查 401（token 錯/缺權限）vs 400（格式）等
+    const tokenPrefix = TOKEN ? TOKEN.slice(0, 8) + "..." : "(empty)";
+    process.stderr.write(
+      `[catclaw-discord] upload FAIL status=${res.status} ${res.statusText} ` +
+      `channel=${channelId} file=${filename} size=${buf.length} mime=${mime} ` +
+      `token=${tokenPrefix} body=${JSON.stringify(data).slice(0, 200)}\n`,
+    );
+    throw new Error(`Discord upload ${res.status}: ${JSON.stringify(data)}`);
+  }
 }
 
 // ── Param helpers ────────────────────────────────────────────────────────────
