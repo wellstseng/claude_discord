@@ -16,8 +16,8 @@
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.1",
-    "@mariozechner/pi-agent-core": "0.58.0",
-    "@mariozechner/pi-ai": "0.58.0",
+    "@mariozechner/pi-agent-core": "0.70.2",
+    "@mariozechner/pi-ai": "0.70.2",
     "apache-arrow": "^18.1.0",
     "croner": "^10.0.1",
     "discord.js": "^14.16.3"
