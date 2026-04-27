@@ -17,7 +17,7 @@ CatClaw 是以 Discord 為介面的 AI Agent 運行平台。透過 multi-turn ag
 | [[Architecture]] | 整體架構、資料流、初始化流程 |
 | [[Agent-Loop]] | Multi-turn 推理迴圈、tool 執行、safety 機制 |
 | [[Message-Pipeline]] | 訊息處理管線：Memory Recall → Intent → Prompt Assembly |
-| [[Memory-Engine]] | 三層記憶引擎：Recall / Extract / Consolidate |
+| [[Memory-Engine]] | 四層記憶引擎（global / project / account / agent）：Recall / Extract / Consolidate |
 | [[Context-Engine]] | Context 策略：Decay（漸進衰減+外部化）→ Compaction（結構化摘要+意圖錨點）→ Overflow Hard Stop |
 | [[Provider-System]] | Multi-Provider Failover + Circuit Breaker |
 | [[Tools-and-Skills]] | Tool & Skill Registry、builtin 清單 |
