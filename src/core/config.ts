@@ -1367,19 +1367,22 @@ function loadConfig(): BridgeConfig {
     },
     memory: defaultMemoryConfig(raw.memory, workspaceDir),
     memoryPipeline: buildMemoryPipelineConfig(raw.memoryPipeline, ollamaRaw),
-    ollama: ollamaRaw ? {
-      enabled:    ollamaRaw.enabled ?? true,
+    // 預設行為：使用者沒設 ollama block → 視同啟用 + localhost:11434
+    // 這樣 memoryPipeline.embedding 預設 ollama 也能跑起來（embed 失敗時 graceful skip，
+    // 但 platform.ts 的 cross-validate 至少會通過，不會 startup 直接掛掉）
+    ollama: {
+      enabled:    ollamaRaw?.enabled ?? true,
       primary: {
-        host:           ollamaRaw.primary?.host ?? "http://localhost:11434",
-        model:          ollamaRaw.primary?.model ?? "qwen3:8b",
-        embeddingModel: ollamaRaw.primary?.embeddingModel,
+        host:           ollamaRaw?.primary?.host ?? "http://localhost:11434",
+        model:          ollamaRaw?.primary?.model ?? "qwen3:8b",
+        embeddingModel: ollamaRaw?.primary?.embeddingModel ?? "qwen3-embedding:8b",
       },
-      fallback:   ollamaRaw.fallback,
-      failover:   ollamaRaw.failover ?? true,
-      thinkMode:  ollamaRaw.thinkMode ?? false,
-      numPredict: ollamaRaw.numPredict ?? 8192,
-      timeout:    ollamaRaw.timeout ?? 120_000,
-    } : undefined,
+      fallback:   ollamaRaw?.fallback,
+      failover:   ollamaRaw?.failover ?? true,
+      thinkMode:  ollamaRaw?.thinkMode ?? false,
+      numPredict: ollamaRaw?.numPredict ?? 8192,
+      timeout:    ollamaRaw?.timeout ?? 120_000,
+    },
     safety: {
       enabled:      raw.safety?.enabled ?? true,
       selfProtect:  raw.safety?.selfProtect ?? true,
