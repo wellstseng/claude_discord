@@ -9,3 +9,4 @@ signal/
 .claude/memory/personal/
 .claude/memory/episodic/
 .claude/memory/feedback_*.md
+.playwright-mcp/
