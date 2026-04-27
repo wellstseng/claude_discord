@@ -128,8 +128,8 @@ export interface ModelsJsonConfig {
   providers: Record<string, ModelProviderDefinition>;
 }
 
-/** API 類型識別 */
-export type ModelApi = "anthropic-messages" | "openai-completions" | "openai-codex-responses" | "ollama";
+/** API 類型識別 — pi-ai 直接傳遞值，registry 以已知字串建 provider，未知直接 skip */
+export type ModelApi = string;
 
 /** auth-profile.json 中單一 credential */
 export type AuthProfileCredential =

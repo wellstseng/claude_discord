@@ -13,94 +13,43 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { getModels, getProviders } from "@mariozechner/pi-ai";
 import { log } from "../logger.js";
-import type { ModelsJsonConfig, ModelProviderDefinition, ModelsConfig } from "../core/config.js";
+import type { ModelsJsonConfig, ModelProviderDefinition, ModelsConfig, ModelDefinition } from "../core/config.js";
 
-// ── 內建模型目錄 ─────────────────────────────────────────────────────────────
+// ── 內建模型目錄（動態從 pi-ai 抽）───────────────────────────────────────────
+//
+// 啟動時呼叫 buildBuiltinProviders()，把 pi-ai 全部 provider × 全部 model 攤平到 models.json。
+// pi-ai 升版重啟就自動帶新 provider / 新 model。
+// catclaw 沒對應 LLMProvider impl 的 api，registry build 時會 skip，但清單還是會出現。
 
-const BUILTIN_PROVIDERS: Record<string, ModelProviderDefinition> = {
-  anthropic: {
-    baseUrl: "https://api.anthropic.com",
-    api: "anthropic-messages",
-    models: [
-      {
-        id: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
-        reasoning: true,
-        input: ["text", "image"],
-        cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-        contextWindow: 200000,
-        maxTokens: 16000,
-      },
-      {
-        id: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-        contextWindow: 200000,
-        maxTokens: 8192,
-      },
-      {
-        id: "claude-sonnet-4-5-20250514",
-        name: "Claude Sonnet 4.5",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-        contextWindow: 200000,
-        maxTokens: 8192,
-      },
-      {
-        id: "claude-haiku-4-5-20251001",
-        name: "Claude Haiku 4.5",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 },
-        contextWindow: 200000,
-        maxTokens: 8192,
-      },
-    ],
-  },
-  openai: {
-    baseUrl: "https://api.openai.com/v1",
-    api: "openai-completions",
-    models: [
-      {
-        id: "gpt-4o",
-        name: "GPT-4o",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: { input: 2.5, output: 10, cacheRead: 1.25, cacheWrite: 0 },
-        contextWindow: 128000,
-        maxTokens: 16384,
-      },
-      {
-        id: "gpt-4o-mini",
-        name: "GPT-4o Mini",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: { input: 0.15, output: 0.6, cacheRead: 0.075, cacheWrite: 0 },
-        contextWindow: 128000,
-        maxTokens: 16384,
-      },
-    ],
-  },
-  "openai-codex": {
-    baseUrl: "https://chatgpt.com/backend-api",
-    api: "openai-codex-responses",
-    models: [
-      {
-        id: "gpt-5.4",
-        name: "GPT-5.4 (Codex)",
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 200000,
-        maxTokens: 16384,
-      },
-    ],
-  },
-};
+function buildBuiltinProviders(): Record<string, ModelProviderDefinition> {
+  const result: Record<string, ModelProviderDefinition> = {};
+
+  for (const providerName of getProviders()) {
+    const piModels = getModels(providerName);
+    if (piModels.length === 0) continue;
+
+    const first = piModels[0]!;
+    result[providerName] = {
+      baseUrl: first.baseUrl,
+      api: first.api,
+      models: piModels.map(m => ({
+        id: m.id,
+        name: m.name,
+        api: m.api,
+        reasoning: m.reasoning,
+        input: m.input as Array<"text" | "image">,
+        cost: m.cost,
+        contextWindow: m.contextWindow,
+        maxTokens: m.maxTokens,
+      })),
+    };
+  }
+
+  log.debug(`[models-config] 從 pi-ai 抽取 ${Object.keys(result).length} 個 provider`);
+  return result;
+}
 
 // ── 產生 models.json ─────────────────────────────────────────────────────────
 
@@ -124,17 +73,20 @@ export function ensureModelsJson(workspaceDir: string, modelsConfig?: ModelsConf
     // replace：只用自訂
     providers = modelsConfig?.providers ?? {};
   } else {
-    // merge：內建 + 自訂合併（自訂優先）
-    providers = { ...BUILTIN_PROVIDERS };
+    // merge：內建（從 pi-ai 動態抽）+ 自訂合併（自訂優先）
+    providers = buildBuiltinProviders();
     if (modelsConfig?.providers) {
       for (const [id, def] of Object.entries(modelsConfig.providers)) {
         if (providers[id]) {
-          // 合併：自訂 models 追加到內建，baseUrl/api 覆寫
+          // 合併：自訂 models 覆寫內建（同 id 自訂優先），baseUrl/api 覆寫
+          const byId = new Map<string, ModelDefinition>();
+          for (const m of providers[id].models) byId.set(m.id, m);
+          for (const m of def.models) byId.set(m.id, m);  // 自訂覆寫
           providers[id] = {
             baseUrl: def.baseUrl ?? providers[id].baseUrl,
             api: def.api ?? providers[id].api,
             apiKey: def.apiKey ?? providers[id].apiKey,
-            models: [...providers[id].models, ...def.models],
+            models: Array.from(byId.values()),
           };
         } else {
           providers[id] = def;
