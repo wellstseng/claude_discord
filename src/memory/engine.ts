@@ -316,6 +316,9 @@ export class MemoryEngine {
   /**
    * 完整 drop table + 從 dir 重新 seed（embedding model 換維度後必須走這條）。
    * seedFromDir 只 upsert 不 drop，遇到舊維度 schema 會 schema 衝突靜默失敗。
+   *
+   * 成功 seed 至少 1 筆 → 寫入 embedding-meta.json 標記當前 model + dim，
+   * 供 dashboard 比對偵測 model 漂移
    */
   async dropAndSeed(dir: string, namespace: string): Promise<{ dropped: boolean; seeded: number; skipped: number; errors: number }> {
     let dropped = false;
@@ -326,6 +329,24 @@ export class MemoryEngine {
       log.warn(`[memory-engine] dropAndSeed: dropTable ${namespace} 失敗：${err instanceof Error ? err.message : String(err)}`);
     }
     const result = await this.seedFromDir(dir, namespace);
+
+    // 重建成功 → 標記當前 embedding model 與 dim 進 state
+    if (result.seeded > 0) {
+      try {
+        const { getEmbeddingProvider } = await import("../vector/embedding-provider.js");
+        const { writeEmbeddingMeta } = await import("../vector/embedding-state.js");
+        const provider = getEmbeddingProvider();
+        const dim = await provider.getDimensions();
+        writeEmbeddingMeta(resolvePath(this.cfg.vectorDbPath), {
+          model: provider.modelName,
+          dim,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        log.debug(`[memory-engine] dropAndSeed 寫 embedding-meta 失敗：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     return { dropped, ...result };
   }
 }

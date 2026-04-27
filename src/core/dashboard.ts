@@ -767,6 +767,7 @@ label.cfg-toggle { min-width: 36px; }
 
 <!-- Pipeline -->
 <div id="pane-pipeline" class="pane">
+  <div id="pl-drift-banner" style="display:none"></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
     <!-- 監控區：Ollama 狀態 -->
     <div class="card">
@@ -3464,12 +3465,32 @@ async function testMemRecall() {
 
 async function loadPipeline() {
   // 並行載入所有資料
-  const [ollamaStatus, models, pipeline, vectorStats] = await Promise.all([
+  const [ollamaStatus, models, pipeline, vectorStats, embStatus] = await Promise.all([
     authFetch('/api/ollama/status').then(r => r.json()).catch(() => ({ online: false })),
     authFetch('/api/ollama/models').then(r => r.json()).catch(() => ({ models: [] })),
     authFetch('/api/memory/pipeline').then(r => r.json()).catch(() => ({ config: null, activeProvider: null, embeddingDim: 0 })),
     authFetch('/api/memory/vector/stats').then(r => r.json()).catch(() => ({ available: false })),
+    authFetch('/api/memory/embedding-status').then(r => r.json()).catch(() => ({ drift: false })),
   ]);
+
+  // Embedding model drift banner（換了 config 但沒 ♻ 完整重建 → 跳警示）
+  const driftEl = document.getElementById('pl-drift-banner');
+  if (driftEl) {
+    if (embStatus.drift) {
+      driftEl.style.display = 'block';
+      driftEl.innerHTML =
+        '<div style="background:rgba(245,158,11,0.15);border:1px solid var(--warn);padding:10px;border-radius:6px;margin-bottom:12px">' +
+        '<div style="color:var(--warn);font-weight:600;margin-bottom:4px">⚠ Embedding 模型已改但向量 DB 未重建</div>' +
+        '<div style="font-size:0.82rem">config: <code>' + (embStatus.configModel || '-') + '</code> ' +
+        '↔ 上次重建用: <code>' + (embStatus.lastBuiltModel || '-') + '</code> (dim ' + (embStatus.lastBuiltDim || '-') +
+        ', ' + (embStatus.lastBuiltAt ? new Date(embStatus.lastBuiltAt).toLocaleString('zh-TW') : '-') + ')</div>' +
+        '<div style="font-size:0.82rem;margin-top:4px;color:var(--fg2)">舊向量無法和新 model 的 query 對齊 → recall 會 blind spot。建議立即按下方 ♻ 完整重建。</div>' +
+        '</div>';
+    } else {
+      driftEl.style.display = 'none';
+      driftEl.innerHTML = '';
+    }
+  }
 
   // Ollama 狀態
   const statusEl = document.getElementById('pl-ollama-status');
@@ -6403,6 +6424,25 @@ export class DashboardServer {
             }
           })();
         });
+        return;
+      }
+
+      // GET /api/memory/embedding-status — 偵測當前 config embedding model 與上次 ♻ 完整重建時是否一致
+      if (url === "/api/memory/embedding-status" && method === "GET") {
+        void (async () => {
+          try {
+            const { detectDrift } = await import("../vector/embedding-state.js");
+            const { config: cfg } = await import("./config.js");
+            const vectorDbPath = cfg.memory?.vectorDbPath ?? join(homedir(), ".catclaw", "_vectordb");
+            const resolvedPath = vectorDbPath.startsWith("~") ? vectorDbPath.replace("~", homedir()) : vectorDbPath;
+            const currentModel = cfg.memoryPipeline?.embedding?.model;
+            const result = detectDrift(resolvedPath, currentModel);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(result));
+          } catch (err) {
+            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+          }
+        })();
         return;
       }
 
