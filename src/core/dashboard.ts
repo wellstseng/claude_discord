@@ -4152,6 +4152,36 @@ setInterval(loadStatus, 30000);
 
 // ── Trace Markdown Export Helper ─────────────────────────────────────────────
 
+/** 把 Anthropic message 陣列展開為 markdown 區塊。每訊息獨立 block + 高亮 compaction 摘要 */
+function renderMessagesMarkdown(msgs: unknown[]): string {
+  if (!Array.isArray(msgs) || msgs.length === 0) return "（空）\n\n";
+  const PER_MSG_CAP = 3000;
+  let out = "";
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i] as { role?: string; content?: unknown };
+    const role = m?.role ?? "?";
+    let text = "";
+    if (typeof m?.content === "string") {
+      text = m.content;
+    } else if (Array.isArray(m?.content)) {
+      text = m.content.map((b) => {
+        const blk = b as { type?: string; text?: string; name?: string; id?: string; tool_use_id?: string };
+        if (blk?.type === "text") return blk.text ?? "";
+        if (blk?.type === "tool_use") return `[tool_use: ${blk.name ?? blk.id ?? "?"}]`;
+        if (blk?.type === "tool_result") return `[tool_result: ${blk.tool_use_id ?? "?"}]`;
+        return `[${blk?.type ?? "?"}]`;
+      }).join(" ");
+    }
+    const isCompactionSummary = text.includes("[對話摘要");
+    const marker = isCompactionSummary ? " 📦 **(compaction summary)**" : "";
+    const truncated = text.length > PER_MSG_CAP;
+    const body = truncated ? text.slice(0, PER_MSG_CAP) + `\n…(truncated, full ${text.length} chars)` : text;
+    out += `**#${i} [${role}]${marker}** _(${text.length} chars)_\n\n`;
+    out += "```\n" + body + "\n```\n\n";
+  }
+  return out;
+}
+
 /** 將單筆 trace 格式化為 Markdown（單筆下載 + 批次 zip 共用） */
 function formatTraceMarkdown(entry: MessageTraceEntry, ctx: TraceContextSnapshot | null | undefined): string {
   let md = `# Trace Export: ${entry.traceId}\n\n`;
@@ -4250,6 +4280,15 @@ function formatTraceMarkdown(entry: MessageTraceEntry, ctx: TraceContextSnapshot
     if (ctx.memoryContext) {
       md += `### Memory Context (${ctx.memoryContext.length} chars)\n\n`;
       md += "```\n" + ctx.memoryContext.slice(0, 2000) + (ctx.memoryContext.length > 2000 ? "\n…(truncated)" : "") + "\n```\n\n";
+    }
+    if (ctx.ceApplied && Array.isArray(ctx.messagesBeforeCE) && ctx.messagesBeforeCE.length) {
+      md += `### Messages Before CE (${ctx.messagesBeforeCE.length} messages)\n\n`;
+      md += renderMessagesMarkdown(ctx.messagesBeforeCE);
+    }
+    if (Array.isArray(ctx.messagesAfterCE) && ctx.messagesAfterCE.length) {
+      const label = ctx.ceApplied ? "Messages After CE" : "Messages";
+      md += `### ${label} (${ctx.messagesAfterCE.length} messages)\n\n`;
+      md += renderMessagesMarkdown(ctx.messagesAfterCE);
     }
   }
   md += `## Raw JSON\n\n`;
