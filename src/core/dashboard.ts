@@ -2287,38 +2287,83 @@ async function loadModelsConfig() {
 
     let html = '<div style="margin-bottom:12px"><strong style="color:#818cf8">當前模型：</strong><span style="color:#34d399;font-size:1.1em;font-weight:bold">' + primary + '</span>';
     html += '  <span style="color:#888;font-size:0.8em;margin-left:8px">fallback: ' + fallbacks + '</span></div>';
-    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">';
-    for (const alias of aliasKeys) {
-      const isCurrent = alias === primary;
-      const btnClass = isCurrent ? 'btn btn-green btn-sm' : 'btn btn-sm';
-      html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + alias + '&quot;)" ' + (isCurrent ? 'disabled' : '') + '>' + alias + '</button>';
-    }
-    html += '</div>';
 
-    // 依 Provider 列出 models.json 全部 model（pi-ai 動態同步）
+    // ── 依憑證 provider 分組快捷 ──────────────────────────────────────────────
+    // 取 auth-profiles.statuses 的 keys = 有實際憑證的 provider 列表
+    // 對每個 provider，列出 models.json[provider].models（每個 model 優先顯示對應 alias）
+    let providers = {};
     try {
       const mj = await authFetch('/api/models-json').then(r => r.json());
-      if (mj.exists) {
-        const providers = mj.data?.providers || {};
-        const aliasValueSet = new Set(Object.values(aliases));
-        html += '<details style="margin-bottom:12px;padding:8px;background:#161827;border-radius:6px"><summary style="cursor:pointer;color:#818cf8;font-size:0.82rem;font-weight:bold">📦 依 Provider 列出全部模型（' + Object.keys(providers).length + ' providers）</summary><div style="margin-top:8px">';
-        for (const [pid, prov] of Object.entries(providers)) {
-          const models = (prov && prov.models) || [];
-          if (models.length === 0) continue;
-          html += '<div style="margin-bottom:8px"><strong style="font-size:0.78rem;color:#a78bfa">' + esc(pid) + '</strong> <span style="color:#666;font-size:0.7rem">(' + models.length + ')</span>';
-          html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
-          for (const m of models) {
-            const ref = pid + '/' + m.id;
-            const isCurrent = ref === primary || aliasValueSet.has(ref) && Object.entries(aliases).some(([k,v]) => k === primary && v === ref);
-            const btnClass = isCurrent ? 'btn btn-green btn-sm' : 'btn btn-sm';
-            html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + ref + '&quot;)" title="' + esc(m.name||'') + '" style="font-size:0.7rem;padding:2px 8px" ' + (isCurrent ? 'disabled' : '') + '>' + esc(m.id) + '</button>';
-          }
-          html += '</div></div>';
+      providers = mj.exists ? (mj.data?.providers || {}) : {};
+    } catch (mjErr) { /* models.json 讀失敗，下面 fallback */ }
+
+    let activeProviders = [];
+    try {
+      const ap = await authFetch('/api/auth-profiles').then(r => r.json());
+      activeProviders = Object.keys((ap && ap.statuses) || {});
+    } catch (apErr) { /* auth profiles 讀失敗 → 空陣列 → 下面 fallback */ }
+
+    // 反查表：provider/modelId → alias（顯示 alias 簡稱比較好認）
+    const refToAlias = {};
+    for (const [a, ref] of Object.entries(aliases)) refToAlias[String(ref)] = a;
+
+    if (activeProviders.length > 0) {
+      html += '<div style="margin-bottom:12px;padding:10px;background:#161827;border-radius:6px;border:1px solid #2a2d3e">';
+      html += '<div style="font-size:0.78rem;color:#818cf8;font-weight:bold;margin-bottom:6px">📌 依憑證快速切換</div>';
+      for (const pid of activeProviders) {
+        const prov = providers[pid];
+        const models = (prov && prov.models) || [];
+        if (models.length === 0) {
+          // models.json 沒這 provider 但有 auth profile → 顯示提示
+          html += '<div style="margin-bottom:8px;font-size:0.75rem;color:#888"><strong style="color:#a78bfa">' + esc(pid) + '</strong>：models.json 沒對應 model 清單</div>';
+          continue;
         }
-        html += '</div></details>';
+        html += '<div style="margin-bottom:8px"><strong style="font-size:0.78rem;color:#a78bfa">' + esc(pid) + '</strong> <span style="color:#666;font-size:0.7rem">(' + models.length + ' 個 model)</span>';
+        html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
+        for (const m of models) {
+          const ref = pid + '/' + m.id;
+          const alias = refToAlias[ref];
+          // primary 比對：直接設 ref，或設了 alias 而 alias 解析到此 ref
+          const isCurrent = primary === ref || (alias && primary === alias);
+          const btnClass = isCurrent ? 'btn btn-green btn-sm' : 'btn btn-sm';
+          // 點擊：有 alias 切到 alias（讓 primary 顯示簡稱），沒 alias 切到完整 ref
+          const target = alias || ref;
+          const label = alias || m.id;
+          const tooltip = alias ? (m.name || ref) + ' (alias=' + alias + ')' : (m.name || '');
+          html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + target + '&quot;)" title="' + esc(tooltip) + '" style="font-size:0.72rem;padding:2px 8px" ' + (isCurrent ? 'disabled' : '') + '>' + esc(label) + '</button>';
+        }
+        html += '</div></div>';
       }
-    } catch (mjErr) {
-      html += '<div style="color:#888;font-size:0.75rem;margin-bottom:12px">（讀取 models.json 失敗：' + mjErr + '）</div>';
+      html += '</div>';
+    } else if (aliasKeys.length > 0) {
+      // fallback：沒抓到 auth profiles 時顯示原本 flat alias bar
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">';
+      for (const alias of aliasKeys) {
+        const isCurrent = alias === primary;
+        const btnClass = isCurrent ? 'btn btn-green btn-sm' : 'btn btn-sm';
+        html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + alias + '&quot;)" ' + (isCurrent ? 'disabled' : '') + '>' + alias + '</button>';
+      }
+      html += '</div>';
+    }
+
+    // 依 Provider 列出 models.json 全部 model（pi-ai 動態同步）— 用上面已抓的 providers
+    if (Object.keys(providers).length > 0) {
+      const aliasValueSet = new Set(Object.values(aliases));
+      html += '<details style="margin-bottom:12px;padding:8px;background:#161827;border-radius:6px"><summary style="cursor:pointer;color:#818cf8;font-size:0.82rem;font-weight:bold">📦 依 Provider 列出全部模型（' + Object.keys(providers).length + ' providers）</summary><div style="margin-top:8px">';
+      for (const [pid, prov] of Object.entries(providers)) {
+        const models = (prov && prov.models) || [];
+        if (models.length === 0) continue;
+        html += '<div style="margin-bottom:8px"><strong style="font-size:0.78rem;color:#a78bfa">' + esc(pid) + '</strong> <span style="color:#666;font-size:0.7rem">(' + models.length + ')</span>';
+        html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
+        for (const m of models) {
+          const ref = pid + '/' + m.id;
+          const isCurrent = ref === primary || aliasValueSet.has(ref) && Object.entries(aliases).some(([k,v]) => k === primary && v === ref);
+          const btnClass = isCurrent ? 'btn btn-green btn-sm' : 'btn btn-sm';
+          html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + ref + '&quot;)" title="' + esc(m.name||'') + '" style="font-size:0.7rem;padding:2px 8px" ' + (isCurrent ? 'disabled' : '') + '>' + esc(m.id) + '</button>';
+        }
+        html += '</div></div>';
+      }
+      html += '</div></details>';
     }
     // routing 區塊
     const routing = mc.routing || {};
