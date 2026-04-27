@@ -73,7 +73,7 @@ function closeFenceIfOpen(text: string): string {
  * - 跨段 code fence 自動補 open/close，避免語法斷裂
  * - 預留 20 字空間給 fence 標記
  */
-function splitForDiscord(content: string, limit = TEXT_LIMIT): string[] {
+export function splitForDiscord(content: string, limit = TEXT_LIMIT): string[] {
   if (content.length <= limit) return content.length ? [content] : [];
 
   const SAFE = limit - 20;

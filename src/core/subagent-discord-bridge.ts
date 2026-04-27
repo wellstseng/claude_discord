@@ -93,27 +93,16 @@ export async function sendSubagentNotification(
     } else if (!record.result) {
       await textChannel.send(`✅ **${label}** 完成\n(無輸出)`);
     } else {
-      // Discord 單訊息上限 2000，預留 header 與安全邊距 → 1900 給內容
-      const headerLen = `✅ **${label}** 完成\n`.length;
-      const inlineCap = 2000 - headerLen - 5; // 5 chars 安全邊距
-      if (record.result.length <= inlineCap) {
-        await textChannel.send(`✅ **${label}** 完成\n${record.result}`);
-      } else {
-        // 太長 → 完整內容用 .md 附件，訊息本體放摘要前段提示
-        const previewLen = inlineCap - 80; // 留空間給尾段「…（完整內容見附件）」
-        const preview = record.result.slice(0, previewLen);
-        const note = `\n…（完整內容 ${record.result.length} 字，見附件）`;
-        const buf = Buffer.from(record.result, "utf-8");
-        const filename = `subagent-${record.runId.slice(0, 8)}.md`;
-        try {
-          await textChannel.send({
-            content: `✅ **${label}** 完成\n${preview}${note}`,
-            files: [{ attachment: buf, name: filename }],
-          });
-        } catch (err) {
-          log.warn(`[subagent-discord-bridge] 附件上傳失敗，退回純文字截斷：${err instanceof Error ? err.message : String(err)}`);
-          await textChannel.send(`✅ **${label}** 完成\n${preview}\n…（截斷，附件失敗）`);
-        }
+      // 用 cli-bridge 的 splitForDiscord（含 code fence 平衡 + 換行斷點）拆段
+      const { splitForDiscord } = await import("../cli-bridge/reply.js");
+      const header = `✅ **${label}** 完成`;
+      const fullText = `${header}\n${record.result}`;
+      const chunks = splitForDiscord(fullText);
+      // 每段加序號（多段時才加）讓使用者看到全貌
+      const total = chunks.length;
+      for (let i = 0; i < total; i++) {
+        const body = total > 1 ? `${chunks[i]}\n\n_(${i + 1}/${total})_` : chunks[i]!;
+        await textChannel.send(body);
       }
     }
   } catch (err) {
