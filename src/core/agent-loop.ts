@@ -14,7 +14,9 @@
  * 參考架構文件第 6 節（Agent Loop + Tool 執行引擎）。
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join as pathJoin } from "node:path";
+import { homedir } from "node:os";
 import { log } from "../logger.js";
 import { makeToolResultMessage } from "../providers/base.js";
 import type { LLMProvider, Message, ProviderEvent, ImageBlock, ContentBlock } from "../providers/base.js";
@@ -1318,11 +1320,30 @@ export async function* agentLoop(
       }
 
       // ── Background Agent 結果注入 ──────────────────────────────────────────
+      // ≤ INLINE_LIMIT 字 → 完整 inline；> 限制 → 寫檔 + 注入 preview + 路徑，
+      // parent agent 可用 read_file 取完整內容（避免 context 被一個 subagent 大輸出佔滿）
       if (pendingBgResults.length > 0) {
+        const INLINE_LIMIT = 8000; // ~2000 tokens
         const parts = pendingBgResults.splice(0).map(r => {
           const status = r.type === "completed" ? "✅ 完成" : "❌ 失敗";
-          const preview = r.content.slice(0, 2000);
-          return `[背景 Agent ${status}] ${r.label} (${r.runId.slice(0, 8)})\n${preview}`;
+          const header = `[背景 Agent ${status}] ${r.label} (${r.runId.slice(0, 8)})`;
+          if (r.content.length <= INLINE_LIMIT) {
+            return `${header}\n${r.content}`;
+          }
+          // 太長 → 寫檔 + preview + 路徑
+          try {
+            const dir = pathJoin(process.env["CATCLAW_HOME"] ?? pathJoin(homedir(), ".catclaw"), "workspace", "data", "subagent-results");
+            mkdirSync(dir, { recursive: true });
+            const filePath = pathJoin(dir, `${r.runId}.md`);
+            writeFileSync(filePath, r.content, "utf-8");
+            const preview = r.content.slice(0, INLINE_LIMIT - 400);
+            return `${header} — 完整結果（${r.content.length} 字）已外部化\n\n預覽（前 ${INLINE_LIMIT - 400} 字）：\n${preview}\n\n…(後 ${r.content.length - (INLINE_LIMIT - 400)} 字請用 read_file 取完整檔案：\`${filePath}\`)`;
+          } catch (err) {
+            // 寫檔失敗 → 退回截斷 preview，但用較大上限
+            log.warn(`[agent-loop] subagent 結果外部化失敗 runId=${r.runId}：${err instanceof Error ? err.message : String(err)}`);
+            const preview = r.content.slice(0, INLINE_LIMIT);
+            return `${header}\n${preview}\n\n…(原文 ${r.content.length} 字，外部化失敗已截斷)`;
+          }
         });
         messages.push({ role: "user", content: `[系統通知] 背景子 agent 已完成：\n\n${parts.join("\n\n---\n\n")}` });
         log.debug(`[agent-loop] 注入 ${parts.length} 個背景 agent 結果`);
