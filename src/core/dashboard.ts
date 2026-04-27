@@ -2290,6 +2290,32 @@ async function loadModelsConfig() {
       html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + alias + '&quot;)" ' + (isCurrent ? 'disabled' : '') + '>' + alias + '</button>';
     }
     html += '</div>';
+
+    // 依 Provider 列出 models.json 全部 model（pi-ai 動態同步）
+    try {
+      const mj = await authFetch('/api/models-json').then(r => r.json());
+      if (mj.exists) {
+        const providers = mj.data?.providers || {};
+        const aliasValueSet = new Set(Object.values(aliases));
+        html += '<details style="margin-bottom:12px;padding:8px;background:#161827;border-radius:6px"><summary style="cursor:pointer;color:#818cf8;font-size:0.82rem;font-weight:bold">📦 依 Provider 列出全部模型（' + Object.keys(providers).length + ' providers）</summary><div style="margin-top:8px">';
+        for (const [pid, prov] of Object.entries(providers)) {
+          const models = (prov && prov.models) || [];
+          if (models.length === 0) continue;
+          html += '<div style="margin-bottom:8px"><strong style="font-size:0.78rem;color:#a78bfa">' + esc(pid) + '</strong> <span style="color:#666;font-size:0.7rem">(' + models.length + ')</span>';
+          html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
+          for (const m of models) {
+            const ref = pid + '/' + m.id;
+            const isCurrent = ref === primary || aliasValueSet.has(ref) && Object.entries(aliases).some(([k,v]) => k === primary && v === ref);
+            const btnClass = isCurrent ? 'btn btn-green btn-sm' : 'btn btn-sm';
+            html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + ref + '&quot;)" title="' + esc(m.name||'') + '" style="font-size:0.7rem;padding:2px 8px" ' + (isCurrent ? 'disabled' : '') + '>' + esc(m.id) + '</button>';
+          }
+          html += '</div></div>';
+        }
+        html += '</div></details>';
+      }
+    } catch (mjErr) {
+      html += '<div style="color:#888;font-size:0.75rem;margin-bottom:12px">（讀取 models.json 失敗：' + mjErr + '）</div>';
+    }
     // routing 區塊
     const routing = mc.routing || {};
     html += '<details style="margin-top:12px;padding-top:10px;border-top:1px solid #2a2d3e"><summary style="cursor:pointer;color:#818cf8;font-size:0.82rem;font-weight:bold">模型路由（channel/project/role 覆蓋）</summary>';
@@ -5400,11 +5426,32 @@ export class DashboardServer {
               const data = existsSync(p) ? JSON.parse(readFileSync(p, "utf-8")) : {};
 
               if (body.action === "set-primary" && body.primary) {
+                const primary = body.primary as string;
                 const aliases = data.aliases as Record<string, string> | undefined;
-                if (aliases && !Object.keys(aliases).includes(body.primary as string) && !Object.values(aliases).includes(body.primary as string)) {
-                  throw new Error(`模型 '${body.primary}' 不存在。可用：${Object.keys(aliases).join(", ")}`);
+                let valid = false;
+                // 1) alias key
+                if (aliases && Object.keys(aliases).includes(primary)) valid = true;
+                // 2) alias value（provider/model 已被某個 alias 指過）
+                if (!valid && aliases && Object.values(aliases).includes(primary)) valid = true;
+                // 3) provider/model 格式 + models.json 內查得到（依 provider 動態同步的全部模型都允許）
+                if (!valid && primary.includes("/")) {
+                  try {
+                    const { resolveWorkspaceDirSafe } = await import("./config.js");
+                    const ws = resolveWorkspaceDirSafe();
+                    const mjPath = join(ws, "agents", "default", "models.json");
+                    if (existsSync(mjPath)) {
+                      const mj = JSON.parse(readFileSync(mjPath, "utf-8")) as { providers?: Record<string, { models?: Array<{ id: string }> }> };
+                      const [pid, ...rest] = primary.split("/");
+                      const mid = rest.join("/");
+                      if (pid && mid && mj.providers?.[pid]?.models?.some(m => m.id === mid)) valid = true;
+                    }
+                  } catch { /* fall through to error */ }
                 }
-                data.primary = body.primary;
+                if (!valid) {
+                  const aliasList = aliases ? Object.keys(aliases).join(", ") : "(無 alias)";
+                  throw new Error(`模型 '${primary}' 不存在。可用 alias：${aliasList}（或用 provider/model 格式，需在 models.json 中存在）`);
+                }
+                data.primary = primary;
               } else if (body.action === "set-routing" && body.mapKey && body.key) {
                 const validMaps = ["channels", "roles", "projects"];
                 if (!validMaps.includes(body.mapKey as string)) throw new Error(`無效的路由類型：${body.mapKey}`);
