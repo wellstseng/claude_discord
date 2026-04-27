@@ -1306,7 +1306,11 @@ export async function* agentLoop(
       // ── 使用者插話/編輯訊息注入（soft inject，不打斷 LLM 進行中的呼叫）──
       const pendingInterrupts = drainInterruptQueue(sessionKey);
       if (pendingInterrupts.length > 0) {
-        const block = pendingInterrupts.map(i => `[使用者插話] ${i}`).join("\n\n");
+        const items = pendingInterrupts.map(i => `[使用者新訊息（turn 進行中插入）] ${i}`).join("\n\n");
+        const block =
+          `${items}\n\n` +
+          `→ 以上為使用者在 turn 進行中下達的新指示或補充。請當作 user 新請求對待：` +
+          `納入並繼續處理，重新評估是否該轉向、補資料或調整方向；除非任務真正完成，否則不要 end_turn。`;
         messages.push({ role: "user", content: block });
         log.info(`[agent-loop] [loop=${loopCount}] 注入 ${pendingInterrupts.length} 則插話訊息到當前 turn`);
         // 給 Discord 一個視覺提示，模型會在這之後自然接續
