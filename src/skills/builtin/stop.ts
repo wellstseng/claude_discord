@@ -170,11 +170,11 @@ export const rollbackSkill: Skill = {
 
 export const clearSkill: Skill = {
   name: "clear",
-  description: "清除當前頻道的 session 歷史（保留 session，清空 messages）",
+  description: "清除當前頻道的 session 歷史（messages）。`/clear all` 連 trace 一起清；預設保留 trace（30 天 TTL 自動滾動）。",
   tier: "standard",
   trigger: ["/clear"],
 
-  async execute({ channelId }) {
+  async execute({ channelId, args }) {
     const sessionManager = getPlatformSessionManager();
     const sessions = sessionManager.list();
     const session = sessions.find(s => s.channelId === channelId);
@@ -183,10 +183,14 @@ export const clearSkill: Skill = {
       return { text: "ℹ️ 此頻道尚無 session 歷史。" };
     }
 
+    const clearTrace = args.trim().toLowerCase() === "all";
     const msgCount = sessionManager.clearMessages(session.sessionKey);
-    const tracesDeleted = getTraceStore()?.deleteBySession(session.sessionKey) ?? 0;
+    const tracesDeleted = clearTrace ? (getTraceStore()?.deleteBySession(session.sessionKey) ?? 0) : 0;
 
-    return { text: `🧹 Session 已清除（${msgCount} 條訊息、${tracesDeleted} 筆 trace 已刪除）。` };
+    if (clearTrace) {
+      return { text: `🧹 Session + Trace 已清除（${msgCount} 條訊息、${tracesDeleted} 筆 trace 已刪除）。` };
+    }
+    return { text: `🧹 Session 已清除（${msgCount} 條訊息）。Trace 保留（用 \`/clear all\` 連 trace 一起清）。` };
   },
 };
 
