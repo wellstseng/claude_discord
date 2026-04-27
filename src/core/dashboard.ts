@@ -785,7 +785,10 @@ label.cfg-toggle { min-width: 36px; }
     <div class="card">
       <h3 style="margin:0 0 8px">Vector DB</h3>
       <div id="pl-vector-stats">載入中...</div>
-      <button class="btn btn-green btn-sm" style="margin-top:8px" onclick="pipelineResync()">🔄 Vector Resync</button>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-green btn-sm" onclick="pipelineResync(false)" title="只 upsert 現有 atom，不 drop（同維度 / 安全）">🔄 Vector Resync</button>
+        <button class="btn btn-sm" style="background:var(--warn);color:#fff" onclick="pipelineResync(true)" title="先 dropTable 再 seed — 換 embedding 模型/維度時必跑（會清空向量 DB 重建）">♻ 完整重建（drop + seed）</button>
+      </div>
       <div id="pl-resync-result" style="font-size:0.82rem;margin-top:8px"></div>
     </div>
     <!-- 操作區：Embedding 切換 -->
@@ -3573,17 +3576,23 @@ async function pipelineSwitchExtract() {
   } catch (e) { msgEl.innerHTML = '<div style="color:var(--error)">錯誤: ' + e.message + '</div>'; }
 }
 
-async function pipelineResync() {
+async function pipelineResync(rebuild) {
   var el = document.getElementById('pl-resync-result');
-  el.innerHTML = '<div style="color:var(--fg2)">重建中（可能需要數十秒）...</div>';
+  if (rebuild && !confirm('完整重建會 drop 所有向量 table 後重新 embed（適用於換 embedding 模型）。確認執行？')) return;
+  el.innerHTML = '<div style="color:var(--fg2)">' + (rebuild ? '完整重建中（清空 + 重新 embed，可能數十秒）...' : 'Resync 中...') + '</div>';
   try {
-    var r = await authFetch('/api/memory/resync', { method: 'POST' }).then(function(r) { return r.json(); });
+    var r = await authFetch('/api/memory/resync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rebuild: !!rebuild }),
+    }).then(function(r) { return r.json(); });
     if (r.error) { el.innerHTML = '<div style="color:var(--error)">' + r.error + '</div>'; return; }
     var lines = (r.report || []).map(function(l) {
-      return '<div>• ' + l.layer + '：✅ ' + l.seeded + ' embedded, ' + l.skipped + ' skipped, ' + l.errors + ' errors</div>';
+      var tag = l.dropped ? '🗑 dropped → ' : '';
+      return '<div>• ' + l.layer + '：' + tag + '✅ ' + l.seeded + ' embedded, ' + l.skipped + ' skipped, ' + l.errors + ' errors</div>';
     });
-    el.innerHTML = '<div style="color:var(--success);font-weight:500;margin-bottom:4px">✅ Resync 完成</div>' + lines.join('');
-    // 刷新 vector stats
+    var title = r.rebuild ? '✅ 完整重建完成' : '✅ Resync 完成';
+    el.innerHTML = '<div style="color:var(--success);font-weight:500;margin-bottom:4px">' + title + '</div>' + lines.join('');
     loadPipeline();
   } catch (e) { el.innerHTML = '<div style="color:var(--error)">錯誤: ' + e.message + '</div>'; }
 }
@@ -6398,48 +6407,63 @@ export class DashboardServer {
       }
 
       // POST /api/memory/resync — 觸發 vector resync
+      // body: { rebuild?: boolean } —— rebuild=true 會 dropTable 再 seed，
+      //   用於換 embedding 模型/維度後（upsert 在 dim mismatch 會 schema 衝突 skip）
       if (url === "/api/memory/resync" && method === "POST") {
-        void (async () => {
-          try {
-            const { getPlatformMemoryEngine } = await import("./platform.js");
-            const engine = getPlatformMemoryEngine();
-            if (!engine) { res.writeHead(500); res.end(JSON.stringify({ error: "MemoryEngine 未啟動" })); return; }
-
-            const status = engine.getStatus();
-            const memRoot = await resolveMemRootForAgent();
-            const layers: Array<{ label: string; dir: string; namespace: string }> = [];
-            layers.push({ label: "global", dir: status.globalDir, namespace: "global" });
-
-            const projectsDir = join(memRoot, "projects");
-            if (existsSync(projectsDir)) {
-              for (const sub of readdirSync(projectsDir)) {
-                layers.push({ label: `project/${sub}`, dir: join(projectsDir, sub), namespace: `project/${sub}` });
+        let body = "";
+        req.on("data", (c: Buffer) => { body += c.toString(); });
+        req.on("end", () => {
+          void (async () => {
+            try {
+              let rebuild = false;
+              if (body.trim()) {
+                try { rebuild = !!(JSON.parse(body) as { rebuild?: boolean }).rebuild; } catch { /* ignore malformed body */ }
               }
-            }
-            const accountsDir = join(memRoot, "accounts");
-            if (existsSync(accountsDir)) {
-              for (const sub of readdirSync(accountsDir)) {
-                layers.push({ label: `account/${sub}`, dir: join(accountsDir, sub), namespace: `account/${sub}` });
-              }
-            }
+              const { getPlatformMemoryEngine } = await import("./platform.js");
+              const engine = getPlatformMemoryEngine();
+              if (!engine) { res.writeHead(500); res.end(JSON.stringify({ error: "MemoryEngine 未啟動" })); return; }
 
-            const report: Array<{ layer: string; seeded: number; skipped: number; errors: number }> = [];
-            for (const l of layers) {
-              if (!existsSync(l.dir)) continue;
-              try {
-                const result = await engine.seedFromDir(l.dir, l.namespace);
-                report.push({ layer: l.label, ...result });
-              } catch (err) {
-                report.push({ layer: l.label, seeded: 0, skipped: 0, errors: 1 });
-              }
-            }
+              const status = engine.getStatus();
+              const memRoot = await resolveMemRootForAgent();
+              const layers: Array<{ label: string; dir: string; namespace: string }> = [];
+              layers.push({ label: "global", dir: status.globalDir, namespace: "global" });
 
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ ok: true, report }));
-          } catch (err) {
-            res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
-          }
-        })();
+              const projectsDir = join(memRoot, "projects");
+              if (existsSync(projectsDir)) {
+                for (const sub of readdirSync(projectsDir)) {
+                  layers.push({ label: `project/${sub}`, dir: join(projectsDir, sub), namespace: `project/${sub}` });
+                }
+              }
+              const accountsDir = join(memRoot, "accounts");
+              if (existsSync(accountsDir)) {
+                for (const sub of readdirSync(accountsDir)) {
+                  layers.push({ label: `account/${sub}`, dir: join(accountsDir, sub), namespace: `account/${sub}` });
+                }
+              }
+
+              const report: Array<{ layer: string; seeded: number; skipped: number; errors: number; dropped?: boolean }> = [];
+              for (const l of layers) {
+                if (!existsSync(l.dir)) continue;
+                try {
+                  if (rebuild) {
+                    const r = await engine.dropAndSeed(l.dir, l.namespace);
+                    report.push({ layer: l.label, dropped: r.dropped, seeded: r.seeded, skipped: r.skipped, errors: r.errors });
+                  } else {
+                    const r = await engine.seedFromDir(l.dir, l.namespace);
+                    report.push({ layer: l.label, ...r });
+                  }
+                } catch {
+                  report.push({ layer: l.label, seeded: 0, skipped: 0, errors: 1 });
+                }
+              }
+
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: true, rebuild, report }));
+            } catch (err) {
+              res.writeHead(500); res.end(JSON.stringify({ error: String(err) }));
+            }
+          })();
+        });
         return;
       }
 

@@ -66,14 +66,28 @@ export function getAtom(dirs: string[], name: string): Atom | null {
   return null;
 }
 
-/** 刪除 atom 檔案 */
-export function deleteAtom(dirs: string[], name: string): boolean {
+/**
+ * 刪除 atom 檔案 + 連帶清掉向量 DB 條目（避免重組後留僵屍指向不存在的檔案）。
+ * namespace 預設 "global"；多 namespace 環境（project/account 層）由呼叫端傳入。
+ */
+export function deleteAtom(dirs: string[], name: string, namespace = "global"): boolean {
   for (const dir of dirs) {
     const path = join(dir, `${name}.md`);
     if (existsSync(path)) {
       try {
         unlinkSync(path);
         log.info(`[memory-api] 刪除 atom: ${name}`);
+        // fire-and-forget 清向量 DB（vector service 不可用時靜默略過）
+        import("../vector/lancedb.js").then(({ getVectorService }) => {
+          try {
+            const vs = getVectorService();
+            if (vs.isAvailable()) {
+              vs.delete(name, namespace).catch((err: unknown) => {
+                log.debug(`[memory-api] 清向量 ${name}@${namespace} 失敗：${err instanceof Error ? err.message : String(err)}`);
+              });
+            }
+          } catch { /* vector service 未初始化 */ }
+        }).catch(() => { /* dynamic import 失敗 */ });
         return true;
       } catch (err) {
         log.warn(`[memory-api] 刪除失敗 ${name}: ${err instanceof Error ? err.message : String(err)}`);

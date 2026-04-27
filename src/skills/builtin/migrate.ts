@@ -6,7 +6,8 @@
  *   /migrate import [--force] [--dry-run]  — 從 ~/.claude 匯入記憶
  *   /migrate rebuild [<memoryDir>]          — 重建 MEMORY.md 索引
  *   /migrate seed [--dry-run]              — 將 atom 嵌入至 LanceDB（global）
- *   /migrate vector-resync [--dry-run]    — 全層向量重建（global + project + account）
+ *   /migrate vector-resync [--dry-run] [--rebuild]
+ *                                          — 全層向量 resync（upsert，預設）；--rebuild 先 dropTable 再 seed（換模型/維度時用）
  *   /migrate status                         — 顯示遷移狀態
  *   /migrate search <query>                — 直查 LanceDB（不過 LLM）
  *   /migrate stats                          — LanceDB 向量數 + table 清單
@@ -114,6 +115,8 @@ async function handleSeed(args: string): Promise<SkillResult> {
 
 async function handleVectorResync(args: string): Promise<SkillResult> {
   const dryRun = args.includes("--dry-run");
+  // --rebuild：先 dropTable 再 seed（必要時機：換 embedding 模型/維度、清僵屍 atom）
+  const rebuild = args.includes("--rebuild");
   const { getPlatformMemoryEngine } = await import("../../core/platform.js");
   const engine = getPlatformMemoryEngine();
   if (!engine) {
@@ -144,7 +147,8 @@ async function handleVectorResync(args: string): Promise<SkillResult> {
   }
 
   if (dryRun) {
-    const lines = ["**[Dry Run] vector-resync 預覽**"];
+    const lines = [`**[Dry Run] vector-resync${rebuild ? " --rebuild" : ""} 預覽**`];
+    if (rebuild) lines.push(`⚠️ rebuild 模式會 drop 所有 namespace table 後重建`);
     for (const l of layers) {
       if (!existsSync(l.dir)) continue;
       const count = readdirSync(l.dir).filter(f => f.endsWith(".md") && f !== "MEMORY.md").length;
@@ -153,28 +157,37 @@ async function handleVectorResync(args: string): Promise<SkillResult> {
     return { text: lines.join("\n") };
   }
 
-  const report: string[] = ["**向量全層重建完成**"];
-  let totalSeeded = 0, totalSkipped = 0, totalErrors = 0;
+  const report: string[] = [`**向量全層${rebuild ? "重建" : "Resync"}完成**`];
+  let totalSeeded = 0, totalSkipped = 0, totalErrors = 0, totalDropped = 0;
 
   for (const l of layers) {
     if (!existsSync(l.dir)) continue;
     try {
-      const result = await engine.seedFromDir(l.dir, l.namespace);
-      report.push(`• ${l.label}：✅ ${result.seeded} embedded, ${result.skipped} skipped, ${result.errors} errors`);
-      totalSeeded += result.seeded;
-      totalSkipped += result.skipped;
-      totalErrors += result.errors;
+      if (rebuild) {
+        const r = await engine.dropAndSeed(l.dir, l.namespace);
+        if (r.dropped) totalDropped++;
+        report.push(`• ${l.label}：${r.dropped ? "🗑 dropped → " : ""}✅ ${r.seeded} embedded, ${r.skipped} skipped, ${r.errors} errors`);
+        totalSeeded += r.seeded; totalSkipped += r.skipped; totalErrors += r.errors;
+      } else {
+        const r = await engine.seedFromDir(l.dir, l.namespace);
+        report.push(`• ${l.label}：✅ ${r.seeded} embedded, ${r.skipped} skipped, ${r.errors} errors`);
+        totalSeeded += r.seeded; totalSkipped += r.skipped; totalErrors += r.errors;
+      }
     } catch (err) {
       report.push(`• ${l.label}：❌ ${err instanceof Error ? err.message : String(err)}`);
       totalErrors++;
     }
   }
 
-  report.push(`\n**合計**：${totalSeeded} embedded, ${totalSkipped} skipped, ${totalErrors} errors`);
+  const droppedNote = rebuild ? `${totalDropped} dropped, ` : "";
+  report.push(`\n**合計**：${droppedNote}${totalSeeded} embedded, ${totalSkipped} skipped, ${totalErrors} errors`);
   if (totalErrors > 0 || totalSkipped > 0) {
     report.push("⚠️ 有 skip/error — 確認 Ollama embedding 是否正常");
   } else {
     report.push("✅ 全部完成");
+  }
+  if (!rebuild && totalSkipped > 0) {
+    report.push("\n💡 若是換了 embedding 模型/維度（dim mismatch 會 skip），請改跑 `/migrate vector-resync --rebuild`");
   }
 
   return { text: report.join("\n") };
@@ -279,7 +292,7 @@ export const skill: Skill = {
             "• `import [--force] [--dry-run]` — 從 `~/.claude/memory/` 匯入記憶",
             "• `rebuild [<memoryDir>] [--dry-run]` — 重建 `MEMORY.md` 索引",
             "• `seed [--dry-run]` — 將記憶目錄 atom 嵌入至 LanceDB（global only）",
-            "• `vector-resync [--dry-run]` — 全層向量重建（global + project + account）",
+            "• `vector-resync [--dry-run] [--rebuild]` — 全層向量 resync；--rebuild 先 dropTable 再 seed（換模型/維度時用）",
             "• `status` — 查看遷移狀態",
             "• `search <query>` — 直查 LanceDB（不過 LLM，minScore=0 顯示原始 score）",
             "• `stats` — LanceDB table 清單 + 向量數",

@@ -312,6 +312,22 @@ export class MemoryEngine {
       log.warn(`[memory-engine] rebuildIndex 失敗：${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  /**
+   * 完整 drop table + 從 dir 重新 seed（embedding model 換維度後必須走這條）。
+   * seedFromDir 只 upsert 不 drop，遇到舊維度 schema 會 schema 衝突靜默失敗。
+   */
+  async dropAndSeed(dir: string, namespace: string): Promise<{ dropped: boolean; seeded: number; skipped: number; errors: number }> {
+    let dropped = false;
+    try {
+      const { getVectorService } = await import("../vector/lancedb.js");
+      dropped = await getVectorService().dropTable(namespace);
+    } catch (err) {
+      log.warn(`[memory-engine] dropAndSeed: dropTable ${namespace} 失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+    const result = await this.seedFromDir(dir, namespace);
+    return { dropped, ...result };
+  }
 }
 
 // ── 全域單例 ──────────────────────────────────────────────────────────────────
