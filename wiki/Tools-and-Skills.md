@@ -157,6 +157,7 @@ interface Skill {
 | `/add-bridge` | `/add-bridge`, `/addbridge` | 新增 CLI Bridge 設定並驗證上線 | admin |
 | `/migrate` | `/migrate` | 記憶遷移管理（從 ~/.claude 匯入、重建索引、查看狀態） | admin |
 | `/restart` | `重啟`, `restart` | 重啟 CatClaw bot | admin |
+| `/capabilities` | `/capabilities`, `/caps` | 列出 CatClaw 平台全部可用能力（hooks/tools/skills/modules/mcp） | public |
 
 #### Prompt-type Skills（Markdown 注入）
 

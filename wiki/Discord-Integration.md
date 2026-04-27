@@ -17,6 +17,17 @@ Discord messageCreate
   └── 7. 排入 session.enqueueTurn()
 ```
 
+## messageUpdate 處理（4-23）
+
+使用者編輯訊息時感知並注入修正版本：
+
+| 場景 | 處理方式 |
+|------|---------|
+| **Debounce 窗口內**（尚未 dispatch） | `debounceMessageIndex` Map 追蹤 `messageId → buffer 位置`，編輯時直接替換 buffer 內容，agent 拿到的是修正後版本 |
+| **已 dispatch 到 agent**（CLI Bridge active） | 偵測 channel 是否有 active CLI Bridge（status=busy），透過 `bridge.send()` 注入 `[訊息編輯]` 通知，Claude Code 收到後自行調整回覆方向（利用既有插話機制中斷舊 turn） |
+
+支援 `messageUpdate` event listener（含 partial fetch）。
+
 ## Channel 權限
 
 三層繼承：Thread → Parent Channel → Guild Default
@@ -90,10 +101,29 @@ Discord 訊息上限 2000 字元。超過時：
 
 `bot-circuit-breaker.ts` — Bot-to-Bot 對話防呆機制。偵測同頻道 bot 互相回覆過度活躍，超過閾值暫停等人介入：
 
-| 參數 | 預設 |
-| ---- | ---- |
-| `maxRounds` | 10 輪 |
-| `maxDurationMs` | 180,000 ms（3 分鐘） |
+| 參數 | 預設 | 說明 |
+| ---- | ---- | ---- |
+| `enabled` | `true` | 預設啟用 |
+| `maxRounds` | 10 輪 | 連續 bot 互動最大來回輪數 |
+| `maxDurationMs` | 180,000 ms（3 分鐘）| 最大持續時間 |
+
+開啟時超過 maxRounds 或 maxDurationMs，此 channel 的 bot-to-bot 對話自動停止，避免兩個 bot 互相觸發無限輪。設定路徑：`catclaw.json.botCircuitBreaker`。
+
+## Discord 圖片下載與 magic bytes 偵測（4-19）
+
+`extractAttachments()` 下載圖片附件後，**用 magic bytes 偵測真實格式**（PNG/JPEG/GIF/WebP），不信任 Discord 提供的 `contentType`。
+
+**原因**：Discord API 常報 `image/webp` 但實際是 PNG（user 上傳壓縮過的圖），若直接用 contentType 送給 Anthropic Vision，API 回 400 reject。
+
+## CLI Bridge 上線補處理 inbound history（4-21）
+
+CLI Bridge `start()` 上線時除了 `sendStartupNotification`，還會 fire-and-forget 跑 `drainInboundHistoryOnStartup()`：
+
+1. `consumeForInjection(channelId, ..., "bridge:{label}")` 拿 bridge scope 全部 entries
+2. 加前綴後 `bridge.send()` 丟進 CLI 自動處理
+3. 無 entries 時 noop；消費後 JSONL 自動清空避免重複處理
+
+讓使用者離線期間累積到 inbound history 的訊息在上線時自動補處理，不需等下一則新訊息進來才被消費。
 
 ## Inbound History Store
 

@@ -20,7 +20,7 @@ graph TB
 
     subgraph "基礎設施層"
         PRV[providers/ — LLM Failover]
-        MEM[memory/ — 三層記憶]
+        MEM[memory/ — 四層記憶]
         CTX[context-engine.ts — 壓縮策略]
         TRG[tools/ + skills/ — Registry]
         SES[session.ts — 持久化佇列]
@@ -79,8 +79,8 @@ graph TB
 | 5 | ProviderRegistry | LLM Provider 註冊 + failover chain |
 | 6 | SessionManager | Session 持久化、TTL 清理、載入現有 session |
 | 7 | Registration + IdentityLinker | 使用者註冊 + 身份綁定 |
-| 8 | OllamaClient | Embedding 客戶端（可選） |
-| 9 | MemoryEngine | 三層記憶引擎初始化 |
+| 8 | EmbeddingProvider / ExtractionProvider | 記憶管線抽象層（ollama / google / openai / voyage / anthropic 等），啟動時 `verify?()` fail-loud + Health Monitor 接線 |
+| 9 | MemoryEngine | 四層記憶引擎初始化（global / project / agent / atom） |
 | 10 | RateLimiter | 角色級速率限制 |
 | 11 | ContextEngine | 壓縮策略鏈初始化 |
 | 12 | SubagentRegistry | 子任務並行限制 |

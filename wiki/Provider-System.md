@@ -37,10 +37,12 @@ interface LLMProvider {
 | `claude` / `claude-oauth` | Anthropic Claude API（V2 使用 `claude-oauth` + OAuth token） |
 | `openai-compat` | OpenAI-compatible API（任何相容端點） |
 | `ollama` | 本地 Ollama 推理 |
-| `codex-oauth` | OAuth-based Codex |
-| `cli-claude` | Spawn Claude CLI（legacy） |
-| `cli-gemini` | Spawn Gemini CLI（legacy） |
-| `cli-codex` | Spawn Codex CLI（legacy） |
+| `codex-oauth` | OAuth-based Codex；**共用 `~/.codex/auth.json` 與 Codex CLI**（避免雙方 refresh 互踩），支援 nested 格式 + JWT exp 解析（4-23） |
+| `cli-claude` | Spawn Claude CLI（ACP 路徑），可走 control_request 互動權限審批 |
+| `cli-gemini` | Spawn Gemini CLI |
+| `cli-codex` | Spawn Codex CLI；繼承全域 `~/.codex` 設定，approval decision 採用新 enum API |
+
+> **內建模型清單**：自 4-26 起改從 `@mariozechner/pi-ai` 動態抽取（`buildBuiltinProviders()`），pi-ai 升版重啟自動帶新 provider/model。Dashboard 模型快捷依「auth-profile.json 的 provider」動態分組。
 
 ## ProviderRegistry
 
@@ -59,8 +61,8 @@ channels[channelId] → projects[projectId] → roles[role] → defaultId
 1. 依序嘗試 failover chain 中的 provider
 2. 跳過 circuit breaker 為 open 狀態的 provider
 3. 成功 → `breaker.recordSuccess()`，回傳結果
-4. 4xx 錯誤（非 429）→ 不記錄失敗，直接拋出（用戶端錯誤不算 provider 問題）
-5. 5xx / 429 / 網路錯誤 → `breaker.recordFailure()`，嘗試下一個
+4. 4xx 錯誤（非 429、非 quota）→ 不記錄失敗，直接拋出（用戶端錯誤不算 provider 問題）
+5. **5xx / 429 / quota error / 網路錯誤** → `breaker.recordFailure()`，嘗試下一個（4-26：quota error 也觸發 failover，避免長時間掛死在已耗盡的 provider）
 6. 全部失敗 → 拋出合併錯誤訊息
 
 ## Circuit Breaker

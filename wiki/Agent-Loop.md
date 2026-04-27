@@ -67,13 +67,14 @@ LLM 輸出被截斷時（`max_tokens` stop reason），自動續接：
 
 ### Tool Loop Detection
 
-三層防禦避免 LLM 陷入重複操作：
+四層防禦避免 LLM 陷入重複操作：
 
 | 層級 | 偵測條件 | 動作 |
 | ---- | -------- | ---- |
 | Exact Loop | 同參數呼叫 3 次 | 中斷 + 警告 |
 | Loose Retry | 最近 10 次中 ≥8 次同 tool，且其中 ≥5 次「失敗 + args 相似於當前 call」 | 中斷 + 警告（單看 tool name 會誤擋探索性呼叫，需疊 args 相似度 + 失敗判定） |
 | Alternating Cycle | 交替循環偵測 | 中斷 + 警告 |
+| **Scattered Repeat + 0-progress**（4-24） | 散彈式重複（不同工具但相同意圖反覆嘗試）+ 0 進度守門 | 中斷 + 警告，避免 LLM 跳工具卻原地踏步 |
 
 ### TurnTracker
 
@@ -86,6 +87,36 @@ LLM 輸出被截斷時（`max_tokens` stop reason），自動續接：
 ### Auto-Compact
 
 當 Context Engine 在 turn 中觸發壓縮策略時，壓縮後的訊息會回寫到 session，確保下一輪使用壓縮後的歷史。
+
+### Soft-Inject 插話處理（4-23 + 4-27）
+
+Turn 進行中使用者插話（含訊息編輯）時：
+
+- **不 hard-abort**：原本 abort 會讓 user prompt + 已組裝 partial assistant 雙雙丟失（user 看不到任何回應）
+- **改 soft-inject**：當 turn 結束前注入 `[使用者新訊息（turn 進行中插入）] {msg}` + 明確指示「**當作 user 新請求對待，重新評估方向**，除非任務真正完成否則不要 end_turn」（4-27 framing 強化，原 `[使用者插話]` 被 LLM 誤讀為「補充 context」造成提早 end_turn）
+- **abort 路徑保留**：但不丟 user prompt 與已生成內容
+
+### Deferred Tool 完整修補（4-23）
+
+Deferred tool（schema 不在初始 context，需 `tool_search` 活化）多項治本：
+
+- 活化改信任 `tool_search` result，禁模糊匹配
+- `tool_search` 後空回應自動續接 + 強化 deferred 指示
+- Deferred 活化節流（一次活化多個會觸發 Anthropic 空回應）
+- Deferred nudge 上限 3 + 耗盡後通知使用者
+- Provider error 不再被吞，trace turnIndex 與 tool-log 檔名差 1 修復
+
+### Subagent 完成通知（4-26）
+
+`spawn_subagent` 完成後：
+
+- 結果 ≤ 1980 字 → 單則 reply（inline）
+- 結果 > 1980 字 → 自動分段，每段加 `_(i/total)_` 頁碼讓使用者看全貌（不用附件，行動裝置直接讀）
+- code fence 跨段自動補頭尾 ` ``` `（不破壞 markdown 結構）
+
+### Agent Skills 主對話載入（4-24）
+
+主對話也載入 agent skills + 自建提示（原本只在 subagent 載入）；CATCLAW.md 加「對話 vs 任務的工具邊界」硬規則 — 當前頻道回覆直接寫文字，不用 MCP。
 
 ## 事件流
 

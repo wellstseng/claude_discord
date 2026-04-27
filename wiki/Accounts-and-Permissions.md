@@ -117,10 +117,14 @@ Discord userId 進入
 
 ## Rate Limiter
 
-角色級速率限制：
+角色級速率限制（per-role，每分鐘請求上限）：
 
 | 角色 | 限制 |
 | ---- | ---- |
 | guest | 5 次/分鐘 |
 | member | 30 次/分鐘 |
+| developer | 60 次/分鐘 |
 | admin | 120 次/分鐘 |
+| platform-owner | 300 次/分鐘 |
+
+設定路徑：`catclaw.json.rateLimit.{role}.requestsPerMinute`。
