@@ -143,8 +143,8 @@ export class LanceVectorService implements VectorService {
       updatedAt: new Date().toISOString(),
     };
 
+    const tableName = nsToTable(namespace);
     try {
-      const tableName = nsToTable(namespace);
       const tableList = await this.db.tableNames();
 
       if (!tableList.includes(tableName)) {
@@ -158,7 +158,24 @@ export class LanceVectorService implements VectorService {
       }
       return true;
     } catch (err) {
-      log.warn(`[lancedb] upsert ${id} 失敗：${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      // Dim mismatch（換 embedding 模型常見）：舊 table 是 1024-dim、新向量 768-dim
+      // → LanceDB 拋 schema 不匹配。自動 drop + 重建（只含本筆），讓寫入流程不卡關。
+      // 既有其他 atom 仍需 dashboard ♻ 完整重建 補回，但至少當下這筆寫得進去。
+      const isDimMismatch = /schema|dimension|dim|FixedSizeList|vector.*length|invalid.*record/i.test(msg);
+      if (isDimMismatch) {
+        log.warn(`[lancedb] upsert ${id} 偵測到 schema/dim mismatch（${msg.slice(0, 100)}），自動 drop+rebuild "${namespace}"`);
+        try {
+          await this.db.dropTable(tableName).catch(() => { /* table 可能已不存在 */ });
+          await this.db.createTable(tableName, [record]);
+          log.warn(`[lancedb] "${namespace}" 已自動重建（僅含 ${id}）。其他 atom 需走 dashboard ♻ 完整重建 或 /migrate vector-resync --rebuild 補回。`);
+          return true;
+        } catch (err2) {
+          log.warn(`[lancedb] auto-rebuild "${namespace}" 失敗：${err2 instanceof Error ? err2.message : String(err2)}`);
+          return false;
+        }
+      }
+      log.warn(`[lancedb] upsert ${id} 失敗：${msg}`);
       return false;
     }
   }
