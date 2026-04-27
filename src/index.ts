@@ -221,6 +221,34 @@ bot.once("clientReady", async (c) => {
         log.debug(`[log-error-monitor] Discord 通知失敗：${err instanceof Error ? err.message : String(err)}`);
       });
     });
+
+    // ── Health Monitor → Discord 通報（startup fail / component critical / recovered）──
+    const sendToChannel = async (content: string): Promise<void> => {
+      const notifyChannelId = _errorNotifyChannel;
+      if (!notifyChannelId) return;
+      try {
+        const ch = await bot.channels.fetch(notifyChannelId);
+        if (!ch?.isTextBased() || !("send" in ch)) return;
+        await ch.send(content);
+      } catch (err) {
+        log.debug(`[health] Discord 通報失敗：${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+
+    eventBus.on("health:startup", (results) => {
+      const failed = results.filter(r => !r.ok);
+      if (failed.length === 0) return; // 全綠不打擾
+      const lines = failed.map(r => `✗ \`${r.name}\`：${r.detail}`).join("\n");
+      void sendToChannel(`🩺 **Startup Health Summary — ${failed.length} 項失敗**\n${lines}`);
+    });
+
+    eventBus.on("health:critical", (name, error) => {
+      void sendToChannel(`🚨 **Component CRITICAL：\`${name}\`**\n${error.slice(0, 500)}`);
+    });
+
+    eventBus.on("health:recovered", (name) => {
+      void sendToChannel(`✅ **Component 已恢復：\`${name}\`**`);
+    });
   }
 
   // V1 crash recovery（scanAndCleanActiveTurns）已移除 — V2 走 agentLoop，不寫 active-turns

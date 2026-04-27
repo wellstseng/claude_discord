@@ -181,6 +181,14 @@ Bearer token 認證（可選）：
 | `/api/logs/stream` | GET | SSE 即時日誌串流 |
 | `/api/restart` | POST | PM2 重啟 |
 
+### Health
+
+| 端點 | 方法 | 說明 |
+|------|------|------|
+| `/api/health` | GET | Component 健康狀態 + 啟動健康摘要。回 `{ summary: { healthy, degraded, unhealthy, unknown, total }, components: ComponentHealth[], startup: Array<{ name, ok, detail }> }`。詳見 `health-monitor.md`。 |
+
+日誌 tab 內含「🩺 Component Health」面板（紅綠燈總覽 + 表格 + 啟動摘要 details），呼叫 `loadHealth()` 載入。
+
 ## Web Chat
 
 Dashboard 內嵌互動式對話介面，支援：

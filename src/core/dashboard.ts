@@ -47,6 +47,7 @@ import { getSessionManager } from "./session.js";
 import { getContextEngine } from "./context-engine.js";
 import { getInboundHistoryStore } from "../discord/inbound-history.js";
 import { PROTECTED_WRITE_PATHS_DEFAULT, PROTECTED_READ_PATHS_DEFAULT } from "../safety/guard.js";
+import { getAllHealth as healthGetAll, getStartupResults as healthGetStartup } from "./health-monitor.js";
 
 // ── Codex OAuth 狀態 ────────────────────────────────────────────────────────
 let _codexOAuthState: { status: string; authUrl?: string; expiresAt?: string; error?: string } | null = null;
@@ -508,6 +509,17 @@ label.cfg-toggle { min-width: 36px; }
     </h2>
     <div id="log-clear-msg" class="msg" style="font-size:0.72rem"></div>
     <textarea id="log-area" rows="30" readonly></textarea>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <h2>🩺 Component Health
+      <button class="btn btn-sm" style="float:right" onclick="loadHealth()">↻ 重新整理</button>
+    </h2>
+    <div id="health-summary" style="font-size:0.85rem;color:var(--fg2);margin-bottom:6px">載入中...</div>
+    <div id="health-components" style="font-size:0.82rem"></div>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;font-size:0.8rem;color:var(--fg2)">啟動健康摘要</summary>
+      <div id="health-startup" style="font-size:0.78rem;margin-top:6px"></div>
+    </details>
   </div>
   <div class="card" style="margin-top:12px">
     <h2>Error Snapshots
@@ -1369,6 +1381,86 @@ async function clearLogs() {
     msg.className = 'msg err';
     msg.textContent = '失敗：' + e;
   }
+}
+
+// ── Component Health ──────────────────────────────────────────────────────────
+function _healthBadge(status) {
+  if (status === 'healthy')   return '<span style="color:#0a0">●</span>';
+  if (status === 'degraded')  return '<span style="color:#fa0">●</span>';
+  if (status === 'unhealthy') return '<span style="color:#f33">●</span>';
+  return '<span style="color:#888">●</span>';
+}
+
+function _fmtTimeAgo(ts) {
+  if (!ts) return '—';
+  const sec = Math.round((Date.now() - ts) / 1000);
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.round(sec / 60) + 'm ago';
+  if (sec < 86400) return Math.round(sec / 3600) + 'h ago';
+  return Math.round(sec / 86400) + 'd ago';
+}
+
+async function loadHealth() {
+  const sumEl = document.getElementById('health-summary');
+  const compEl = document.getElementById('health-components');
+  const startupEl = document.getElementById('health-startup');
+  try {
+    const d = await authFetch('/api/health').then(r => r.json());
+    const s = d.summary || { healthy: 0, degraded: 0, unhealthy: 0, unknown: 0, total: 0 };
+    sumEl.innerHTML = 'Total: <b>' + s.total + '</b> · ' +
+      _healthBadge('healthy') + ' ' + s.healthy + ' · ' +
+      _healthBadge('degraded') + ' ' + s.degraded + ' · ' +
+      _healthBadge('unhealthy') + ' ' + s.unhealthy + ' · ' +
+      _healthBadge('unknown') + ' ' + s.unknown;
+
+    const comps = d.components || [];
+    if (comps.length === 0) {
+      compEl.innerHTML = '<span style="color:var(--fg3)">尚無 component 紀錄</span>';
+    } else {
+      compEl.innerHTML = '<table style="width:100%;border-collapse:collapse"><thead><tr>' +
+        '<th style="text-align:left;padding:4px">狀態</th>' +
+        '<th style="text-align:left;padding:4px">Component</th>' +
+        '<th style="text-align:right;padding:4px">成功</th>' +
+        '<th style="text-align:right;padding:4px">失敗</th>' +
+        '<th style="text-align:right;padding:4px">連續失敗</th>' +
+        '<th style="text-align:right;padding:4px">最後失敗</th>' +
+        '<th style="text-align:left;padding:4px">最後錯誤</th>' +
+        '</tr></thead><tbody>' +
+        comps.map(c => {
+          const err = c.lastError ? (c.lastError.length > 80 ? c.lastError.slice(0, 80) + '…' : c.lastError) : '';
+          return '<tr style="border-top:1px solid var(--border)">' +
+            '<td style="padding:4px">' + _healthBadge(c.status) + '</td>' +
+            '<td style="padding:4px;font-family:monospace">' + c.name + '</td>' +
+            '<td style="padding:4px;text-align:right;color:#0a0">' + c.totalSuccess + '</td>' +
+            '<td style="padding:4px;text-align:right;color:#f55">' + c.totalFailure + '</td>' +
+            '<td style="padding:4px;text-align:right">' + c.consecutiveFailures + '</td>' +
+            '<td style="padding:4px;text-align:right;color:var(--fg2)">' + _fmtTimeAgo(c.lastFailure) + '</td>' +
+            '<td style="padding:4px;color:var(--fg2);font-size:0.75rem">' + err + '</td>' +
+            '</tr>';
+        }).join('') +
+        '</tbody></table>';
+    }
+
+    const startup = d.startup || [];
+    if (startup.length === 0) {
+      startupEl.innerHTML = '<span style="color:var(--fg3)">尚無 startup 紀錄</span>';
+    } else {
+      startupEl.innerHTML = startup.map(s =>
+        (s.ok ? '✓ ' : '✗ ') + '<code>' + s.name + '</code>: ' + s.detail
+      ).join('<br>');
+    }
+  } catch (e) {
+    sumEl.innerHTML = '<span style="color:#f55">載入失敗：' + e + '</span>';
+  }
+}
+
+// 切到 logs tab 時自動載入一次
+const _origSwitchTab = window.switchTab;
+if (typeof _origSwitchTab === 'function') {
+  window.switchTab = function(name, btn) {
+    _origSwitchTab(name, btn);
+    if (name === 'logs') loadHealth();
+  };
 }
 
 // ── Error Snapshots ──────────────────────────────────────────────────────────
@@ -4491,6 +4583,27 @@ export class DashboardServer {
           res.end(JSON.stringify({ success: true, cleared, totalBytes, errors: errors.length ? errors : undefined }));
         }
         log.info(`[dashboard] logs cleared: ${cleared.join(", ")} (${totalBytes} bytes)`);
+        return;
+      }
+
+      // GET /api/health — component health + 最近一次 startup summary
+      if (url === "/api/health" && method === "GET") {
+        try {
+          const components = healthGetAll();
+          const startup = healthGetStartup();
+          const summary = {
+            healthy: components.filter(c => c.status === "healthy").length,
+            degraded: components.filter(c => c.status === "degraded").length,
+            unhealthy: components.filter(c => c.status === "unhealthy").length,
+            unknown: components.filter(c => c.status === "unknown").length,
+            total: components.length,
+          };
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ summary, components, startup }));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        }
         return;
       }
 

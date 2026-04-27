@@ -9,6 +9,7 @@
  */
 
 import { log } from "../logger.js";
+import { recordSuccess as healthRecordSuccess, recordFailure as healthRecordFailure } from "../core/health-monitor.js";
 import type { MemoryPipelineConfig, ExtractionProviderType } from "../core/config.js";
 
 // ── Interface ────────────────────────────────────────────────────────────────
@@ -20,6 +21,8 @@ export interface ExtractionProvider {
   generate(prompt: string, opts?: { maxTokens?: number }): Promise<string>;
   /** system + messages → 文字回應（用於 session-memory） */
   chat(messages: Array<{ role: string; content: string }>, opts?: { system?: string; timeout?: number }): Promise<string>;
+  /** 啟動時驗證 model 真的可用（fail-loud）。回 ok=false 會被 startup summary 標紅。 */
+  verify?(): Promise<{ ok: boolean; error?: string }>;
 }
 
 // ── Ollama Provider ──────────────────────────────────────────────────────────
@@ -35,20 +38,60 @@ export class OllamaExtractionProvider implements ExtractionProvider {
   async generate(prompt: string, opts?: { maxTokens?: number }): Promise<string> {
     const { getOllamaClient } = await import("../ollama/client.js");
     const client = getOllamaClient();
-    return client.generate(prompt, {
-      model: this.modelName,
-      think: "auto",
-      numPredict: opts?.maxTokens ?? 2048,
-    });
+    try {
+      const result = await client.generate(prompt, {
+        model: this.modelName,
+        think: "auto",
+        numPredict: opts?.maxTokens ?? 2048,
+      });
+      // 空字串視為 silent fail（OllamaClient 失敗時回傳 ""）
+      if (!result) {
+        healthRecordFailure("extraction:ollama", `generate 回傳空字串（model ${this.modelName} 不可用）`);
+      } else {
+        healthRecordSuccess("extraction:ollama");
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      healthRecordFailure("extraction:ollama", msg);
+      throw err;
+    }
   }
 
   async chat(messages: Array<{ role: string; content: string }>, opts?: { system?: string; timeout?: number }): Promise<string> {
     const { getOllamaClient } = await import("../ollama/client.js");
     const client = getOllamaClient();
-    return client.chat(
-      messages.map(m => ({ role: m.role as "user" | "system" | "assistant", content: m.content })),
-      { system: opts?.system, timeout: opts?.timeout },
-    );
+    try {
+      const result = await client.chat(
+        messages.map(m => ({ role: m.role as "user" | "system" | "assistant", content: m.content })),
+        { system: opts?.system, timeout: opts?.timeout },
+      );
+      if (!result) {
+        healthRecordFailure("extraction:ollama", `chat 回傳空字串（model ${this.modelName} 不可用）`);
+      } else {
+        healthRecordSuccess("extraction:ollama");
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      healthRecordFailure("extraction:ollama", msg);
+      throw err;
+    }
+  }
+
+  async verify(): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const { getOllamaClient } = await import("../ollama/client.js");
+      const client = getOllamaClient();
+      const results = await client.verifyAllModels();
+      const matched = results.find(r => r.llm.model === this.modelName);
+      if (!matched) {
+        return { ok: false, error: `無 backend 定義 llm model "${this.modelName}"（檢查 catclaw.json ollama.primary.model）` };
+      }
+      return matched.llm.ok ? { ok: true } : { ok: false, error: matched.llm.error };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 }
 

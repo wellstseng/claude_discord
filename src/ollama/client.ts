@@ -299,6 +299,67 @@ export class OllamaClient {
     }
   }
 
+  /**
+   * 驗證 backend 上的指定 model 是否真實存在（POST /api/show）。
+   * 用於 startup 時的 fail-loud 檢查 — 避免 model name 對不上但 init 假成功。
+   */
+  async verifyModel(backend: OllamaBackend, modelName: string): Promise<{ ok: boolean; error?: string }> {
+    const url = backend.host.replace(/\/$/, "") + "/api/show";
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: modelName }),
+        signal: controller.signal,
+      });
+      if (resp.ok) return { ok: true };
+      if (resp.status === 404) {
+        return { ok: false, error: `model "${modelName}" not found on ${backend.name} (${backend.host})` };
+      }
+      return { ok: false, error: `HTTP ${resp.status} verifying ${modelName} on ${backend.name}` };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: `verify ${modelName} on ${backend.name} 失敗：${msg}` };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * 啟動時對所有 enabled backend 的 llm + embedding model 跑一次 verify。
+   * 回傳每個 backend 各 model 的驗證結果，給 startup health summary 使用。
+   */
+  async verifyAllModels(): Promise<Array<{
+    backend: string;
+    host: string;
+    llm: { model: string; ok: boolean; error?: string };
+    embedding?: { model: string; ok: boolean; error?: string };
+  }>> {
+    const results = [];
+    for (const b of this.backends) {
+      if (!b.enabled) continue;
+      const llm = await this.verifyModel(b, b.model);
+      const item: {
+        backend: string;
+        host: string;
+        llm: { model: string; ok: boolean; error?: string };
+        embedding?: { model: string; ok: boolean; error?: string };
+      } = {
+        backend: b.name,
+        host: b.host,
+        llm: { model: b.model, ...llm },
+      };
+      if (b.embeddingModel) {
+        const emb = await this.verifyModel(b, b.embeddingModel);
+        item.embedding = { model: b.embeddingModel, ...emb };
+      }
+      results.push(item);
+    }
+    return results;
+  }
+
   // ── 狀態管理 ──────────────────────────────────────────────────────────────
 
   private getState(b: OllamaBackend): BackendState {

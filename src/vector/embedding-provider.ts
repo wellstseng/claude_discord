@@ -11,6 +11,7 @@
 
 import { log } from "../logger.js";
 import { getOllamaClient } from "../ollama/client.js";
+import { recordSuccess as healthRecordSuccess, recordFailure as healthRecordFailure } from "../core/health-monitor.js";
 import type { MemoryPipelineConfig, EmbeddingProviderType } from "../core/config.js";
 
 // ── Interface ────────────────────────────────────────────────────────────────
@@ -25,6 +26,8 @@ export interface EmbeddingProvider {
   readonly modelName: string;
   embed(texts: string[]): Promise<EmbedResult>;
   getDimensions(): Promise<number>;
+  /** 啟動時驗證 model 真的可用（fail-loud）。回 ok=false 會被 startup summary 標紅。 */
+  verify?(): Promise<{ ok: boolean; error?: string }>;
 }
 
 // ── Ollama Provider ──────────────────────────────────────────────────────────
@@ -47,6 +50,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
       if (!vectors.length) {
         log.debug("[embedding:ollama] embed 回傳空陣列（Ollama 不可用）");
+        healthRecordFailure("embedding:ollama", "embed 回傳空陣列（Ollama 不可用或 model 拿不到）");
         return { vectors: [], dim: this._cachedDim };
       }
 
@@ -56,9 +60,12 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
         this._cachedDim = dim;
       }
 
+      healthRecordSuccess("embedding:ollama");
       return { vectors, dim };
     } catch (err) {
-      log.warn(`[embedding:ollama] embedTexts 失敗（graceful skip）：${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`[embedding:ollama] embedTexts 失敗（graceful skip）：${msg}`);
+      healthRecordFailure("embedding:ollama", msg);
       return { vectors: [], dim: this._cachedDim };
     }
   }
@@ -67,6 +74,22 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
     if (this._cachedDim > 0) return this._cachedDim;
     const result = await this.embed(["test"]);
     return result.dim;
+  }
+
+  async verify(): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const { getOllamaClient } = await import("../ollama/client.js");
+      const client = getOllamaClient();
+      const results = await client.verifyAllModels();
+      // 找哪個 backend 有定義這個 embedding model
+      const matched = results.find(r => r.embedding?.model === this.modelName);
+      if (!matched?.embedding) {
+        return { ok: false, error: `無 backend 定義 embedding model "${this.modelName}"（檢查 catclaw.json ollama.primary.embeddingModel）` };
+      }
+      return matched.embedding.ok ? { ok: true } : { ok: false, error: matched.embedding.error };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 }
 
@@ -113,9 +136,12 @@ export class GoogleEmbeddingProvider implements EmbeddingProvider {
         this._cachedDim = vectors[0].length;
       }
 
+      healthRecordSuccess("embedding:google");
       return { vectors, dim: this._cachedDim };
     } catch (err) {
-      log.warn(`[embedding:google] 失敗（graceful skip）：${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`[embedding:google] 失敗（graceful skip）：${msg}`);
+      healthRecordFailure("embedding:google", msg);
       return { vectors: [], dim: this._cachedDim };
     }
   }

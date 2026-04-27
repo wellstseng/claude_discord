@@ -32,9 +32,10 @@ import { initRegistrationManager } from "../accounts/registration.js";
 import { initIdentityLinker } from "../accounts/identity-linker.js";
 import { initProjectManager, type ProjectManager } from "../projects/manager.js";
 import { initMemoryEngine, type MemoryEngine } from "../memory/engine.js";
-import { initOllamaClient } from "../ollama/client.js";
-import { initEmbeddingProvider } from "../vector/embedding-provider.js";
-import { initExtractionProvider } from "../memory/extraction-provider.js";
+import { initOllamaClient, getOllamaClient } from "../ollama/client.js";
+import { initEmbeddingProvider, hasEmbeddingProvider, getEmbeddingProvider } from "../vector/embedding-provider.js";
+import { initExtractionProvider, hasExtractionProvider, getExtractionProvider } from "../memory/extraction-provider.js";
+import { reportStartupSummary } from "./health-monitor.js";
 import { initRateLimiter, getRateLimiter, type RateLimiter } from "./rate-limiter.js";
 import { renameSessions } from "../migration/rename-sessions.js";
 import { initTraceStore, getTraceStore, getTraceContextStore } from "./message-trace.js";
@@ -365,6 +366,9 @@ export async function initPlatform(
     log.info(`[platform] Hook 系統：config=${(config.hooks ?? []).length}, global-fs=${scanRes.global.length}, agent-fs=${totalByAgent}`);
   }
 
+  // ── 12.5 Startup Health Check（fail-loud：驗證關鍵組件實際可用）──────────
+  await runStartupHealthCheck(config);
+
   _ready = true;
   log.info(`[platform] 初始化完成 providers=${Object.keys(config.providers).join(",")}`);
 
@@ -384,6 +388,107 @@ export async function initPlatform(
       log.warn(`[platform] 摘要注入失敗：${err instanceof Error ? err.message : String(err)}`);
     }
   }, 2000);
+}
+
+// ── Startup Health Check ─────────────────────────────────────────────────────
+
+/**
+ * 對啟動時關鍵組件做實際 verify，集中印出紅綠燈摘要。
+ * 失敗的不會 throw（保留 graceful，確保 dashboard 仍可訪問），
+ * 但會在 log 大聲喊 + 寫入 health-monitor，後續可被 dashboard / Discord 通報訂閱。
+ */
+async function runStartupHealthCheck(config: BridgeConfig): Promise<void> {
+  const items: Array<{ name: string; ok: boolean; detail: string }> = [];
+
+  // Ollama backend reachability + 各 model 存在性
+  if (config.ollama?.enabled !== false && config.ollama) {
+    try {
+      const client = getOllamaClient();
+      const results = await client.verifyAllModels();
+      for (const r of results) {
+        // backend 連線本身（用 llm verify 的結果代表）
+        const backendOk = r.llm.ok || (r.embedding?.ok ?? false);
+        if (!backendOk && r.llm.error?.includes("失敗")) {
+          items.push({ name: `ollama:${r.backend}`, ok: false, detail: `host ${r.host} 無法連線（${r.llm.error}）` });
+          continue;
+        }
+        items.push({
+          name: `ollama:${r.backend}:llm`,
+          ok: r.llm.ok,
+          detail: r.llm.ok ? `model ${r.llm.model} @ ${r.host}` : (r.llm.error ?? "unknown"),
+        });
+        if (r.embedding) {
+          items.push({
+            name: `ollama:${r.backend}:embedding`,
+            ok: r.embedding.ok,
+            detail: r.embedding.ok ? `model ${r.embedding.model} @ ${r.host}` : (r.embedding.error ?? "unknown"),
+          });
+        }
+      }
+    } catch (err) {
+      items.push({
+        name: "ollama",
+        ok: false,
+        detail: `OllamaClient 未初始化或失敗：${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  // Embedding provider verify（如果走非 Ollama provider 由 provider 自己決定）
+  if (hasEmbeddingProvider()) {
+    try {
+      const provider = getEmbeddingProvider();
+      if (provider.verify) {
+        const r = await provider.verify();
+        items.push({
+          name: `embedding-provider:${provider.providerName}`,
+          ok: r.ok,
+          detail: r.ok ? `${provider.modelName}（verify 通過）` : (r.error ?? "verify 失敗"),
+        });
+      } else {
+        items.push({
+          name: `embedding-provider:${provider.providerName}`,
+          ok: true,
+          detail: `${provider.modelName}（無 verify 實作，假設 ok）`,
+        });
+      }
+    } catch (err) {
+      items.push({
+        name: "embedding-provider",
+        ok: false,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Extraction provider verify
+  if (hasExtractionProvider()) {
+    try {
+      const provider = getExtractionProvider();
+      if (provider.verify) {
+        const r = await provider.verify();
+        items.push({
+          name: `extraction-provider:${provider.providerName}`,
+          ok: r.ok,
+          detail: r.ok ? `${provider.modelName}（verify 通過）` : (r.error ?? "verify 失敗"),
+        });
+      } else {
+        items.push({
+          name: `extraction-provider:${provider.providerName}`,
+          ok: true,
+          detail: `${provider.modelName}（無 verify 實作，假設 ok）`,
+        });
+      }
+    } catch (err) {
+      items.push({
+        name: "extraction-provider",
+        ok: false,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  reportStartupSummary(items);
 }
 
 // ── 子系統存取 ────────────────────────────────────────────────────────────────

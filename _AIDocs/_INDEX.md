@@ -1,6 +1,6 @@
 # CatClaw _AIDocs 知識庫索引
 
-> 建立日期：2026-03-18 | 最近更新：2026-04-23 | 專案：catclaw
+> 建立日期：2026-03-18 | 最近更新：2026-04-27 | 專案：catclaw
 
 ## 專案簡介
 
@@ -37,6 +37,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | Hooks | `src/hooks/` | Hook 系統：36 events + scanner + runner + defineHook SDK + folder-convention 掛載 + fs.watch 熱重載 |
 | Safety | `src/safety/` | 安全攔截：guard + collab-conflict |
 | Workflow | `src/workflow/` | 工作流引擎：rut/oscillation/fix-escalation/sync/wisdom/failure-detector |
+| Health Monitor | `src/core/health-monitor.ts` | Component-level fail-loud + degraded/critical/recovered 升級與通報 |
 | Cron | `src/cron.ts` | 排程服務（cron/every/at），croner 驅動 |
 | MCP | `src/mcp/` | MCP client（rich content 支援）+ Discord MCP server |
 | Computer Use MCP | `mcp/computer-use/` | 獨立 MCP Server：螢幕截圖（等比縮放+座標自動換算）/鍵鼠操控（拖曳插值）/視窗管理/測試框架（9 tools） |
@@ -84,6 +85,7 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | [modules/hooks.md](modules/hooks.md) | `src/hooks/` | Hook 系統（36 events + defineHook SDK + folder-convention） | 2026-04-15 |
 | [modules/safety.md](modules/safety.md) | `src/safety/` | 安全攔截 | 2026-04-05 |
 | [modules/workflow.md](modules/workflow.md) | `src/workflow/` | 工作流引擎 | 2026-04-05 |
+| [modules/health-monitor.md](modules/health-monitor.md) | `src/core/health-monitor.ts` | Component fail-loud + 通報 | 2026-04-27 |
 | [modules/acp.md](modules/acp.md) | `src/acp.ts` | Claude CLI spawn（Legacy，僅 cron.ts 使用） | 2026-04-13 |
 | [modules/permission-gate.md](modules/permission-gate.md) | `src/accounts/permission-gate.ts` | 權限閘門（Tier + allow/deny） | 2026-04-06 |
 | [modules/ollama-provider.md](modules/ollama-provider.md) | `src/providers/ollama.ts` | Ollama 本地 LLM Provider | 2026-04-06 |

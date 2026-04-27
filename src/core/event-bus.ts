@@ -124,6 +124,12 @@ export interface CatClawEvents {
 
   // ── Log Monitor ──
   "log:error":           [snapshot: { timestamp: string; message: string; context: string; snapshotPath: string }];
+
+  // ── Health Monitor（component-level fail-loud + escalation）──
+  "health:startup":      [results: Array<{ name: string; ok: boolean; detail: string }>];
+  "health:degraded":     [name: string, error: string];
+  "health:critical":     [name: string, error: string];
+  "health:recovered":    [name: string];
 }
 
 // ── EventBus 實作 ─────────────────────────────────────────────────────────
