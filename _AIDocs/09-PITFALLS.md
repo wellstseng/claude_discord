@@ -1,4 +1,4 @@
-# 09 — 陷阱速查（22 項）
+# 09 — 陷阱速查（25 項）
 
 > 開發與維護時容易踩到的坑，全部從實際除錯經驗總結。
 
@@ -169,8 +169,12 @@ const ch = await client.channels.fetch(channelId);
 | catclaw.json trailing comma 導致 hot-reload 失敗 | §19 | JSONC strip 後仍需合法 JSON |
 | cron exec 輸出亂碼（cp950） | §20 | 注入 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1` |
 | cron exec 失敗時頻道無回報 | §21 | catch 區塊加 Discord 錯誤訊息發送 |
+| HookEvent 新增後腳本不載入 | §22 | types/metadata-parser/tool description 三處同步 |
+| Ollama embed/extract 看似 ok 但 0 萃取（12 天 silent） | §23 | model name 跟 `ollama list` 完整對齊 + verify? + health-monitor |
+| 插話後 user 看不到回應 | §24 | soft-inject + framing「當作新請求對待，不要 end_turn」 |
+| codex-oauth token 跟 Codex CLI 互踩失效 | §25 | 共用 `~/.codex/auth.json` + 支援 nested + JWT exp |
 
-> §18-21 編號已依序排列（2026-04-06 修正）
+> §18-21 編號已依序排列（2026-04-06 修正）；§22 為 hook 系統 32 events 擴充後新增（2026-04-15）；§23-25 為 4-22~4-27 實戰陷阱補登
 
 ## 18. cron exec 在 Windows 失敗（spawn sh ENOENT → cmd 路徑不通）
 
@@ -214,3 +218,40 @@ const ch = await client.channels.fetch(channelId);
 1. `types.ts` — HookEvent union + Input interface
 2. `metadata-parser.ts` — `VALID_EVENTS` Set
 3. tool description — `hook_register` event 參數範例 + 相關 tool description
+
+## 23. Embedding / Extraction 模型 name 對不上 → silent fail 12 天
+
+**現象**：catclaw.json 設 `qwen3-embedding:8b` 但本機只裝 `qwen3-embedding:latest`；啟動時只印「初始化 provider」看似 ok，後續 graceful skip 一直靜默失敗，**12 天無人發現，memory-extractor 22 次 flush 無一次成功萃取**。
+
+**原因**：早期實作把 Ollama API 失敗都當 graceful skip（log.warn + 回空陣列）；model 名 mismatch 在 catclaw 層完全看不到。
+
+**解法（4-26 三層 fail-loud + 通報）**：
+1. **L1 startup verify** — `OllamaClient.verifyModel/verifyAllModels()` 用 `POST /api/show` 驗 model 存在；`Embedding/ExtractionProvider` 介面新增 `verify?()`；`platform.ts` 在 `_ready=true` 之前呼叫 `runStartupHealthCheck()` 印紅綠燈摘要
+2. **L2 health-monitor** — 新增 `core/health-monitor.ts`，門檻 degraded=2 / critical=5 連續失敗，emit `health:degraded`/`critical`/`recovered`，critical 1 小時節流
+3. **L3 通報** — `GET /api/health` endpoint + Dashboard 「🩺 Component Health」面板（紅綠燈 + 表格 + startup details）+ `index.ts` 訂閱 health:* event 推 Discord errorNotifyChannel
+
+**附加**：embedding 模型漂移時 dashboard 警示 banner 提示重建索引；`upsert` 自動處理 dim mismatch（drop + rebuild 該 namespace）。
+
+## 24. 插話 hard-abort 造成 user prompt 與已組裝回覆雙雙丟失
+
+**現象**：使用者在 turn 進行中插話，新訊息進來 → 舊 turn 直接 abort，**user 看不到任何回應**（既有的中間文字也丟了，新 prompt 也沒處理）。
+
+**原因**：原邏輯偵測到新訊息就 abort 當前 turn，未保留 in-flight 的 user prompt 與 partial assistant content。
+
+**解法（4-23 + 4-27 兩階段）**：
+- **階段一（4-23）soft-inject**：當 turn 結束前注入 `[使用者新訊息（turn 進行中插入）]`，模型自行評估是否轉向；abort 路徑保留但**不丟 user prompt 與已生成內容**
+- **階段二（4-27）framing 強化**：原本 `[使用者插話] {msg}` 模型常誤讀為「補充 context」而非「new instruction」，注入後仍直接 `end_turn`（trace 2aa73911 案例：使用者插話「HR 系統」後 Loop #8 stop=end_turn 提早收場）。改為 `[使用者新訊息（turn 進行中插入）] {msg}` + 明確指示「**當作 user 新請求對待，重新評估方向**，除非任務真正完成否則不要 end_turn」
+
+**判斷準則**：插話 = 在當前 turn 還沒 end 之前進來的新訊息，**永遠當作新指令**而非追加說明。
+
+## 25. codex-oauth 跟 Codex CLI 共用 `~/.codex/auth.json` 互踩 refresh
+
+**現象**：catclaw 跟 Codex CLI 各自 refresh OAuth token，後 refresh 的會讓前者的 access token 失效；catclaw 也讀不到 Codex CLI 寫的 nested 格式。
+
+**原因**：catclaw 早期版本自有 codex-oauth credential 檔，跟 Codex CLI 各寫各的 → 兩邊互相 invalidate。
+
+**解法（4-23）**：
+- catclaw 跟 Codex CLI 共用 `~/.codex/auth.json`（避免雙方 refresh 互踩）
+- 支援 Codex CLI **nested auth.json 格式**（`tokens` 物件包 `id_token` / `access_token` / `refresh_token`）+ **JWT exp 解析**（不用 `expires_at` 欄位，直接從 JWT payload `exp` claim 推）
+- cli-bridge codex approval decision enum 改用新 API + 繼承全域 `~/.codex` 設定
+- `codex.sandboxPolicy.networkAccess` 型別應為 `boolean`（早期文件寫 string）
