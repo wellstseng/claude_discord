@@ -13,10 +13,11 @@ Discord-based AI Agent platform with full development capabilities — multi-tur
 | **Skills** | 35 builtin skills (32 command-type + 3 prompt-type) — config, session, account, status, restart, plan, remind, hook, and more |
 | **Hook System** | 36 events (10 categories: Lifecycle / Turn / Memory / Subagent / Context / CLI Bridge / File+Command / File Watcher / Error / Platform) + folder-convention mount + fs.watch hot-reload + TS/JS/sh/ps1 runtimes + defineHook SDK |
 | **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / acp-cli / cli-* + circuit-breaker failover |
-| **Memory** | Four-layer engine (Global / Project / Account / Agent) — vector recall + keyword search + auto-extraction + consolidation |
-| **Context Engine** | Decay (progressive decay + externalization) / Compaction (LLM structured summary) / Overflow Hard Stop — three strategies + anti-hallucination honest stubs + turn cap warning |
+| **Memory** | Four-layer engine (Global / Project / Account / Agent) — vector recall + keyword search + auto-extraction + consolidation + **embedding model drift detection + auto dim-mismatch rebuild** |
+| **Context Engine** | Decay (progressive decay + externalization) / Compaction (LLM structured summary) / Overflow Hard Stop — three strategies + anti-hallucination honest stubs + turn cap warning + **Tool LRU eviction** (curbs cache cost from `tool_search` activation) |
 | **Accounts** | Registration, identity linking, 5-tier roles (guest/member/developer/admin/platform-owner), per-channel permission gate |
-| **Subagent** | Sub-task dispatch + Discord thread bridge + tracking |
+| **Subagent** | Sub-task dispatch + **Discord thread / paged-reply bridge** + tracking (auto-paginates results > 1980 chars with `_(i/total)_` markers) |
+| **Health Monitor** | Component-level fail-loud + startup health summary (red/green) + degraded/critical streak detection + Discord alerts |
 | **Scheduling** | cron / every / at — message, subagent, exec, claude-acp actions + `/cron` skill + agent isolation |
 | **Discord** | Streaming reply, debounce, thread inheritance, attachment handling, crash recovery, bot circuit breaker |
 | **Dashboard** | Web UI at port 8088 — REST API, message trace visualization, token usage, session management |
@@ -255,9 +256,10 @@ Web dashboard available at `http://localhost:8088` (when enabled).
 
 Features:
 - Session list and message history
-- Message trace visualization (7-stage pipeline)
+- Message trace visualization (7-stage pipeline) + **batch select / batch export to .zip / batch delete** + per-trace Markdown export (incl. messages before/after CE for audit of compaction summary quality)
 - Token usage tracking
-- Memory management
+- Memory management (embedding model drift triggers a banner prompting index rebuild)
+- 🩺 **Component Health** panel (red/green overview + consecutive failure counts + startup details)
 - Online config editor (incl. FileWatcher directory settings)
 - CLI Bridge status
 - Web Chat (cross-platform session sharing)

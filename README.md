@@ -13,10 +13,11 @@
 | **Skills** | 35 builtin skills（32 command-type + 3 prompt-type）— config、session、account、status、restart、plan、remind、hook 等 |
 | **Hook 系統** | 36 events（10 類，Lifecycle/Turn/Memory/Subagent/Context/CLIBridge/FileCmd/FileWatcher/Error/Platform）+ folder-convention 掛載 + fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK |
 | **Multi-Provider** | claude-api / ollama / openai-compat / codex-oauth / acp-cli / cli-* + circuit-breaker failover |
-| **記憶引擎** | 四層記憶（Global / Project / Account / Agent）— 向量 recall + 關鍵字搜尋 + 自動萃取 + 晉升/衰減 |
-| **Context Engine** | Decay（漸進衰減+外部化）/ Compaction（LLM 結構化摘要）/ Overflow Hard Stop 三策略 + anti-hallucination stub 誠實化 + turn cap warning |
+| **記憶引擎** | 四層記憶（Global / Project / Account / Agent）— 向量 recall + 關鍵字搜尋 + 自動萃取 + 晉升/衰減 + **embedding 模型漂移偵測 + 自動 dim mismatch 重建** |
+| **Context Engine** | Decay（漸進衰減+外部化）/ Compaction（LLM 結構化摘要）/ Overflow Hard Stop 三策略 + anti-hallucination stub 誠實化 + turn cap warning + **Tool LRU eviction**（治本 tool_search 活化的 cache 累計成本） |
 | **帳號權限** | 註冊、identity linking、5 級角色（guest/member/developer/admin/platform-owner）、per-channel 權限閘門 |
-| **Subagent** | 子任務分派 + Discord thread bridge + 追蹤 |
+| **Subagent** | 子任務分派 + **Discord thread / 分段 reply bridge** + 追蹤（>1980 字自動分頁帶 `_(i/total)_` 標記） |
+| **Health Monitor** | Component-level fail-loud + 啟動健康總覽（紅綠燈）+ degraded/critical 連續失敗偵測 + Discord 通報 |
 | **排程** | cron / every / at — message、subagent、exec、claude-acp 動作 + `/cron` skill 動態管理 + agent 隔離 |
 | **Discord** | 串流回覆、debounce、thread 繼承、附件處理、crash recovery、bot circuit breaker |
 | **Dashboard** | Web UI（port 8088）— REST API、訊息追蹤視覺化、token 用量、session 管理 |
@@ -256,9 +257,10 @@ Web 監控面板，預設位於 `http://localhost:8088`。
 
 功能：
 - Session 列表與訊息歷史
-- 訊息追蹤視覺化（7 階段管線）
+- 訊息追蹤視覺化（7 階段管線）+ **Trace 批次選取 / 批次匯出 .zip / 批次刪除** + 單筆 Markdown 匯出（含 CE 前後 messages，可審計 compaction 摘要品質）
 - Token 用量統計
-- 記憶管理
+- 記憶管理（embedding 模型漂移時警示 banner 提示重建索引）
+- 🩺 **Component Health** 面板（紅綠燈總覽 + 連續失敗計數 + startup details）
 - 線上 Config 編輯（含 FileWatcher 目錄監聽設定）
 - CLI Bridge 狀態
 - Web Chat（跨平台 session 共用）
