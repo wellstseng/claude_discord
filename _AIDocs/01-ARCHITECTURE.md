@@ -1,6 +1,6 @@
 # 01 — 架構概覽
 
-> 最近更新：2026-04-18
+> 最近更新：2026-04-27
 
 ## 專案目標
 
@@ -8,7 +8,7 @@
 
 - **Agent Loop（一軌制）**：CatClaw 自有 agent loop 控制所有 tool，LLM 只負責思考
 - **HTTP API 直連**：透過 pi-ai `streamSimpleAnthropic` 直接呼叫 Claude API，不 spawn CLI
-- **Provider 抽象**：claude-api / ollama / openai-compat / codex-oauth，hot-swap via registry
+- **Provider 抽象**：claude-api / ollama / openai-compat / codex-oauth / acp-cli / cli-claude / cli-gemini / cli-codex，hot-swap via registry，circuit-breaker + failover
 - **models.json**：model 設定唯一真相來源（per-agent，位於 agents/{agentId}/models.json）
 - **四層記憶**：Global + Project + Account + Agent（atom memory + LanceDB vector search）
 - **權限系統**：5 級角色（guest → platform-owner）+ Tool Tier 物理移除
@@ -21,8 +21,8 @@
 | 套件 | 用途 |
 |------|------|
 | `discord.js` ^14.16.3 | Discord Gateway 連線、訊息收發 |
-| `@mariozechner/pi-ai` 0.58.0 | LLM HTTP API 串流（streamSimpleAnthropic） |
-| `@mariozechner/pi-agent-core` 0.58.0 | Agent 核心工具 |
+| `@mariozechner/pi-ai` 0.70.2 | LLM HTTP API 串流（streamSimpleAnthropic）+ 內建模型清單 |
+| `@mariozechner/pi-agent-core` 0.70.2 | Agent 核心工具 |
 | `@lancedb/lancedb` ^0.27.1 | 向量資料庫（記憶 recall） |
 | `apache-arrow` ^18.1.0 | LanceDB 底層依賴 |
 | `croner` ^10.0.1 | Cron 排程表達式解析 |

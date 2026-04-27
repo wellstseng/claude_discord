@@ -1,6 +1,6 @@
 # 00 — CatClaw 全貌
 
-> 版本：v2.0.0 | 最近更新：2026-04-18
+> 版本：v2.0.0 | 最近更新：2026-04-27
 
 ## 是什麼
 
@@ -8,7 +8,7 @@ CatClaw = **Codex 版 Claude Code CLI + 多人 AI 開發平台**。
 以 Discord 為前端，提供等同 Claude Code 的完整開發能力。
 
 - **Multi-turn Agent Loop**：tool 迴圈 + output token recovery + auto-compact
-- **多 Provider**：Claude API / Ollama / OpenAI-compat / ACP CLI，failover 自動切換
+- **多 Provider**：Claude API / Codex OAuth / Ollama / OpenAI-compat / ACP CLI / CLI-Claude / CLI-Gemini / CLI-Codex，circuit-breaker + failover 自動切換
 - **25 builtin tools**：file read/write/edit、run_command、search、memory、subagent、hook 管理等
 - **35 builtin skills**（32 command-type + 3 prompt-type）：Discord 指令層（/think、/mode、/use、/stop、/plan、/remind、/hook 等）
 - **36-event hook 系統**：folder-convention 掛載（global + per-agent）+ fs.watch 熱重載 + TS/JS/sh/ps1 多 runtime + defineHook SDK
@@ -135,7 +135,12 @@ src/
 │   ├── session-snapshot.ts  (Session snapshot 儲存)
 │   ├── task-store.ts        (Task 持久化)
 │   ├── task-ui.ts           (Discord Components v2 Task UI)
-│   └── tool-log-store.ts    (Tool 執行日誌)
+│   ├── tool-log-store.ts    (Tool 執行日誌)
+│   ├── health-monitor.ts    (Component-level fail-loud + degraded/critical/recovered 通報)
+│   ├── log-error-monitor.ts (PM2 log error 偵測 + Discord 通知)
+│   ├── restart-history.ts   (主進程啟動/關閉歷史 + unexpected_termination 偵測)
+│   ├── agent-skill-loader.ts (Agent 自建 skill 載入)
+│   └── agent-types.ts       (Agent 系統型別定義)
 ├── providers/               (LLM Provider 抽象層)
 │   ├── registry.ts          (Provider 註冊 + failover 解析)
 │   ├── base.ts              (Provider 介面 + 通用型別)
@@ -154,13 +159,15 @@ src/
 │   └── builtin/             (file read/write/edit、run_command、search、hook 管理等)
 ├── skills/                  (35 builtin skills)
 │   ├── registry.ts          (Skill 註冊 + trigger match)
-│   ├── builtin/             (25 TS skills)
+│   ├── builtin/             (26 TS files → 32 command-type skills)
 │   └── builtin-prompt/      (3 prompt skill 子目錄：commit/ discord/ pr/，各含 SKILL.md)
 ├── memory/                  (四層記憶引擎)
 │   ├── engine.ts            (recall + extract + consolidate 統合)
 │   ├── recall.ts / extract.ts / consolidate.ts
 │   ├── atom.ts / context-builder.ts / session-memory.ts
-│   └── write-gate.ts / episodic.ts / index-manager.ts
+│   ├── write-gate.ts / episodic.ts / index-manager.ts
+│   ├── extraction-provider.ts (Ollama / Anthropic / OpenAI 萃取 provider 抽象)
+│   └── memory-api.ts        (atom CRUD + recall-test + stats，供 Dashboard)
 ├── accounts/                (帳號/角色/權限)
 │   ├── registry.ts / permission-gate.ts / role-tool-sets.ts
 │   └── identity-linker.ts / registration.ts
@@ -171,7 +178,7 @@ src/
 │   ├── metadata-parser.ts / sdk.ts / index.ts
 │   └── file-watcher.ts     (檔案變更監控 → hook 觸發)
 ├── vector/                  (向量搜尋)
-│   ├── embedding.ts / lancedb.ts
+│   ├── embedding.ts / lancedb.ts / embedding-provider.ts (Ollama / Google embedding 抽象)
 ├── ollama/                  (Ollama client)
 │   └── client.ts
 ├── workflow/                (工作流自動化)
@@ -180,10 +187,18 @@ src/
 ├── discord/                 (Discord 擴充)
 │   ├── inbound-history.ts
 │   └── bot-circuit-breaker.ts (Bot-to-Bot 對話防呆 circuit breaker)
+├── cli-bridge/              (CLI Bridge 持久 process 模組)
+│   ├── bridge.ts            (生命週期管理 + drainInboundHistoryOnStartup)
+│   ├── process.ts / reply.ts / stdout-log.ts / types.ts
+│   ├── channel-naming.ts    (頻道名循環尾綴剝除)
+│   ├── discord-sender.ts    (SharedBotPool + per-channel proxy)
+│   ├── index.ts             (跨頻道 mention 路由)
+│   └── providers/           (codex-oauth / cli-* 各 provider 適配)
+├── migration/               (設定檔升級)
+├── projects/                (專案管理)
+│   └── manager.ts
 ├── mcp/                     (MCP 整合)
 │   ├── client.ts / discord-server.ts
-└── projects/                (專案管理)
-    └── manager.ts
 ```
 
 ---
