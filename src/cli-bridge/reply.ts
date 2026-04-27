@@ -221,6 +221,12 @@ export async function handleCliBridgeReply(
 
   let buffer = "";
   let thinkingBuffer = "";
+  /**
+   * mid-stream split 已送出的原始 buffer 內容累計。
+   * 用於 result 分支去重 — 避免 LLM 在 split 後重發 delta 導致重複送出。
+   * 保守原則：只在完全重疊或開頭重疊時 dedup，否則照送（不丟訊息）。
+   */
+  let sentRaw = "";
   const state = { editMsg: null as Message | null };
   let editTimer: ReturnType<typeof setTimeout> | null = null;
   let editBusy = false;
@@ -372,6 +378,28 @@ export async function handleCliBridgeReply(
     }
   }
 
+  /**
+   * 去除已透過 mid-stream split 送出的內容，避免 result flush 重複送。
+   * 保守策略：
+   *   - 完全相同 / sentRaw 結尾包含 text → 全部已送，回 ""
+   *   - text 開頭包含 sentRaw → 切掉前綴，送差異部分
+   *   - sentRaw 結尾跟 text 開頭有重疊 → 切掉重疊段
+   *   - 都不符合 → 原樣回（寧可重複也不丟訊息）
+   */
+  function stripDuplicate(text: string): string {
+    if (!sentRaw || !text) return text;
+    if (sentRaw === text) return "";
+    if (sentRaw.endsWith(text)) return "";
+    if (text.startsWith(sentRaw)) return text.slice(sentRaw.length);
+    const maxOverlap = Math.min(sentRaw.length, text.length);
+    for (let n = maxOverlap; n > 0; n--) {
+      if (sentRaw.endsWith(text.slice(0, n))) {
+        return text.slice(n);
+      }
+    }
+    return text;
+  }
+
   // ── Ack reaction（始終用原始訊息的 reaction）──
   void originalMessage.react("⏳").catch(() => {});
 
@@ -409,6 +437,7 @@ export async function handleCliBridgeReply(
         // 超過 TEXT_LIMIT → 送出當前 buffer，開新 edit message
         if (buffer.length > TEXT_LIMIT - 100) {
           cancelEditTimer();
+          const rawSent = buffer;
           const content = closeFenceIfOpen(buffer);
           const chunks = splitForDiscord(content);
           for (let i = 0; i < chunks.length; i++) {
@@ -421,6 +450,7 @@ export async function handleCliBridgeReply(
               }
             } catch (e) { log.debug(`[cli-bridge-reply] chunk send/edit 失敗：${e instanceof Error ? e.message : String(e)}`); }
           }
+          sentRaw += rawSent;
           buffer = "";
           state.editMsg = null;
           await initEditMsg();
@@ -518,50 +548,76 @@ export async function handleCliBridgeReply(
           thinkingBuffer = "";
         }
 
-        // 最後 flush
+        // 最後 flush — 與 mid-stream split 去重，避免 LLM 重發 delta 導致重複送出
         cancelEditTimer();
         const hasFinalText = buffer.trim().length > 0;
         if (hasFinalText && intermediateStyle !== "normal" && intermediateMsg && state.editMsg === intermediateMsg) {
           // intermediate 模式：最終回覆是新文字，不要 edit 中間訊息，送新訊息
-          const chunks = splitForDiscord(closeFenceIfOpen(buffer));
-          let allOk = true;
-          for (const chunk of chunks) {
-            const ok = await retrySend(async () => { await sendText(chunk); });
-            if (!ok) allOk = false;
+          const dedup = stripDuplicate(closeFenceIfOpen(buffer));
+          if (!dedup.trim()) {
+            log.debug(`[cli-bridge-reply] turn=${turnId.slice(0, 8)} final flush 全為已送內容，跳過 (intermediate)`);
+            discordDelivery = "success";
+          } else {
+            const chunks = splitForDiscord(dedup);
+            let allOk = true;
+            for (const chunk of chunks) {
+              const ok = await retrySend(async () => { await sendText(chunk); });
+              if (!ok) allOk = false;
+            }
+            discordDelivery = allOk ? "success" : "failed";
           }
-          discordDelivery = allOk ? "success" : "failed";
         } else if (hasFinalText && state.editMsg) {
           const final = closeFenceIfOpen(buffer);
+          const dedup = stripDuplicate(final);
           const msg = state.editMsg;
-          const chunks = splitForDiscord(final);
-          let allOk = true;
-          for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i]!;
-            const ok = await retrySend(async () => {
-              if (i === 0) await sender.edit(msg, chunk);
-              else await sender.send(chunk);
-            });
-            if (!ok) allOk = false;
+          if (!dedup.trim()) {
+            log.debug(`[cli-bridge-reply] turn=${turnId.slice(0, 8)} final flush 全為已送內容，跳過 (editMsg)`);
+            // 把 placeholder "..." 清掉，避免畫面殘留
+            try { await msg.delete(); } catch (e) { log.debug(`[cli-bridge-reply] 清除 placeholder 失敗：${e instanceof Error ? e.message : String(e)}`); }
+            discordDelivery = "success";
+          } else {
+            const chunks = splitForDiscord(dedup);
+            let allOk = true;
+            for (let i = 0; i < chunks.length; i++) {
+              const chunk = chunks[i]!;
+              const ok = await retrySend(async () => {
+                if (i === 0) await sender.edit(msg, chunk);
+                else await sender.send(chunk);
+              });
+              if (!ok) allOk = false;
+            }
+            discordDelivery = allOk ? "success" : "failed";
+            discordMessageId = msg.id;
           }
-          discordDelivery = allOk ? "success" : "failed";
-          discordMessageId = msg.id;
         } else if (hasFinalText) {
-          const chunks = splitForDiscord(buffer);
-          let allOk = true;
-          for (const chunk of chunks) {
-            const ok = await retrySend(async () => { await sendText(chunk); });
-            if (!ok) allOk = false;
+          const dedup = stripDuplicate(buffer);
+          if (!dedup.trim()) {
+            log.debug(`[cli-bridge-reply] turn=${turnId.slice(0, 8)} final flush 全為已送內容，跳過 (no editMsg)`);
+            discordDelivery = "success";
+          } else {
+            const chunks = splitForDiscord(dedup);
+            let allOk = true;
+            for (const chunk of chunks) {
+              const ok = await retrySend(async () => { await sendText(chunk); });
+              if (!ok) allOk = false;
+            }
+            discordDelivery = allOk ? "success" : "failed";
           }
-          discordDelivery = allOk ? "success" : "failed";
         } else if (evt.text) {
           // buffer 為空但 result 帶有文字（常見於 permission deny 後 CLI 直接結束 turn）
-          const chunks = splitForDiscord(evt.text);
-          let allOk = true;
-          for (const chunk of chunks) {
-            const ok = await retrySend(async () => { await sendText(chunk); });
-            if (!ok) allOk = false;
+          const dedup = stripDuplicate(evt.text);
+          if (!dedup.trim()) {
+            log.debug(`[cli-bridge-reply] turn=${turnId.slice(0, 8)} result.text 全為已送內容，跳過`);
+            discordDelivery = "success";
+          } else {
+            const chunks = splitForDiscord(dedup);
+            let allOk = true;
+            for (const chunk of chunks) {
+              const ok = await retrySend(async () => { await sendText(chunk); });
+              if (!ok) allOk = false;
+            }
+            discordDelivery = allOk ? "success" : "failed";
           }
-          discordDelivery = allOk ? "success" : "failed";
         } else if (evt.is_error) {
           // 無文字但標記為錯誤 → 送通用提示
           await retrySend(async () => { await sendText("⚠️ turn 結束（無回應文字）"); });
