@@ -1,6 +1,6 @@
 # catclaw 設定參考
 
-> 根據 `catclaw.example.json`、`src/core/config.ts` 整理，2026-04-18
+> 根據 `catclaw.example.json`、`src/core/config.ts` 整理，2026-04-27
 >
 > V2 三層分離架構：模型定義（agentDefaults/modelsConfig）、認證（auth-profile.json）、路由（providerRouting）各自獨立
 
@@ -145,11 +145,11 @@ V2 三層分離的 Agent 預設模型設定。格式：`"provider/model"`，如 
 
 ## modelsConfig
 
-自訂 Provider 模型目錄（可選）。內建 provider（anthropic、openai、openai-codex）自動載入。
+自訂 Provider 模型目錄（可選）。**內建模型清單從 `@mariozechner/pi-ai` 動態抽取**（`buildBuiltinProviders()` 啟動時把 pi-ai 全部 provider × 全部 model 攤平），pi-ai 升版重啟自動帶新 provider / 新 model。catclaw 沒對應 LLMProvider impl 的 api，registry build 時會 skip，但仍出現在清單供 Dashboard 顯示。
 
 ```jsonc
 "modelsConfig": {
-  "mode": "merge",                    // "merge"（內建+自訂合併，預設） | "replace"（只用自訂）
+  "mode": "merge",                    // "merge"（pi-ai 內建+自訂合併，自訂優先，預設） | "replace"（只用自訂）
   "providers": {
     "ollama": {
       "baseUrl": "http://localhost:11434",
@@ -169,6 +169,8 @@ V2 三層分離的 Agent 預設模型設定。格式：`"provider/model"`，如 
   }
 }
 ```
+
+> **Dashboard 模型快捷**：模型選擇面板依「auth-profile.json 中的 provider」動態分組，跟著 auth profiles 變動；每組列出 models.json 該 provider 全部模型（不再寫死）。
 
 ---
 
@@ -342,7 +344,7 @@ Session 持久化設定。
 
 ## memoryPipeline
 
-記憶管線設定（embedding / extraction / reranker 後端抽象層）。
+記憶管線設定（embedding / extraction / reranker 三 provider 抽象層，記憶系統與 Ollama 解耦）。
 
 ```jsonc
 "memoryPipeline": {
@@ -365,7 +367,20 @@ Session 持久化設定。
 }
 ```
 
-> 若未設定 `memoryPipeline` 但有設定 `ollama`，系統自動從 `ollama.primary` 推導。
+### Provider 對應 implementation
+
+| 區塊 | type union | 實作位置 |
+|------|-----------|----------|
+| `embedding.provider` | `"ollama" \| "google" \| "openai" \| "voyage"` | `src/vector/embedding-provider.ts`（Ollama / Google 已實作；OpenAI / Voyage 為 stub） |
+| `extraction.provider` | `"ollama" \| "anthropic" \| "openai"` | `src/memory/extraction-provider.ts`（Anthropic auto-resolve API key from auth-profile.json） |
+| `reranker.provider` | `"ollama" \| "cohere" \| "none"` | 預設 `none` |
+
+### 行為要點
+
+- 若未設定 `memoryPipeline` 但有設定 `ollama`，系統自動從 `ollama.primary` 推導
+- 啟動時透過 `verify?()` 驗 model 真的可用，失敗在 startup health summary 標紅（fail-loud，反「silent skip」）
+- Embedding 模型漂移時：dashboard 警示 banner 提示重建索引；`upsert` 自動處理 dim mismatch（drop+rebuild 該 namespace）
+- `Embedding/Extraction` graceful skip 點接 `health-monitor` record，degraded=連續 2 次失敗、critical=連續 5 次失敗
 
 ---
 
@@ -375,27 +390,31 @@ Session 持久化設定。
 
 ```jsonc
 "ollama": {
-  "enabled": false,
+  "enabled": true,                  // 預設 true（4-26 起），未設 ollama block 視同啟用
   "primary": {
     "host": "http://localhost:11434",
     "model": "qwen3:14b",
     "embeddingModel": "qwen3-embedding:8b"
   },
-  "failover": false,               // primary 失敗時自動切換 fallback
+  "failover": false,                // primary 失敗時自動切換 fallback
   "thinkMode": false,               // 啟用 thinking 模式（qwen3 等）
   "numPredict": 512,                // 最大輸出 token
-  "timeout": 60000                   // 逾時毫秒
+  "timeout": 60000                  // 逾時毫秒
 }
 ```
 
 | 欄位 | config.ts 預設值 |
 |------|-----------------|
+| `enabled` | `true` |
 | `primary.host` | `"http://localhost:11434"` |
 | `primary.model` | `"qwen3:8b"` |
+| `primary.embeddingModel` | `"qwen3-embedding:8b"` |
 | `failover` | `true` |
 | `thinkMode` | `false` |
 | `numPredict` | `8192` |
 | `timeout` | `120000` |
+
+> **4-26 變動**：原預設 `enabled: false`，初次安裝後若 ollama 未開即 startup fail；改 `true` 後配合 health-monitor fail-loud + provider quota error 觸發 failover，初次安裝體驗順暢。
 
 ---
 
@@ -813,6 +832,7 @@ File Watcher 設定（監聽外部檔案變更）。
 | `memory.extract.accumTurnThreshold` | `5` | 累積 turn 閾值 |
 | `memory.extract.cooldownMs` | `120000` | 同 session 萃取冷卻 |
 | `memory.episodic.ttlDays` | `24` | |
+| `ollama.enabled` | `true` | 4-26 起預設啟用 |
 | `ollama.failover` | `true` | |
 | `ollama.numPredict` | `8192` | |
 | `ollama.timeout` | `120000` | |
