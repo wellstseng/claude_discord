@@ -2309,28 +2309,58 @@ async function loadModelsConfig() {
 
     if (activeProviders.length > 0) {
       html += '<div style="margin-bottom:12px;padding:10px;background:#161827;border-radius:6px;border:1px solid #2a2d3e">';
-      html += '<div style="font-size:0.78rem;color:#818cf8;font-weight:bold;margin-bottom:6px">📌 依憑證快速切換</div>';
+      html += '<div style="font-size:0.78rem;color:#818cf8;font-weight:bold;margin-bottom:6px">📌 依憑證快速切換 <span style="color:#666;font-weight:normal;font-size:0.72rem">（僅顯示各系列最新）</span></div>';
       for (const pid of activeProviders) {
         const prov = providers[pid];
         const models = (prov && prov.models) || [];
         if (models.length === 0) {
-          // models.json 沒這 provider 但有 auth profile → 顯示提示
           html += '<div style="margin-bottom:8px;font-size:0.75rem;color:#888"><strong style="color:#a78bfa">' + esc(pid) + '</strong>：models.json 沒對應 model 清單</div>';
           continue;
         }
-        html += '<div style="margin-bottom:8px"><strong style="font-size:0.78rem;color:#a78bfa">' + esc(pid) + '</strong> <span style="color:#666;font-size:0.7rem">(' + models.length + ' 個 model)</span>';
+        // ── 篩出「各系列最新版本」 ──────────────────────────────────────────────
+        // 1. 排除日期 snapshot（id 結尾 -YYYYMMDD）
+        // 2. 排除 -latest 別名（已被穩定 id 取代）
+        // 3. 排除 claude-3-* 舊世代（已被 4 系列取代）
+        // 4. 對 anthropic claude-{haiku|sonnet|opus}-* 抓系列名分組，取版本號最高
+        // 5. 對其他 provider 用 numeric 排序取最高（gpt-5.5 > gpt-5.4 > gpt-5.3...）
+        const filtered = models.filter(m => !/-\d{8}$/.test(m.id) && !/-latest$/.test(m.id) && !/^claude-3-/.test(m.id));
+        const families = {};
+        for (const m of filtered) {
+          let famKey;
+          const cm = m.id.match(/^(claude-(?:haiku|sonnet|opus))-/);
+          if (cm) {
+            famKey = cm[1]; // claude-haiku / claude-sonnet / claude-opus
+          } else {
+            // gpt-5.5 / gpt-5.4-mini / gpt-5.3-codex-spark 等：取「主版本前綴」當 family
+            // ⇒ 切到第一段不含主版本後變動的部分（去掉尾段版本號），再用 numeric 排序選最高
+            const gm = m.id.match(/^([a-zA-Z]+)-(\d+)/);
+            famKey = gm ? gm[1] + '-' + gm[2] : m.id; // gpt-5 / 其他無法歸類的 each-its-own
+          }
+          if (!families[famKey]) families[famKey] = [];
+          families[famKey].push(m);
+        }
+        const latestModels = [];
+        for (const fam of Object.values(families)) {
+          fam.sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }));
+          latestModels.push(fam[0]);
+        }
+        latestModels.sort((a, b) => a.id.localeCompare(b.id));
+
+        const totalCount = models.length;
+        const shownCount = latestModels.length;
+        html += '<div style="margin-bottom:8px"><strong style="font-size:0.78rem;color:#a78bfa">' + esc(pid) + '</strong> <span style="color:#666;font-size:0.7rem">(' + shownCount + ' / ' + totalCount + ' 顯示，舊版於下方詳細區)</span>';
         html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">';
-        for (const m of models) {
+        for (const m of latestModels) {
           const ref = pid + '/' + m.id;
           const alias = refToAlias[ref];
-          // primary 比對：直接設 ref，或設了 alias 而 alias 解析到此 ref
           const isCurrent = primary === ref || (alias && primary === alias);
           const btnClass = isCurrent ? 'btn btn-green btn-sm' : 'btn btn-sm';
-          // 點擊：有 alias 切到 alias（讓 primary 顯示簡稱），沒 alias 切到完整 ref
+          // 點擊：有 alias 切到 alias，沒 alias 切到完整 ref
           const target = alias || ref;
-          const label = alias || m.id;
-          const tooltip = alias ? (m.name || ref) + ' (alias=' + alias + ')' : (m.name || '');
-          html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + target + '&quot;)" title="' + esc(tooltip) + '" style="font-size:0.72rem;padding:2px 8px" ' + (isCurrent ? 'disabled' : '') + '>' + esc(label) + '</button>';
+          // label 一律用 model id（讓使用者看到實際 model）；alias 顯示在尾段小字
+          const aliasBadge = alias ? ' <span style="color:#34d399;font-size:0.65rem;margin-left:2px">@' + alias + '</span>' : '';
+          const tooltip = (m.name || '') + (alias ? ' (alias=' + alias + ')' : '');
+          html += '<button class="' + btnClass + '" onclick="switchPrimary(&quot;' + target + '&quot;)" title="' + esc(tooltip) + '" style="font-size:0.72rem;padding:2px 8px" ' + (isCurrent ? 'disabled' : '') + '>' + esc(m.id) + aliasBadge + '</button>';
         }
         html += '</div></div>';
       }
