@@ -40,7 +40,8 @@ function computeBuildInfo(): { commit: string; commitTime: string; startedAt: nu
   return { commit, commitTime, startedAt: Date.now() };
 }
 const BUILD_INFO = computeBuildInfo();
-import { getTraceStore, getTraceContextStore, MessageTrace, type MessageTraceEntry } from "./message-trace.js";
+import { getTraceStore, getTraceContextStore, MessageTrace, type MessageTraceEntry, type TraceContextSnapshot } from "./message-trace.js";
+import yazl from "yazl";
 import { readToolLog } from "./tool-log-store.js";
 import { getSessionManager } from "./session.js";
 import { getContextEngine } from "./context-engine.js";
@@ -596,6 +597,12 @@ label.cfg-toggle { min-width: 36px; }
         <option value="100">100</option>
       </select>
     </h2>
+    <div id="trace-bulk-bar" style="margin-top:8px;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;display:none;align-items:center;gap:8px;font-size:0.82rem">
+      <span id="trace-bulk-count" style="color:var(--fg2)">已選 0 筆</span>
+      <button class="btn btn-sm" onclick="bulkExportTraces()" style="margin-left:auto">📥 批次匯出 (.zip)</button>
+      <button class="btn btn-sm" onclick="bulkDeleteTraces()" style="background:var(--red2);color:#fff">🗑 批次刪除</button>
+      <button class="btn btn-sm" onclick="clearTraceSelection()">取消選取</button>
+    </div>
     <div id="trace-list" style="margin-top:8px"></div>
   </div>
 </div>
@@ -2507,6 +2514,7 @@ function _traceRowHtml(t) {
   const liveStyle = isLive ? 'background:rgba(255,200,0,0.08);' : '';
   const errorStyle = errorBadge ? 'background:rgba(220,38,38,0.06);' : '';
   let html = '<tr data-trace-id="' + t.traceId + '" style="border-bottom:1px solid var(--border);cursor:pointer;' + liveStyle + errorStyle + '" onclick="showTraceDetail(\\'' + t.traceId + '\\')">';
+  html += '<td style="padding:4px;text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="trace-row-checkbox" data-trace-id="' + t.traceId + '" onchange="onTraceCheckboxChange()"></td>';
   html += '<td style="padding:4px;color:var(--fg2)">' + ts + '</td>';
   const agentBadge = t.agentId ? ' <span style="background:#7c3aed;color:#fff;font-size:0.6rem;padding:0 3px;border-radius:3px">' + t.agentId + '</span>' : '';
   const copyBtn = '<span title="複製 Trace ID" style="cursor:pointer;font-size:0.7rem;margin-right:2px;opacity:0.5" onclick="event.stopPropagation();navigator.clipboard.writeText(\\'' + t.traceId + '\\').then(()=>{this.textContent=\\'✅\\';setTimeout(()=>this.textContent=\\'📋\\',800)})">📋</span>';
@@ -2530,6 +2538,7 @@ function _traceRowHtml(t) {
 const _traceTableHeader = (() => {
   const tip = (label, desc) => label + ' <span class="th-tip" title="' + desc + '">?</span>';
   let h = '<tr style="border-bottom:1px solid var(--border);color:var(--fg2)">';
+  h += '<th style="text-align:center;padding:4px;width:28px"><input type="checkbox" id="trace-select-all" title="全選" onchange="onTraceSelectAllChange()"></th>';
   h += '<th style="text-align:left;padding:4px">時間</th>';
   h += '<th style="text-align:left;padding:4px">Channel</th>';
   h += '<th style="text-align:right;padding:4px">' + tip('Duration', '從收到訊息到回覆完成的總耗時') + '</th>';
@@ -2623,6 +2632,7 @@ async function loadTraces() {
             if (delta) window.scrollBy(0, delta);
           }
         }
+        _updateTraceBulkBar();
         return;
       }
     }
@@ -2632,7 +2642,87 @@ async function loadTraces() {
     for (const t of merged) html += _traceRowHtml(t);
     html += '</tbody></table>';
     _safeSetHtml(el, html);
+    _updateTraceBulkBar();
   } catch (e) { if (!el.querySelector('table')) _safeSetHtml(el, '<div style="color:var(--red2)">載入失敗：' + e + '</div>'); }
+}
+
+// ── Trace 批次選取 ──────────────────────────────────────────────────────────
+function _getCheckedTraceIds() {
+  return Array.from(document.querySelectorAll('.trace-row-checkbox'))
+    .filter(cb => cb.checked)
+    .map(cb => cb.getAttribute('data-trace-id'));
+}
+function _updateTraceBulkBar() {
+  const ids = _getCheckedTraceIds();
+  const bar = document.getElementById('trace-bulk-bar');
+  const cnt = document.getElementById('trace-bulk-count');
+  if (!bar) return;
+  if (ids.length > 0) {
+    bar.style.display = 'flex';
+    if (cnt) cnt.textContent = '已選 ' + ids.length + ' 筆';
+  } else {
+    bar.style.display = 'none';
+  }
+  // 同步 select-all indeterminate
+  const all = document.querySelectorAll('.trace-row-checkbox');
+  const sel = document.getElementById('trace-select-all');
+  if (sel && all.length > 0) {
+    sel.checked = ids.length === all.length;
+    sel.indeterminate = ids.length > 0 && ids.length < all.length;
+  }
+}
+function onTraceCheckboxChange() { _updateTraceBulkBar(); }
+function onTraceSelectAllChange() {
+  const sel = document.getElementById('trace-select-all');
+  const checked = !!(sel && sel.checked);
+  for (const cb of document.querySelectorAll('.trace-row-checkbox')) cb.checked = checked;
+  _updateTraceBulkBar();
+}
+function clearTraceSelection() {
+  for (const cb of document.querySelectorAll('.trace-row-checkbox')) cb.checked = false;
+  const sel = document.getElementById('trace-select-all');
+  if (sel) { sel.checked = false; sel.indeterminate = false; }
+  _updateTraceBulkBar();
+}
+async function bulkExportTraces() {
+  const ids = _getCheckedTraceIds();
+  if (ids.length === 0) return;
+  try {
+    const r = await authFetch('/api/traces/bulk-export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    if (!r.ok) { alert('批次匯出失敗：HTTP ' + r.status); return; }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="([^"]+)"/);
+    const filename = m ? m[1] : 'traces.zip';
+    const a = document.createElement('a');
+    const objUrl = URL.createObjectURL(blob);
+    a.href = objUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objUrl);
+  } catch (e) { alert('批次匯出失敗：' + e); }
+}
+async function bulkDeleteTraces() {
+  const ids = _getCheckedTraceIds();
+  if (ids.length === 0) return;
+  if (!confirm('確定刪除已選的 ' + ids.length + ' 筆 trace？此動作無法復原。')) return;
+  try {
+    const r = await authFetch('/api/traces/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    const j = await r.json();
+    if (!r.ok) { alert('批次刪除失敗：' + (j.error || r.status)); return; }
+    clearTraceSelection();
+    loadTraces();
+  } catch (e) { alert('批次刪除失敗：' + e); }
 }
 
 // ── Trace Context Helpers ────────────────────────────────────────────────────
@@ -4060,6 +4150,113 @@ setInterval(loadStatus, 30000);
 </body>
 </html>`;
 
+// ── Trace Markdown Export Helper ─────────────────────────────────────────────
+
+/** 將單筆 trace 格式化為 Markdown（單筆下載 + 批次 zip 共用） */
+function formatTraceMarkdown(entry: MessageTraceEntry, ctx: TraceContextSnapshot | null | undefined): string {
+  let md = `# Trace Export: ${entry.traceId}\n\n`;
+  md += `匯出時間：${new Date().toISOString()}\n\n`;
+  md += `| 欄位 | 值 |\n|------|----|\n`;
+  md += `| Trace ID | \`${entry.traceId}\` |\n`;
+  md += `| 時間 | ${entry.ts} |\n`;
+  md += `| Channel | ${entry.channelId} |\n`;
+  md += `| Agent | ${entry.agentId ?? "-"} |\n`;
+  md += `| Category | ${entry.category ?? "-"} |\n`;
+  md += `| Status | ${entry.status} |\n`;
+  md += `| Duration | ${entry.totalDurationMs ? (entry.totalDurationMs / 1000).toFixed(1) + "s" : "-"} |\n`;
+  md += `| Effective Input | ${(entry.effectiveInputTokens ?? entry.totalInputTokens ?? 0).toLocaleString()} |\n`;
+  md += `| Output Tokens | ${(entry.totalOutputTokens ?? 0).toLocaleString()} |\n`;
+  md += `| Cache R/W | ${(entry.totalCacheRead ?? 0).toLocaleString()} / ${(entry.totalCacheWrite ?? 0).toLocaleString()} |\n`;
+  md += `| Tools | ${entry.totalToolCalls ?? 0} |\n`;
+  md += `| Cost | ${entry.estimatedCostUsd ? "$" + entry.estimatedCostUsd.toFixed(4) : "-"} |\n`;
+  if (entry.error) md += `| Error | ${entry.error} |\n`;
+  md += `\n`;
+  if (entry.inbound) {
+    md += `## ① Inbound\n\n`;
+    md += `- Text: ${entry.inbound.textPreview}\n`;
+    md += `- Chars: ${entry.inbound.charCount} | Attachments: ${entry.inbound.attachments}\n`;
+    if (entry.inbound.debounceMs) md += `- Debounce: ${entry.inbound.debounceMs}ms\n`;
+    md += `\n`;
+  }
+  if (entry.context) {
+    md += `## ② Context Assembly\n\n`;
+    md += `- Duration: ${entry.context.endMs - entry.context.startMs}ms\n`;
+    md += `- System Prompt: ~${entry.context.systemPromptTokens} tokens\n`;
+    md += `- History: ${entry.context.historyMessageCount} msgs (~${entry.context.historyTokens} tokens)\n`;
+    md += `- Total Context: ~${entry.context.totalContextTokens} tokens\n`;
+    if (entry.context.memoryRecall) {
+      const r = entry.context.memoryRecall;
+      md += `- Memory Recall: ${r.fragmentCount} fragments, ${r.injectedTokens} tokens (${r.durationMs}ms)\n`;
+      if (r.atomNames?.length) md += `  - Atoms: ${r.atomNames.join(", ")}\n`;
+    }
+    md += `\n`;
+  }
+  if (entry.llmCalls?.length) {
+    md += `## ③ LLM Call Loop (${entry.llmCalls.length} iterations)\n\n`;
+    for (const call of entry.llmCalls) {
+      md += `### Loop #${call.iteration} — ${call.model ?? "?"}\n\n`;
+      md += `- Duration: ${(call.durationMs / 1000).toFixed(1)}s | Stop: ${call.stopReason ?? "-"}\n`;
+      md += `- Input: ${call.inputTokens.toLocaleString()} | Output: ${call.outputTokens.toLocaleString()}`;
+      if (call.cacheRead || call.cacheWrite) md += ` | Cache R:${(call.cacheRead ?? 0).toLocaleString()} W:${(call.cacheWrite ?? 0).toLocaleString()}`;
+      md += `\n`;
+      if (call.toolCalls?.length) {
+        md += `\n| Tool | Duration | Params | Result |\n|------|----------|--------|--------|\n`;
+        for (const tc of call.toolCalls) {
+          const p = (tc.paramsPreview ?? "").slice(0, 80).replace(/\|/g, "\\|");
+          const errIcon = tc.validation ? "⚠️" : "❌";
+          const r = tc.error ? `${errIcon} ${tc.error.slice(0, 60)}` : (tc.resultPreview ?? "").slice(0, 60).replace(/\|/g, "\\|");
+          md += `| \`${tc.name}\` | ${tc.durationMs}ms | ${p} | ${r} |\n`;
+        }
+      }
+      md += `\n`;
+    }
+  }
+  if (entry.contextEngineering?.strategiesApplied?.length) {
+    const ce = entry.contextEngineering;
+    md += `## ④ Context Engineering\n\n`;
+    md += `- Strategies: ${ce.strategiesApplied.join(", ")}\n`;
+    md += `- Before: ${ce.tokensBeforeCE.toLocaleString()} → After: ${ce.tokensAfterCE.toLocaleString()} (saved: ${ce.tokensSaved.toLocaleString()})\n`;
+    if (ce.overflowSignaled) md += `- ⚠ Overflow Hard Stop triggered\n`;
+    md += `\n`;
+  }
+  if (entry.abort) {
+    md += `## ⑤ Abort\n\n- Trigger: ${entry.abort.trigger}\n- Rollback: ${entry.abort.rollback}\n\n`;
+  }
+  if (entry.postProcess) {
+    md += `## ⑥ Post-process\n\n`;
+    md += `- Extract: ${entry.postProcess.extractRan ? "✅" : "⏭"}\n`;
+    md += `- Snapshot: ${entry.postProcess.sessionSnapshotKept ? "✅" : "❌"}\n`;
+    md += `- Session note: ${entry.postProcess.sessionNoteUpdated ? "✅" : "⏭"}\n`;
+    md += `\n`;
+  }
+  if (entry.response) {
+    md += `## ⑦ Response\n\n`;
+    md += `- Chars: ${entry.response.charCount} | Duration: ${(entry.response.durationMs / 1000).toFixed(1)}s\n`;
+    md += `- Preview: ${entry.response.textPreview}\n\n`;
+  }
+  if (entry.workflowEvents?.length) {
+    md += `## Workflow Events\n\n`;
+    for (const we of entry.workflowEvents) {
+      md += `- [${we.ts}] **${we.type}** ${we.detail ?? ""}\n`;
+    }
+    md += `\n`;
+  }
+  if (ctx) {
+    md += `## Context Snapshot\n\n`;
+    if (ctx.systemPrompt) {
+      md += `### System Prompt (${ctx.systemPrompt.length} chars)\n\n`;
+      md += "```\n" + ctx.systemPrompt.slice(0, 5000) + (ctx.systemPrompt.length > 5000 ? "\n…(truncated)" : "") + "\n```\n\n";
+    }
+    if (ctx.memoryContext) {
+      md += `### Memory Context (${ctx.memoryContext.length} chars)\n\n`;
+      md += "```\n" + ctx.memoryContext.slice(0, 2000) + (ctx.memoryContext.length > 2000 ? "\n…(truncated)" : "") + "\n```\n\n";
+    }
+  }
+  md += `## Raw JSON\n\n`;
+  md += "```json\n" + JSON.stringify(entry, null, 2) + "\n```\n";
+  return md;
+}
+
 // ── DashboardServer ───────────────────────────────────────────────────────────
 
 export class DashboardServer {
@@ -5075,116 +5272,7 @@ export class DashboardServer {
           if (!entry) { res.writeHead(404); res.end(JSON.stringify({ error: "Trace not found" })); return; }
           const ctxStore = getTraceContextStore();
           const ctx = ctxStore?.get(exportMatch[1]!);
-          let md = `# Trace Export: ${entry.traceId}\n\n`;
-          md += `匯出時間：${new Date().toISOString()}\n\n`;
-          md += `| 欄位 | 值 |\n|------|----|\n`;
-          md += `| Trace ID | \`${entry.traceId}\` |\n`;
-          md += `| 時間 | ${entry.ts} |\n`;
-          md += `| Channel | ${entry.channelId} |\n`;
-          md += `| Agent | ${entry.agentId ?? "-"} |\n`;
-          md += `| Category | ${entry.category ?? "-"} |\n`;
-          md += `| Status | ${entry.status} |\n`;
-          md += `| Duration | ${entry.totalDurationMs ? (entry.totalDurationMs / 1000).toFixed(1) + "s" : "-"} |\n`;
-          md += `| Effective Input | ${(entry.effectiveInputTokens ?? entry.totalInputTokens ?? 0).toLocaleString()} |\n`;
-          md += `| Output Tokens | ${(entry.totalOutputTokens ?? 0).toLocaleString()} |\n`;
-          md += `| Cache R/W | ${(entry.totalCacheRead ?? 0).toLocaleString()} / ${(entry.totalCacheWrite ?? 0).toLocaleString()} |\n`;
-          md += `| Tools | ${entry.totalToolCalls ?? 0} |\n`;
-          md += `| Cost | ${entry.estimatedCostUsd ? "$" + entry.estimatedCostUsd.toFixed(4) : "-"} |\n`;
-          if (entry.error) md += `| Error | ${entry.error} |\n`;
-          md += `\n`;
-          // Inbound
-          if (entry.inbound) {
-            md += `## ① Inbound\n\n`;
-            md += `- Text: ${entry.inbound.textPreview}\n`;
-            md += `- Chars: ${entry.inbound.charCount} | Attachments: ${entry.inbound.attachments}\n`;
-            if (entry.inbound.debounceMs) md += `- Debounce: ${entry.inbound.debounceMs}ms\n`;
-            md += `\n`;
-          }
-          // Context
-          if (entry.context) {
-            md += `## ② Context Assembly\n\n`;
-            md += `- Duration: ${entry.context.endMs - entry.context.startMs}ms\n`;
-            md += `- System Prompt: ~${entry.context.systemPromptTokens} tokens\n`;
-            md += `- History: ${entry.context.historyMessageCount} msgs (~${entry.context.historyTokens} tokens)\n`;
-            md += `- Total Context: ~${entry.context.totalContextTokens} tokens\n`;
-            if (entry.context.memoryRecall) {
-              const r = entry.context.memoryRecall;
-              md += `- Memory Recall: ${r.fragmentCount} fragments, ${r.injectedTokens} tokens (${r.durationMs}ms)\n`;
-              if (r.atomNames?.length) md += `  - Atoms: ${r.atomNames.join(", ")}\n`;
-            }
-            md += `\n`;
-          }
-          // LLM Calls
-          if (entry.llmCalls?.length) {
-            md += `## ③ LLM Call Loop (${entry.llmCalls.length} iterations)\n\n`;
-            for (const call of entry.llmCalls) {
-              md += `### Loop #${call.iteration} — ${call.model ?? "?"}\n\n`;
-              md += `- Duration: ${(call.durationMs / 1000).toFixed(1)}s | Stop: ${call.stopReason ?? "-"}\n`;
-              md += `- Input: ${call.inputTokens.toLocaleString()} | Output: ${call.outputTokens.toLocaleString()}`;
-              if (call.cacheRead || call.cacheWrite) md += ` | Cache R:${(call.cacheRead ?? 0).toLocaleString()} W:${(call.cacheWrite ?? 0).toLocaleString()}`;
-              md += `\n`;
-              if (call.toolCalls?.length) {
-                md += `\n| Tool | Duration | Params | Result |\n|------|----------|--------|--------|\n`;
-                for (const tc of call.toolCalls) {
-                  const p = (tc.paramsPreview ?? "").slice(0, 80).replace(/\|/g, "\\|");
-                  const errIcon = tc.validation ? "⚠️" : "❌";
-                  const r = tc.error ? `${errIcon} ${tc.error.slice(0, 60)}` : (tc.resultPreview ?? "").slice(0, 60).replace(/\|/g, "\\|");
-                  md += `| \`${tc.name}\` | ${tc.durationMs}ms | ${p} | ${r} |\n`;
-                }
-              }
-              md += `\n`;
-            }
-          }
-          // CE
-          if (entry.contextEngineering?.strategiesApplied?.length) {
-            const ce = entry.contextEngineering;
-            md += `## ④ Context Engineering\n\n`;
-            md += `- Strategies: ${ce.strategiesApplied.join(", ")}\n`;
-            md += `- Before: ${ce.tokensBeforeCE.toLocaleString()} → After: ${ce.tokensAfterCE.toLocaleString()} (saved: ${ce.tokensSaved.toLocaleString()})\n`;
-            if (ce.overflowSignaled) md += `- ⚠ Overflow Hard Stop triggered\n`;
-            md += `\n`;
-          }
-          // Abort
-          if (entry.abort) {
-            md += `## ⑤ Abort\n\n- Trigger: ${entry.abort.trigger}\n- Rollback: ${entry.abort.rollback}\n\n`;
-          }
-          // Post-process
-          if (entry.postProcess) {
-            md += `## ⑥ Post-process\n\n`;
-            md += `- Extract: ${entry.postProcess.extractRan ? "✅" : "⏭"}\n`;
-            md += `- Snapshot: ${entry.postProcess.sessionSnapshotKept ? "✅" : "❌"}\n`;
-            md += `- Session note: ${entry.postProcess.sessionNoteUpdated ? "✅" : "⏭"}\n`;
-            md += `\n`;
-          }
-          // Response
-          if (entry.response) {
-            md += `## ⑦ Response\n\n`;
-            md += `- Chars: ${entry.response.charCount} | Duration: ${(entry.response.durationMs / 1000).toFixed(1)}s\n`;
-            md += `- Preview: ${entry.response.textPreview}\n\n`;
-          }
-          // Workflow Events
-          if (entry.workflowEvents?.length) {
-            md += `## Workflow Events\n\n`;
-            for (const we of entry.workflowEvents) {
-              md += `- [${we.ts}] **${we.type}** ${we.detail ?? ""}\n`;
-            }
-            md += `\n`;
-          }
-          // Context Snapshot
-          if (ctx) {
-            md += `## Context Snapshot\n\n`;
-            if (ctx.systemPrompt) {
-              md += `### System Prompt (${ctx.systemPrompt.length} chars)\n\n`;
-              md += "```\n" + ctx.systemPrompt.slice(0, 5000) + (ctx.systemPrompt.length > 5000 ? "\n…(truncated)" : "") + "\n```\n\n";
-            }
-            if (ctx.memoryContext) {
-              md += `### Memory Context (${ctx.memoryContext.length} chars)\n\n`;
-              md += "```\n" + ctx.memoryContext.slice(0, 2000) + (ctx.memoryContext.length > 2000 ? "\n…(truncated)" : "") + "\n```\n\n";
-            }
-          }
-          // Raw JSON
-          md += `## Raw JSON\n\n`;
-          md += "```json\n" + JSON.stringify(entry, null, 2) + "\n```\n";
+          const md = formatTraceMarkdown(entry, ctx);
           const shortId = entry.traceId.slice(0, 8);
           res.writeHead(200, {
             "Content-Type": "text/markdown; charset=utf-8",
@@ -5226,6 +5314,94 @@ export class DashboardServer {
           : traceStore.recent(limit);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ traces: entries }));
+        return;
+      }
+
+      // DELETE /api/traces/:traceId — 刪單筆 trace
+      const traceDelMatch = url.match(/^\/api\/traces\/([a-f0-9-]+)$/);
+      if (traceDelMatch && method === "DELETE") {
+        const traceStore = getTraceStore();
+        if (!traceStore) { res.writeHead(500); res.end(JSON.stringify({ error: "TraceStore not initialized" })); return; }
+        const id = traceDelMatch[1]!;
+        const ok = traceStore.deleteById(id);
+        getTraceContextStore()?.deleteById(id);
+        res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(ok ? { deleted: 1 } : { error: "Trace not found" }));
+        return;
+      }
+
+      // POST /api/traces/bulk-delete — body: { ids: string[] }
+      if (url === "/api/traces/bulk-delete" && method === "POST") {
+        const traceStore = getTraceStore();
+        if (!traceStore) { res.writeHead(500); res.end(JSON.stringify({ error: "TraceStore not initialized" })); return; }
+        let body = "";
+        req.on("data", (c: Buffer) => { body += c.toString(); });
+        req.on("end", () => {
+          try {
+            const { ids } = JSON.parse(body) as { ids: string[] };
+            if (!Array.isArray(ids) || ids.length === 0) {
+              res.writeHead(400); res.end(JSON.stringify({ error: "ids 不能為空" })); return;
+            }
+            const ctxStore = getTraceContextStore();
+            let deleted = 0;
+            for (const id of ids) {
+              if (typeof id !== "string" || !/^[a-f0-9-]+$/.test(id)) continue;
+              if (traceStore.deleteById(id)) deleted++;
+              ctxStore?.deleteById(id);
+            }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ deleted, requested: ids.length }));
+          } catch (err) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: String(err) }));
+          }
+        });
+        return;
+      }
+
+      // POST /api/traces/bulk-export — body: { ids: string[] } → application/zip
+      if (url === "/api/traces/bulk-export" && method === "POST") {
+        const traceStore = getTraceStore();
+        if (!traceStore) { res.writeHead(500); res.end(JSON.stringify({ error: "TraceStore not initialized" })); return; }
+        let body = "";
+        req.on("data", (c: Buffer) => { body += c.toString(); });
+        req.on("end", () => {
+          try {
+            const { ids } = JSON.parse(body) as { ids: string[] };
+            if (!Array.isArray(ids) || ids.length === 0) {
+              res.writeHead(400); res.end(JSON.stringify({ error: "ids 不能為空" })); return;
+            }
+            const ctxStore = getTraceContextStore();
+            const zipfile = new yazl.ZipFile();
+            let added = 0;
+            for (const id of ids) {
+              if (typeof id !== "string" || !/^[a-f0-9-]+$/.test(id)) continue;
+              const entry = traceStore.getById(id);
+              if (!entry) continue;
+              const ctx = ctxStore?.get(id);
+              const md = formatTraceMarkdown(entry, ctx);
+              const shortId = entry.traceId.slice(0, 8);
+              const dateStr = entry.ts.slice(0, 10);
+              zipfile.addBuffer(Buffer.from(md, "utf-8"), `${dateStr}_trace-${shortId}.md`);
+              added++;
+            }
+            if (added === 0) {
+              res.writeHead(404, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "找不到任何符合的 trace" }));
+              return;
+            }
+            const filename = `traces-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}-${added}items.zip`;
+            res.writeHead(200, {
+              "Content-Type": "application/zip",
+              "Content-Disposition": `attachment; filename="${filename}"`,
+            });
+            zipfile.outputStream.pipe(res);
+            zipfile.end();
+          } catch (err) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: String(err) }));
+          }
+        });
         return;
       }
 

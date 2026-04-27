@@ -689,6 +689,31 @@ export class TraceStore {
     return null;
   }
 
+  /** 刪除單筆 trace（連帶刪 context snapshot），回傳是否成功刪除 */
+  deleteById(traceId: string): boolean {
+    let removed = false;
+    try {
+      const files = readdirSync(this.logDir).filter(f => f.endsWith(".jsonl"));
+      for (const f of files) {
+        const filePath = join(this.logDir, f);
+        const lines = readFileSync(filePath, "utf-8").split("\n").filter(Boolean);
+        const kept: string[] = [];
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line) as MessageTraceEntry;
+            if (entry.traceId === traceId) { removed = true; }
+            else { kept.push(line); }
+          } catch { kept.push(line); }
+        }
+        if (kept.length < lines.length) {
+          writeFileSync(filePath, kept.length > 0 ? kept.join("\n") + "\n" : "", "utf-8");
+          break;
+        }
+      }
+    } catch { /* ignore */ }
+    return removed;
+  }
+
   /** 刪除指定 sessionKey 的所有 trace 記錄，回傳刪除數量 */
   deleteBySession(sessionKey: string): number {
     let count = 0;
@@ -808,6 +833,21 @@ export class TraceContextStore {
       }
     } catch { /* ignore */ }
     return null;
+  }
+
+  /** 刪除單筆 trace 的 context snapshot，回傳是否成功 */
+  deleteById(traceId: string): boolean {
+    try {
+      const dirs = readdirSync(this.dir).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse();
+      for (const d of dirs) {
+        const filePath = join(this.dir, d, `${traceId}.json`);
+        if (existsSync(filePath)) {
+          unlinkSync(filePath);
+          return true;
+        }
+      }
+    } catch { /* ignore */ }
+    return false;
   }
 
   /** 清理過期檔案（與 TraceStore 同步 ROLLING_DAYS） */
