@@ -90,10 +90,31 @@ export async function sendSubagentNotification(
 
     if (opts?.error) {
       await textChannel.send(`❌ **${label}** 失敗：${record.error ?? "未知錯誤"}`);
+    } else if (!record.result) {
+      await textChannel.send(`✅ **${label}** 完成\n(無輸出)`);
     } else {
-      const preview = record.result ? record.result.slice(0, 500) : "(無輸出)";
-      const suffix = record.result && record.result.length > 500 ? "\n…（已截斷）" : "";
-      await textChannel.send(`✅ **${label}** 完成\n${preview}${suffix}`);
+      // Discord 單訊息上限 2000，預留 header 與安全邊距 → 1900 給內容
+      const headerLen = `✅ **${label}** 完成\n`.length;
+      const inlineCap = 2000 - headerLen - 5; // 5 chars 安全邊距
+      if (record.result.length <= inlineCap) {
+        await textChannel.send(`✅ **${label}** 完成\n${record.result}`);
+      } else {
+        // 太長 → 完整內容用 .md 附件，訊息本體放摘要前段提示
+        const previewLen = inlineCap - 80; // 留空間給尾段「…（完整內容見附件）」
+        const preview = record.result.slice(0, previewLen);
+        const note = `\n…（完整內容 ${record.result.length} 字，見附件）`;
+        const buf = Buffer.from(record.result, "utf-8");
+        const filename = `subagent-${record.runId.slice(0, 8)}.md`;
+        try {
+          await textChannel.send({
+            content: `✅ **${label}** 完成\n${preview}${note}`,
+            files: [{ attachment: buf, name: filename }],
+          });
+        } catch (err) {
+          log.warn(`[subagent-discord-bridge] 附件上傳失敗，退回純文字截斷：${err instanceof Error ? err.message : String(err)}`);
+          await textChannel.send(`✅ **${label}** 完成\n${preview}\n…（截斷，附件失敗）`);
+        }
+      }
     }
   } catch (err) {
     log.warn(`[subagent-discord-bridge] 通知失敗：${err instanceof Error ? err.message : String(err)}`);
