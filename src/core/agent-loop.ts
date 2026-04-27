@@ -1844,6 +1844,7 @@ export async function* agentLoop(
           name: call.name,
           durationMs,
           error: toolResult.error,
+          validation: toolResult.validation,
           resultPreview: toolResultPreview(toolResult.result, toolResult.error),
           paramsPreview: toolParamsPreview(call.name, effectiveParams),
         });

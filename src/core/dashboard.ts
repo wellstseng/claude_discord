@@ -2809,7 +2809,7 @@ async function showTraceDetail(traceId) {
         if (call.toolCalls?.length > 0) {
           html += '<div style="margin-top:4px">';
           for (const tc of call.toolCalls) {
-            const tcColor = tc.error ? 'var(--red2)' : 'var(--green2)';
+            const tcColor = tc.error ? (tc.validation ? 'var(--warn)' : 'var(--red2)') : 'var(--green2)';
             // Click-to-expand：有完整 tool log 才掛 click（hasToolLog 前置檢查）
             const clickable = hasToolLog;
             const rowAttrs = clickable
@@ -2821,8 +2821,11 @@ async function showTraceDetail(traceId) {
             html += ' <span style="color:var(--fg2)">' + tc.durationMs + 'ms</span>';
             if (clickable) html += ' <span style="color:var(--fg3);font-size:0.7rem">🔍</span>';
             if (tc.paramsPreview) html += ' <span style="color:var(--accent2);font-size:0.75rem">' + esc(tc.paramsPreview).slice(0, 80) + '</span>';
-            if (tc.error) html += ' <span style="color:var(--red2)">❌ ' + esc(tc.error).slice(0, 60) + '</span>';
-            else if (tc.resultPreview) html += ' <span style="color:var(--fg3);font-size:0.75rem">→ ' + esc(tc.resultPreview).slice(0, 60) + '</span>';
+            if (tc.error) {
+              const errIcon = tc.validation ? '⚠️' : '❌';
+              const errColor = tc.validation ? 'var(--warn)' : 'var(--red2)';
+              html += ' <span style="color:' + errColor + '">' + errIcon + ' ' + esc(tc.error).slice(0, 60) + '</span>';
+            } else if (tc.resultPreview) html += ' <span style="color:var(--fg3);font-size:0.75rem">→ ' + esc(tc.resultPreview).slice(0, 60) + '</span>';
             html += '</div>';
             globalToolIdx++;
           }
@@ -5124,7 +5127,8 @@ export class DashboardServer {
                 md += `\n| Tool | Duration | Params | Result |\n|------|----------|--------|--------|\n`;
                 for (const tc of call.toolCalls) {
                   const p = (tc.paramsPreview ?? "").slice(0, 80).replace(/\|/g, "\\|");
-                  const r = tc.error ? `❌ ${tc.error.slice(0, 60)}` : (tc.resultPreview ?? "").slice(0, 60).replace(/\|/g, "\\|");
+                  const errIcon = tc.validation ? "⚠️" : "❌";
+                  const r = tc.error ? `${errIcon} ${tc.error.slice(0, 60)}` : (tc.resultPreview ?? "").slice(0, 60).replace(/\|/g, "\\|");
                   md += `| \`${tc.name}\` | ${tc.durationMs}ms | ${p} | ${r} |\n`;
                 }
               }

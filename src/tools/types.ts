@@ -27,6 +27,8 @@ export interface JsonSchema {
 export interface ToolResult {
   result?: unknown;
   error?: string;
+  /** error 子分類：true = 語法/usage 提示（trace 視覺顯示 ⚠️ 而非 ❌） */
+  validation?: boolean;
   /** Tool 自標記：是否修改了檔案（用於 file:modified 事件） */
   fileModified?: boolean;
   modifiedPath?: string;

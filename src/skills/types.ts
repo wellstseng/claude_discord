@@ -34,6 +34,8 @@ export interface SkillContext {
 export interface SkillResult {
   text: string;
   isError?: boolean;
+  /** isError=true 時的子分類：true = 語法/usage 提示（非真錯誤），預設 false = 真執行錯誤 */
+  validation?: boolean;
 }
 
 // ── Skill 介面 ───────────────────────────────────────────────────────────────

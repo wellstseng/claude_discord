@@ -97,7 +97,7 @@ export const tool: Tool = {
     try {
       const result = await skill.execute(skillCtx);
       if (result.isError) {
-        return { error: result.text };
+        return result.validation ? { error: result.text, validation: true } : { error: result.text };
       }
       return { result: result.text };
     } catch (err) {

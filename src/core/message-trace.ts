@@ -56,6 +56,8 @@ export interface TraceToolCall {
   name: string;
   durationMs: number;
   error?: string;
+  /** error 為語法/usage 提示而非真錯誤；UI 顯示 ⚠️ 而非 ❌ */
+  validation?: boolean;
   resultPreview?: string;
   /** 工具參數摘要（依工具類型提取關鍵欄位） */
   paramsPreview?: string;

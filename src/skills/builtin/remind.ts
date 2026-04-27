@@ -35,7 +35,7 @@ import { addCronJob, removeCronJob, listCronJobs, updateCronJob } from "../../cr
 import type { CronJobEntry } from "../../cron.js";
 import { config } from "../../core/config.js";
 import type { CronAction } from "../../core/config.js";
-import type { Skill } from "../types.js";
+import type { Skill, SkillResult } from "../types.js";
 
 // ── 時間解析 ─────────────────────────────────────────────────────────────────
 
@@ -142,7 +142,14 @@ function actionLabel(keyword: ActionKeyword): string {
 
 export const skill: Skill = {
   name: "cron",
-  description: "排程管理 — 建立、列出、刪除、啟停排程（支援 msg/exec/claude/agent 動作）",
+  description:
+    "排程管理（cron job）。" +
+    "建立：`/cron add at <time> <action> <content>`（一次性）、" +
+    "`/cron add every <interval> <action> <content>`（重複）、" +
+    "`/cron add expr <分 時 日 月 週> <action> <content>`（cron 表達式）。" +
+    "action：msg / exec / claude / agent。" +
+    "範例：`/cron add expr 0 9 * * 1-5 claude 整理本週 PR`。" +
+    "管理：/cron list、/cron delete <id>、/cron enable <id>、/cron disable <id>。",
   tier: "standard",
   trigger: ["/cron", "/排程", "/remind", "/提醒"],
 
@@ -188,7 +195,7 @@ export const skill: Skill = {
 
 // ── add 子命令解析 ──────────────────────────────────────────────────────────
 
-function handleAdd(rest: string, channelId: string, agentId?: string): { text: string; isError?: boolean } {
+function handleAdd(rest: string, channelId: string, agentId?: string): SkillResult {
   if (!config.cron?.enabled) {
     return { text: "排程服務未啟用。請在 catclaw.json 設定 `cron.enabled: true` 後重啟。" };
   }
@@ -202,13 +209,13 @@ function handleAdd(rest: string, channelId: string, agentId?: string): { text: s
   if (scheduleKind === "at") {
     const timeStr = parts[1];
     const parsed = parseTime(timeStr);
-    if (!parsed) return { text: `無法解析時間：\`${timeStr}\`\n支援格式：\`15:55\`、\`30m\`、\`2h\`、\`1d\`、\`2026-04-15\``, isError: true };
+    if (!parsed) return { text: `無法解析時間：\`${timeStr}\`\n支援格式：\`15:55\`、\`30m\`、\`2h\`、\`1d\`、\`2026-04-15\``, isError: true, validation: true };
 
     const actionKw = parts[2]?.toLowerCase();
-    if (!isActionKeyword(actionKw)) return { text: `未知動作類型：\`${parts[2]}\`\n支援：\`msg\`、\`exec\`、\`claude\`、\`agent\``, isError: true };
+    if (!isActionKeyword(actionKw)) return { text: `未知動作類型：\`${parts[2]}\`\n支援：\`msg\`、\`exec\`、\`claude\`、\`agent\``, isError: true, validation: true };
 
     const content = parts.slice(3).join(" ");
-    if (!content) return { text: `缺少內容。用法：\`/cron add at ${timeStr} ${actionKw} <內容>\``, isError: true };
+    if (!content) return { text: `缺少內容。用法：\`/cron add at ${timeStr} ${actionKw} <內容>\``, isError: true, validation: true };
 
     const action = buildAction(actionKw, content, channelId);
     const id = addCronJob({
@@ -228,13 +235,13 @@ function handleAdd(rest: string, channelId: string, agentId?: string): { text: s
   if (scheduleKind === "every") {
     const intervalStr = parts[1];
     const interval = parseInterval(intervalStr);
-    if (!interval) return { text: `無法解析間隔：\`${intervalStr}\`\n支援格式：30s、5m、2h、1d`, isError: true };
+    if (!interval) return { text: `無法解析間隔：\`${intervalStr}\`\n支援格式：30s、5m、2h、1d`, isError: true, validation: true };
 
     const actionKw = parts[2]?.toLowerCase();
-    if (!isActionKeyword(actionKw)) return { text: `未知動作類型：\`${parts[2]}\`\n支援：\`msg\`、\`exec\`、\`claude\`、\`agent\``, isError: true };
+    if (!isActionKeyword(actionKw)) return { text: `未知動作類型：\`${parts[2]}\`\n支援：\`msg\`、\`exec\`、\`claude\`、\`agent\``, isError: true, validation: true };
 
     const content = parts.slice(3).join(" ");
-    if (!content) return { text: `缺少內容。用法：\`/cron add every ${intervalStr} ${actionKw} <內容>\``, isError: true };
+    if (!content) return { text: `缺少內容。用法：\`/cron add every ${intervalStr} ${actionKw} <內容>\``, isError: true, validation: true };
 
     const action = buildAction(actionKw, content, channelId);
     const id = addCronJob({
@@ -250,13 +257,13 @@ function handleAdd(rest: string, channelId: string, agentId?: string): { text: s
 
   // ── expr <5段cron> <action> <content> ──
   if (scheduleKind === "expr") {
-    if (parts.length < 8) return { text: "用法：`/cron add expr <分> <時> <日> <月> <週> <action> <內容>`\n範例：`/cron add expr 0 9 * * * msg 早安`", isError: true };
+    if (parts.length < 8) return { text: "用法：`/cron add expr <分> <時> <日> <月> <週> <action> <內容>`\n範例：`/cron add expr 0 9 * * * msg 早安`", isError: true, validation: true };
     const expr = parts.slice(1, 6).join(" ");
     const actionKw = parts[6]?.toLowerCase();
-    if (!isActionKeyword(actionKw)) return { text: `未知動作類型：\`${parts[6]}\`\n支援：\`msg\`、\`exec\`、\`claude\`、\`agent\``, isError: true };
+    if (!isActionKeyword(actionKw)) return { text: `未知動作類型：\`${parts[6]}\`\n支援：\`msg\`、\`exec\`、\`claude\`、\`agent\``, isError: true, validation: true };
 
     const content = parts.slice(7).join(" ");
-    if (!content) return { text: `缺少內容。用法：\`/cron add expr ${expr} ${actionKw} <內容>\``, isError: true };
+    if (!content) return { text: `缺少內容。用法：\`/cron add expr ${expr} ${actionKw} <內容>\``, isError: true, validation: true };
 
     const action = buildAction(actionKw, content, channelId);
     const id = addCronJob({
@@ -275,7 +282,7 @@ function handleAdd(rest: string, channelId: string, agentId?: string): { text: s
 
 // ── list ────────────────────────────────────────────────────────────────────
 
-function handleList(agentId?: string): { text: string } {
+function handleList(agentId?: string): SkillResult {
   const jobs = listCronJobs(agentId);
   if (jobs.length === 0) {
     // 揭露其他 agent 的 job 存在，避免誤判成「整個系統沒有排程」而手動亂寫 JSON
@@ -318,7 +325,7 @@ function formatSchedule(entry: CronJobEntry): string {
 
 // ── delete ──────────────────────────────────────────────────────────────────
 
-function handleDelete(target: string, agentId?: string): { text: string; isError?: boolean } {
+function handleDelete(target: string, agentId?: string): SkillResult {
   if (removeCronJob(target)) {
     return { text: `已刪除排程：\`${target}\`` };
   }
@@ -334,12 +341,12 @@ function handleDelete(target: string, agentId?: string): { text: string; isError
     return { text: `已刪除排程：**${match.entry.name}**（\`${match.id}\`）` };
   }
 
-  return { text: `找不到排程：\`${target}\`\n用 \`/cron list\` 查看所有排程。`, isError: true };
+  return { text: `找不到排程：\`${target}\`\n用 \`/cron list\` 查看所有排程。`, isError: true, validation: true };
 }
 
 // ── enable / disable ────────────────────────────────────────────────────────
 
-function handleToggle(target: string, enabled: boolean, agentId?: string): { text: string; isError?: boolean } {
+function handleToggle(target: string, enabled: boolean, agentId?: string): SkillResult {
   const jobs = listCronJobs(agentId);
   const match = jobs.find(j => j.id === target)
     ?? jobs.find(j =>
@@ -348,7 +355,7 @@ function handleToggle(target: string, enabled: boolean, agentId?: string): { tex
     );
 
   if (!match) {
-    return { text: `找不到排程：\`${target}\`\n用 \`/cron list\` 查看所有排程。`, isError: true };
+    return { text: `找不到排程：\`${target}\`\n用 \`/cron list\` 查看所有排程。`, isError: true, validation: true };
   }
 
   updateCronJob(match.id, { enabled });
@@ -358,7 +365,7 @@ function handleToggle(target: string, enabled: boolean, agentId?: string): { tex
 
 // ── 用法說明 ────────────────────────────────────────────────────────────────
 
-function showUsage(): { text: string; isError: true } {
+function showUsage(): SkillResult {
   return {
     text: `**排程管理** — \`/cron\`
 
@@ -387,5 +394,6 @@ function showUsage(): { text: string; isError: true } {
 \`/cron add every 6h exec git pull\`
 \`/cron add expr 0 9 * * 1 claude 整理本週 PR\``,
     isError: true,
+    validation: true,
   };
 }
