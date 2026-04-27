@@ -25,7 +25,7 @@ import type { SafetyGuard } from "../safety/guard.js";
 import { eventBus as _eventBusInstance } from "./event-bus.js";
 type EventBus = typeof _eventBusInstance;
 import type { ToolContext } from "../tools/types.js";
-import { getContextEngine, repairToolPairing, estimateTokens } from "./context-engine.js";
+import { getContextEngine, repairToolPairing, estimateTokens, estimateSchemaTokens, selectToolsToEvict } from "./context-engine.js";
 import { getToolLogStore, ToolLogStore } from "./tool-log-store.js";
 import { getSessionSnapshotStore } from "./session-snapshot.js";
 import { registerTurnAbort, clearTurnAbort } from "../skills/builtin/stop.js";
@@ -455,6 +455,7 @@ export type AgentLoopEvent =
   | { type: "done";         text: string; turnCount: number }
   | { type: "context_warning"; level: "high" | "critical"; utilization: number; estimatedTokens: number; contextWindow: number; source: "session" | "model" }
   | { type: "ce_applied";   strategies: string[]; tokensBefore: number; tokensAfter: number }
+  | { type: "tools_evicted"; evicted: string[]; tokensBefore: number; tokensAfter: number }
   | { type: "error";        message: string };
 
 // ── TurnTracker ───────────────────────────────────────────────────────────────
@@ -842,11 +843,15 @@ export async function* agentLoop(
   const contextEngine = getContextEngine();
   let processedHistory: Message[];
   if (contextEngine) {
+    // 把 sys prompt 傳給 CE 讓 estimatedTokens 反映真實 prompt size。
+    // tools schema 在 turn-start 通常很小（builtin only），活化暴增是 mid-turn 由 tool-eviction 處理
+    const sysPromptTokensForCE = Math.ceil((opts.systemPrompt?.length ?? 0) / 4);
     processedHistory = await contextEngine.build(rawHistory, {
       sessionKey,
       turnIndex: session.turnCount,
       agentId: opts.agentId,
       accountId: opts.accountId,
+      systemPromptTokens: sysPromptTokensForCE,
     });
     // S2: 有 strategy 觸發 → 把壓縮後的 messages 寫回 session（含備份原始）
     const ceBd = contextEngine.lastBuildBreakdown;
@@ -888,6 +893,9 @@ export async function* agentLoop(
         strategyDetails: bd.strategyDetails,
         originalMessageDigest: bd.originalMessageDigest,
         overflowSignaled: bd.overflowSignaled,
+        messageTokens: bd.messageTokens,
+        systemPromptTokens: bd.systemPromptTokens,
+        toolsTokens: bd.toolsTokens,
       });
     }
   }
@@ -941,6 +949,10 @@ export async function* agentLoop(
   // 追蹤已載入的 deferred tools（tool_search 後加入）
   const loadedDeferredNames = new Set<string>();
   let toolDefs = eagerDefs;
+  // 追蹤每個 tool 的最後使用 iter（LRU eviction 用）
+  const toolLastUsedIter = new Map<string, number>();
+  // 不可踢的 tool 名（builtin / eager — eager 是當前 turn 起手就需要的）
+  const protectedToolNames = new Set(eagerDefs.map(d => d.name));
 
   // ── 3b. Memory Recall（可選，供子 agent 等無前置 recall 的情境使用）──────────
   let memoryContextBlock = "";
@@ -1333,6 +1345,30 @@ export async function* agentLoop(
         }
       }
 
+      // ── Tool Schema Eviction（LRU）：tools array 過大就踢久沒用的 deferred ──
+      //   tool_search 活化過多 playwright/MCP tools 會讓系統 prompt 暴增，每 iter
+      //   都付一輪 cache read 成本（trace 32c33ced 實測單 turn $4.34、cache R 3.8M）。
+      //   threshold 由 catclaw.json contextEngineering.toolBudget.activeSchemaTokenCap 控制，
+      //   預設 50_000；超過就 LRU 踢直到 ≤ cap。被踢的 tool 之後 tool_search 還能再活化。
+      {
+        const cap = config.contextEngineering?.toolBudget?.activeSchemaTokenCap ?? 50_000;
+        if (cap > 0) {
+          const before = estimateSchemaTokens(toolDefs);
+          if (before > cap) {
+            const evicted = selectToolsToEvict(toolDefs, toolLastUsedIter, cap, protectedToolNames);
+            if (evicted.length > 0) {
+              const evictedSet = new Set(evicted);
+              toolDefs = toolDefs.filter(d => !evictedSet.has(d.name));
+              for (const name of evicted) loadedDeferredNames.delete(name);
+              const after = estimateSchemaTokens(toolDefs);
+              log.info(`[agent-loop] [loop=${loopCount}] tool eviction：踢 ${evicted.length} 個（${evicted.join(", ")}），schema ${before}→${after} tokens`);
+              yield { type: "tools_evicted", evicted, tokensBefore: before, tokensAfter: after };
+              trace?.recordToolEviction?.(loopCount, evicted, before, after);
+            }
+          }
+        }
+      }
+
       const llmCallStartMs = Date.now();
       // 每 iter 重組 systemPrompt：base + 當前 pending 的 deferred listing（已活化的不會再列）
       const deferredBlockNow = buildDeferredBlock();
@@ -1517,6 +1553,8 @@ export async function* agentLoop(
       }
       for (const tc of streamResult.toolCalls) {
         assistantContent.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.params as object });
+        // LRU eviction：標記 tool 在這 iter 被使用
+        toolLastUsedIter.set(tc.name, loopCount);
       }
       messages.push({
         role: "assistant",

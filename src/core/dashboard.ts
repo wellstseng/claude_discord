@@ -3043,11 +3043,24 @@ async function showTraceDetail(traceId) {
     html += '<div class="card" style="background:var(--bg4)">';
     html += '<h3 style="color:var(--accent);margin-bottom:6px">④ Context Engineering</h3>';
     if (t.contextEngineering) {
+      const ce = t.contextEngineering;
       html += '<div style="font-size:0.82rem">';
-      html += '<div>Strategies: ' + t.contextEngineering.strategiesApplied.join(', ') + '</div>';
-      html += '<div>Before: ' + t.contextEngineering.tokensBeforeCE.toLocaleString() + ' → After: ' + t.contextEngineering.tokensAfterCE.toLocaleString() + '</div>';
-      html += '<div style="color:var(--green2)">Saved: ' + t.contextEngineering.tokensSaved.toLocaleString() + ' tokens</div>';
-      if (t.contextEngineering.overflowSignaled) html += '<div style="color:var(--red)">⚠ Overflow Hard Stop triggered</div>';
+      html += '<div>Strategies: ' + (ce.strategiesApplied?.length ? ce.strategiesApplied.join(', ') : '<span style="color:var(--fg2)">未觸發</span>') + '</div>';
+      if (ce.strategiesApplied?.length) {
+        html += '<div>Before: ' + ce.tokensBeforeCE.toLocaleString() + ' → After: ' + ce.tokensAfterCE.toLocaleString() + '</div>';
+        html += '<div style="color:var(--green2)">Saved: ' + ce.tokensSaved.toLocaleString() + ' tokens</div>';
+      }
+      if (ce.overflowSignaled) html += '<div style="color:var(--red)">⚠ Overflow Hard Stop triggered</div>';
+      if (ce.messageTokens != null || ce.systemPromptTokens != null || ce.toolsTokens != null) {
+        html += '<div style="margin-top:4px;color:var(--fg2);font-size:0.78rem">Breakdown：messages=' + (ce.messageTokens ?? 0).toLocaleString() + ' | sys=' + (ce.systemPromptTokens ?? 0).toLocaleString() + ' | tools=' + (ce.toolsTokens ?? 0).toLocaleString() + '</div>';
+      }
+      if (t.toolEvictions?.length) {
+        html += '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:4px"><b style="color:var(--warn)">🪓 Tool Eviction</b>';
+        for (const ev of t.toolEvictions) {
+          html += '<div style="font-size:0.78rem;color:var(--fg2)">iter#' + ev.iteration + ': ' + esc(ev.evicted.join(', ')) + ' (' + ev.tokensBefore.toLocaleString() + '→' + ev.tokensAfter.toLocaleString() + ')</div>';
+        }
+        html += '</div>';
+      }
       if (t.contextEngineering.strategyDetails?.length) {
         html += '<table style="font-size:0.78rem;margin-top:4px;width:100%;border-collapse:collapse">';
         html += '<tr style="color:var(--fg2)"><th style="text-align:left;padding:2px 4px">Strategy</th><th style="text-align:right;padding:2px 4px">Before</th><th style="text-align:right;padding:2px 4px">After</th><th style="text-align:right;padding:2px 4px">Saved</th><th style="text-align:right;padding:2px 4px">Removed</th></tr>';
@@ -4333,12 +4346,28 @@ function formatTraceMarkdown(entry: MessageTraceEntry, ctx: TraceContextSnapshot
       md += `\n`;
     }
   }
-  if (entry.contextEngineering?.strategiesApplied?.length) {
+  if (entry.contextEngineering) {
     const ce = entry.contextEngineering;
     md += `## ④ Context Engineering\n\n`;
-    md += `- Strategies: ${ce.strategiesApplied.join(", ")}\n`;
-    md += `- Before: ${ce.tokensBeforeCE.toLocaleString()} → After: ${ce.tokensAfterCE.toLocaleString()} (saved: ${ce.tokensSaved.toLocaleString()})\n`;
-    if (ce.overflowSignaled) md += `- ⚠ Overflow Hard Stop triggered\n`;
+    if (ce.strategiesApplied?.length) {
+      md += `- Strategies: ${ce.strategiesApplied.join(", ")}\n`;
+      md += `- Before: ${ce.tokensBeforeCE.toLocaleString()} → After: ${ce.tokensAfterCE.toLocaleString()} (saved: ${ce.tokensSaved.toLocaleString()})\n`;
+      if (ce.overflowSignaled) md += `- ⚠ Overflow Hard Stop triggered\n`;
+    } else {
+      md += `- Strategies: （未觸發）\n`;
+    }
+    if (ce.messageTokens != null || ce.systemPromptTokens != null || ce.toolsTokens != null) {
+      md += `- Token breakdown: messages=${(ce.messageTokens ?? 0).toLocaleString()} | sys=${(ce.systemPromptTokens ?? 0).toLocaleString()} | tools=${(ce.toolsTokens ?? 0).toLocaleString()}\n`;
+    }
+    md += `\n`;
+  }
+  if (entry.toolEvictions?.length) {
+    md += `## ④b Tool Schema Eviction (LRU)\n\n`;
+    md += `| Iter | Evicted | Schema Tokens (Before → After) |\n|------|---------|-------------------------------|\n`;
+    for (const ev of entry.toolEvictions) {
+      const evList = ev.evicted.length > 5 ? ev.evicted.slice(0, 5).join(", ") + ` …+${ev.evicted.length - 5}` : ev.evicted.join(", ");
+      md += `| #${ev.iteration} | ${evList} | ${ev.tokensBefore.toLocaleString()} → ${ev.tokensAfter.toLocaleString()} |\n`;
+    }
     md += `\n`;
   }
   if (entry.abort) {

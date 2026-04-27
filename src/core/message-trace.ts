@@ -179,6 +179,12 @@ export interface MessageTraceEntry {
       toolName?: string;
     }>;
     overflowSignaled?: boolean;
+    /** 細項：純 messages tokens（不含 sys/tools） */
+    messageTokens?: number;
+    /** 細項：system prompt tokens */
+    systemPromptTokens?: number;
+    /** 細項：tools schema tokens */
+    toolsTokens?: number;
   };
 
   // Phase 5: Abort/Interrupt
@@ -215,6 +221,14 @@ export interface MessageTraceEntry {
   estimatedCostUsd?: number;
   /** Workflow 事件（wisdom/rut/oscillation/sync 等） */
   workflowEvents?: TraceWorkflowEvent[];
+
+  /** Tool schema LRU eviction 紀錄（agent-loop 在 mid-turn 踢掉 tools 時） */
+  toolEvictions?: Array<{
+    iteration: number;
+    evicted: string[];
+    tokensBefore: number;
+    tokensAfter: number;
+  }>;
 
   // TurnAuditLog 遷移欄位
   phase?: {
@@ -482,6 +496,11 @@ export class MessageTrace {
     this.entry.workflowEvents.push({ ts: Date.now(), type, detail });
   }
 
+  recordToolEviction(iteration: number, evicted: string[], tokensBefore: number, tokensAfter: number): void {
+    if (!this.entry.toolEvictions) this.entry.toolEvictions = [];
+    this.entry.toolEvictions.push({ iteration, evicted, tokensBefore, tokensAfter });
+  }
+
   // ── Phase 4: Context Engineering ──────────────────────────────────────────
 
   recordCE(opts: {
@@ -512,8 +531,12 @@ export class MessageTrace {
       toolName?: string;
     }>;
     overflowSignaled?: boolean;
+    messageTokens?: number;
+    systemPromptTokens?: number;
+    toolsTokens?: number;
   }): void {
-    if (opts.strategiesApplied.length === 0) return;
+    // 即使沒套用任何策略，也要記下 token breakdown（讓 dashboard 看得到 sys/tools/messages 比例）
+    if (opts.strategiesApplied.length === 0 && opts.messageTokens == null) return;
     this.entry.contextEngineering = {
       strategiesApplied: opts.strategiesApplied,
       tokensBeforeCE: opts.tokensBeforeCE,
@@ -522,6 +545,9 @@ export class MessageTrace {
       strategyDetails: opts.strategyDetails,
       originalMessageDigest: opts.originalMessageDigest,
       overflowSignaled: opts.overflowSignaled,
+      messageTokens: opts.messageTokens,
+      systemPromptTokens: opts.systemPromptTokens,
+      toolsTokens: opts.toolsTokens,
     };
   }
 

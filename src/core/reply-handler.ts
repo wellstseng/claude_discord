@@ -468,6 +468,12 @@ export async function handleAgentLoopReply(
         const ceMsg = `📦 **Context 壓縮**：${names}（${event.tokensBefore.toLocaleString()} → ${event.tokensAfter.toLocaleString()} tokens，節省 ${saved.toLocaleString()}）`;
         try { await send(ceMsg); isFirst = false; } catch (e) { log.debug(`[reply-handler] ce_applied send 失敗：${e instanceof Error ? e.message : String(e)}`); }
 
+      } else if (event.type === "tools_evicted") {
+        const saved = event.tokensBefore - event.tokensAfter;
+        const list = event.evicted.length > 4 ? event.evicted.slice(0, 4).join(", ") + ` …+${event.evicted.length - 4}` : event.evicted.join(", ");
+        const evictMsg = `🪓 **Tool LRU eviction**：踢掉 ${event.evicted.length} 個工具（${list}），schema ${event.tokensBefore.toLocaleString()} → ${event.tokensAfter.toLocaleString()} tokens（省 ${saved.toLocaleString()}）`;
+        try { await send(evictMsg); isFirst = false; } catch (e) { log.debug(`[reply-handler] tools_evicted send 失敗：${e instanceof Error ? e.message : String(e)}`); }
+
       } else if (event.type === "context_warning") {
         const icon = event.level === "critical" ? "🔴" : "🟡";
         const pct = (event.utilization * 100).toFixed(1);

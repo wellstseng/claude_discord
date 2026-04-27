@@ -495,6 +495,8 @@ export interface ToolBudgetConfig {
   toolTimeoutMs?: number;
   /** write_file / edit_file 單次寫入上限 bytes（預設 512000 = 500KB，0 = 無限制） */
   maxWriteFileBytes?: number;
+  /** 活躍 tool schema 總 token 上限（超過則 LRU 踢掉最久沒用的 deferred tools，預設 50000，0 = 不限） */
+  activeSchemaTokenCap?: number;
 }
 
 /** 衰減 Level 定義 */

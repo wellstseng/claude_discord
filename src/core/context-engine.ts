@@ -55,13 +55,24 @@ export interface ContextBreakdown {
   overflowSignaled?: boolean;
   strategyDetails?: StrategyDetail[];
   originalMessageDigest?: OriginalMessageDigest[];
+  /** Token 細項拆解（messages / system prompt / tools schema），讓 dashboard 知道 bloat 來源 */
+  messageTokens?: number;
+  systemPromptTokens?: number;
+  toolsTokens?: number;
 }
 
 export interface ContextBuildContext {
   messages: Message[];
   sessionKey: string;
   turnIndex: number;
+  /** 訊息 + system prompt + tools schema 三合一（CE 視野完整化） */
   estimatedTokens: number;
+  /** 細項：純 messages tokens */
+  messageTokens: number;
+  /** 細項：system prompt tokens（不會被 CE 改動） */
+  systemPromptTokens: number;
+  /** 細項：tools schema tokens（不會被 CE 改動，由 agent-loop 的 tool-eviction 處理） */
+  toolsTokens: number;
 }
 
 export interface ContextStrategy {
@@ -77,6 +88,10 @@ export interface BuildOpts {
   ceProvider?: LLMProvider;  // CE 用 LLM（壓縮/摘要）
   agentId?: string;
   accountId?: string;
+  /** 額外 tokens：system prompt（讓 estimatedTokens 反映真實 prompt size） */
+  systemPromptTokens?: number;
+  /** 額外 tokens：tools schema（同上） */
+  toolsTokens?: number;
 }
 
 // ── Tool Pairing Repair ───────────────────────────────────────────────────────
@@ -146,6 +161,64 @@ export function estimateTokens(messages: Message[]): number {
     total += Math.ceil(chars / 4);
   }
   return total;
+}
+
+/** Strategy apply 後同步更新 ctx 三個 token 欄位（messages 改了，sys/tools 不變） */
+function withUpdatedMessages(ctx: ContextBuildContext, newMessages: Message[]): ContextBuildContext {
+  const messageTokens = estimateTokens(newMessages);
+  return {
+    ...ctx,
+    messages: newMessages,
+    messageTokens,
+    estimatedTokens: messageTokens + ctx.systemPromptTokens + ctx.toolsTokens,
+  };
+}
+
+/** 估算 tool schema 陣列佔用的 token 數（送進 LLM tools 參數的部分） */
+export function estimateSchemaTokens(tools: Array<{ name: string; description?: string; input_schema?: unknown }>): number {
+  if (!tools || tools.length === 0) return 0;
+  let chars = 0;
+  for (const t of tools) {
+    chars += (t.name?.length ?? 0) + (t.description?.length ?? 0);
+    if (t.input_schema) chars += JSON.stringify(t.input_schema).length;
+  }
+  return Math.ceil(chars / 4);
+}
+
+/**
+ * 從 toolDefs 中挑出該被踢的 tools（LRU），讓總 schema token 降到 cap 以下。
+ *
+ * - 只踢 deferred 工具（不在 protectedNames 裡）
+ * - 排序：lastUsedIter 升冪（沒用過 = -1，最先踢）
+ * - 踢到剛好 ≤ cap 為止；若全踢光仍超 cap，回傳目前所選名單（呼叫者自行記 log）
+ */
+export function selectToolsToEvict(
+  toolDefs: Array<{ name: string; description?: string; input_schema?: unknown }>,
+  lastUsedIter: Map<string, number>,
+  cap: number,
+  protectedNames: Set<string>,
+): string[] {
+  if (cap <= 0) return [];
+  const currentTotal = estimateSchemaTokens(toolDefs);
+  if (currentTotal <= cap) return [];
+
+  const evictable = toolDefs
+    .filter(d => !protectedNames.has(d.name))
+    .map(d => ({
+      name: d.name,
+      tokens: estimateSchemaTokens([d]),
+      lastUsed: lastUsedIter.get(d.name) ?? -1,
+    }))
+    .sort((a, b) => a.lastUsed - b.lastUsed); // oldest (or never-used) first
+
+  const evicted: string[] = [];
+  let runningTotal = currentTotal;
+  for (const item of evictable) {
+    if (runningTotal <= cap) break;
+    evicted.push(item.name);
+    runningTotal -= item.tokens;
+  }
+  return evicted;
 }
 
 // ── DecayStrategy（漸進式衰減）─────────────────────────────────────────────────
@@ -479,7 +552,7 @@ export class DecayStrategy implements ContextStrategy {
     }
 
     const repaired = repairToolPairing(result);
-    return { ...ctx, messages: repaired, estimatedTokens: estimateTokens(repaired) };
+    return withUpdatedMessages(ctx, repaired);
   }
 
   private _calcTargetLevel(age: number, tempoMultiplier: number): number {
@@ -579,7 +652,9 @@ export class CompactionStrategy implements ContextStrategy {
   }
 
   shouldApply(ctx: ContextBuildContext): boolean {
-    return this.enabled && ctx.estimatedTokens > this.cfg.triggerTokens;
+    // 用 messageTokens 而非 estimatedTokens：compaction 只能壓 messages，
+    // sys/tools 大不該誤觸 compaction（那是 tool-eviction 的責任）
+    return this.enabled && ctx.messageTokens > this.cfg.triggerTokens;
   }
 
   async apply(ctx: ContextBuildContext, ceProvider?: LLMProvider): Promise<ContextBuildContext> {
@@ -713,11 +788,7 @@ ${semanticMessages.map(formatMsg).join("\n")}`;
       const compressed = [...sysMessages, summaryMessage, ...toKeep];
       log.info(`[context-engine:compaction] 壓縮 ${messages.length} → ${compressed.length} messages`);
 
-      return {
-        ...ctx,
-        messages: compressed,
-        estimatedTokens: estimateTokens(compressed),
-      };
+      return withUpdatedMessages(ctx, compressed);
     } catch (err) {
       log.warn(`[context-engine:compaction] LLM 壓縮失敗，回退：${err instanceof Error ? err.message : String(err)}`);
       return this._fallbackSlide(ctx);
@@ -727,7 +798,7 @@ ${semanticMessages.map(formatMsg).join("\n")}`;
   private _fallbackSlide(ctx: ContextBuildContext): ContextBuildContext {
     const preserve = this.cfg.preserveRecentTurns * 2;
     const sliced = repairToolPairing(ctx.messages.slice(-preserve));
-    return { ...ctx, messages: sliced, estimatedTokens: estimateTokens(sliced) };
+    return withUpdatedMessages(ctx, sliced);
   }
 }
 
@@ -767,7 +838,7 @@ export class OverflowHardStopStrategy implements ContextStrategy {
     const minMessages = ctx.messages.slice(-4);
     this.lastOverflowSignaled = true;
     log.warn(`[context-engine:overflow-hard-stop] context 超硬上限 ${ctx.estimatedTokens} tokens，截斷至 ${minMessages.length} messages`);
-    return { ...ctx, messages: minMessages, estimatedTokens: estimateTokens(minMessages) };
+    return withUpdatedMessages(ctx, minMessages);
   }
 }
 
@@ -808,7 +879,10 @@ export class ContextEngine {
   }
 
   async build(messages: Message[], opts: BuildOpts): Promise<Message[]> {
-    const tokensBeforeCE = estimateTokens(messages);
+    const messageTokens = estimateTokens(messages);
+    const systemPromptTokens = opts.systemPromptTokens ?? 0;
+    const toolsTokens = opts.toolsTokens ?? 0;
+    const tokensBeforeCE = messageTokens + systemPromptTokens + toolsTokens;
 
     // originalMessageDigest: 壓縮前的 message 摘要
     const originalMessageDigest = messages.map((m, i) => {
@@ -836,6 +910,9 @@ export class ContextEngine {
       sessionKey: opts.sessionKey,
       turnIndex: opts.turnIndex,
       estimatedTokens: tokensBeforeCE,
+      messageTokens,
+      systemPromptTokens,
+      toolsTokens,
     };
 
     const applied: string[] = [];
@@ -916,6 +993,9 @@ export class ContextEngine {
     this.lastBuildBreakdown = {
       totalMessages: ctx.messages.length,
       estimatedTokens: ctx.estimatedTokens,
+      messageTokens: ctx.messageTokens,
+      systemPromptTokens: ctx.systemPromptTokens,
+      toolsTokens: ctx.toolsTokens,
       strategiesApplied: applied,
       tokensBeforeCE,
       tokensAfterCE: applied.length > 0 ? ctx.estimatedTokens : undefined,
