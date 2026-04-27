@@ -107,17 +107,26 @@ export class FailoverProvider implements LLMProvider {
         // AbortError 不算 provider 失敗，直接傳出
         if (msg === "aborted" || opts?.abortSignal?.aborted) throw err;
 
-        // 4xx（非 429）不代表 provider 下線，不計入 breaker
+        // 4xx（非 429）通常是「客戶端參數錯」不該切 fallback；
+        // 但 quota / billing 類錯誤（402、out of extra usage 等）雖然 HTTP 400-403，
+        // 實質是 provider 不可用，必須走 failover 切下個 provider
+        const lowerMsg = msg.toLowerCase();
+        const isQuotaExhausted = lowerMsg.includes("out of extra usage")
+          || lowerMsg.includes("extra usage")
+          || lowerMsg.includes("insufficient_quota")
+          || lowerMsg.includes("payment_required")
+          || lowerMsg.includes("billing")
+          || lowerMsg.includes("credit");
         const statusMatch = msg.match(/HTTP (\d+)/);
         const status = statusMatch ? parseInt(statusMatch[1]) : 0;
-        if (status >= 400 && status < 500 && status !== 429) {
-          log.debug(`[failover] ${provider.id} 4xx 錯誤（${status}），不觸發 circuit breaker`);
+        if (status >= 400 && status < 500 && status !== 429 && !isQuotaExhausted) {
+          log.debug(`[failover] ${provider.id} 4xx 錯誤（${status}），非 quota/billing，不觸發 circuit breaker`);
           throw err; // 非 provider 故障，直接傳播
         }
 
         breaker.recordFailure();
         errors.push(`${provider.id}: ${msg}`);
-        log.warn(`[failover] ${provider.id} 失敗，嘗試下一個 provider。錯誤：${msg}`);
+        log.warn(`[failover] ${provider.id} 失敗${isQuotaExhausted ? "（quota/billing 用罄）" : ""}，嘗試下一個 provider。錯誤：${msg}`);
       }
     }
 

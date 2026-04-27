@@ -172,7 +172,11 @@ function classifyError(errorMessage: string): CooldownReason | null {
   const msg = errorMessage.toLowerCase();
   if (msg.includes("429") || msg.includes("rate limit"))  return "rate_limit";
   if (msg.includes("503") || msg.includes("overload"))    return "overloaded";
-  if (msg.includes("402") || msg.includes("billing") || msg.includes("credit")) return "billing";
+  // Claude.ai 訂閱「extra usage」用罄訊息（trace req_011CaTyDminogATY6dKbU8ec 實測），
+  // 雖然 HTTP 400 / invalid_request_error，本質是 quota 用罄→ provider 不可用
+  if (msg.includes("402") || msg.includes("billing") || msg.includes("credit") ||
+      msg.includes("out of extra usage") || msg.includes("extra usage") ||
+      msg.includes("insufficient_quota") || msg.includes("payment_required")) return "billing";
   if (msg.includes("401") || msg.includes("403") || msg.includes("auth"))       return "auth";
   return null;
 }
@@ -342,6 +346,15 @@ export class ClaudeApiProvider implements LLMProvider {
         finalText = lastEvent.text;
         finalStopReason = lastEvent.stopReason;
         finalUsage = lastEvent.usage;
+      }
+
+      // pi-ai 把 API 錯誤包成 event.type === "error" event 而不 throw（軟失敗）。
+      // 若 stream 結束時只有 error 事件、無 done → 視為 provider 不可用，要硬 throw 讓 failover 接手。
+      // 不然 agent-loop 只能顯示錯誤訊息給使用者，failover-provider 看不到 → 不會切下個 provider。
+      const errEvent = events.find(e => e.type === "error") as { type: "error"; message: string } | undefined;
+      const hasDone = events.some(e => e.type === "done");
+      if (errEvent && !hasDone) {
+        throw new Error(errEvent.message);
       }
 
       // Debug：若 events 陣列為空（導致 estimated fallback），log 實際收到的 raw events

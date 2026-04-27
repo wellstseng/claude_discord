@@ -170,22 +170,36 @@ export async function initPlatform(
   _projectManager = initProjectManager(join(wsDir, "data"));
 
   // ── 8.5 Ollama Client（供 embedding 使用）─────────────────────────────────
-  if (config.ollama?.enabled !== false && config.ollama) {
-    initOllamaClient(config.ollama);
-    log.info(`[platform] OllamaClient 初始化：${config.ollama.primary?.host ?? "http://localhost:11434"}`);
+  const ollamaActive = config.ollama?.enabled !== false && !!config.ollama;
+  if (ollamaActive) {
+    initOllamaClient(config.ollama!);
+    log.info(`[platform] OllamaClient 初始化：${config.ollama!.primary?.host ?? "http://localhost:11434"}`);
   }
 
   // ── 8.6 Embedding Provider（provider 抽象層）──────────────────────────────
   if (config.memoryPipeline?.embedding) {
+    // Cross-validate：embedding 配 ollama 但 ollama 沒啟用 → 啟動就 fail loud
+    // 不延後到首次 embed 才掛（過去這樣會被 health-monitor 通報但服務已半殘）
+    if (config.memoryPipeline.embedding.provider === "ollama" && !ollamaActive) {
+      throw new Error(
+        `[platform] config 不一致：memoryPipeline.embedding.provider="ollama" 但 config.ollama 未啟用。` +
+        `請在 catclaw.json 補 ollama 區塊（含 enabled:true 與 primary.host），` +
+        `或把 memoryPipeline.embedding.provider 改成其他可用 provider。`
+      );
+    }
     initEmbeddingProvider(config.memoryPipeline.embedding);
   }
 
   // ── 8.7 Extraction Provider（provider 抽象層）─────────────────────────────
   if (config.memoryPipeline?.extraction) {
-    try {
-      initExtractionProvider(config.memoryPipeline.extraction);
-    } catch (err) {
-      log.warn(`[platform] ExtractionProvider 初始化失敗（萃取將靜默跳過）：${err instanceof Error ? err.message : String(err)}`);
+    if (config.memoryPipeline.extraction.provider === "ollama" && !ollamaActive) {
+      log.warn(`[platform] memoryPipeline.extraction.provider="ollama" 但 ollama 未啟用，將略過 extraction（不阻塞 startup）`);
+    } else {
+      try {
+        initExtractionProvider(config.memoryPipeline.extraction);
+      } catch (err) {
+        log.warn(`[platform] ExtractionProvider 初始化失敗（萃取將靜默跳過）：${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 
