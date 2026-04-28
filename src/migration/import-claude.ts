@@ -19,10 +19,18 @@ import { getBootAgentDataDir } from "../core/agent-loader.js";
 // ── 型別 ─────────────────────────────────────────────────────────────────────
 
 export interface ImportOptions {
+  /** 來源根目錄：~/.claude/ */
+  sourceRoot?: string;
   /** 來源：~/.claude/memory/ */
   sourcePath: string;
   /** 目標：~/.catclaw/memory/global/ */
   destPath: string;
+  /** 是否一併匯入 ~/.claude/_AIDocs + README/TECH + 產生 prompt skill */
+  importAidocs?: boolean;
+  /** AIDocs 目標根目錄（預設 ~/.catclaw/aidocs/claude-atomic-memory） */
+  aidocsDestPath?: string;
+  /** Prompt skill 目標目錄（預設 ~/.catclaw/skills/atomic-memory） */
+  skillDestDir?: string;
   /** 已存在的 atom 是否覆寫（預設 false） */
   force?: boolean;
   /** 乾跑模式：只列出動作，不執行 */
@@ -34,6 +42,8 @@ export interface ImportResult {
   skipped: string[];
   errors: string[];
   mergedIndexEntries: number;
+  aidocsCopied: string[];
+  skillWritten: boolean;
 }
 
 // ── 跳過目錄 ─────────────────────────────────────────────────────────────────
@@ -57,6 +67,76 @@ function walkMdFiles(dir: string): string[] {
     }
   }
   return results;
+}
+
+function walkFiles(dir: string): string[] {
+  const results: string[] = [];
+  if (!existsSync(dir)) return results;
+  const entries = readdirSync(dir);
+  for (const entry of entries) {
+    const full = join(dir, entry);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      results.push(...walkFiles(full));
+    } else {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+function copyTree(
+  srcDir: string,
+  destDir: string,
+  result: ImportResult,
+  dryRun: boolean,
+  force: boolean,
+): void {
+  for (const srcFile of walkFiles(srcDir)) {
+    const rel = relative(srcDir, srcFile);
+    const destFile = join(destDir, rel);
+    if (existsSync(destFile) && !force) {
+      result.skipped.push(relative(destDir, destFile));
+      continue;
+    }
+    try {
+      if (!dryRun) {
+        mkdirSync(dirname(destFile), { recursive: true });
+        copyFileSync(srcFile, destFile);
+      }
+      result.aidocsCopied.push(relative(destDir, destFile));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result.errors.push(`${relative(srcDir, srcFile)}: ${msg}`);
+    }
+  }
+}
+
+function buildAtomicMemorySkill(aidocsDir: string): string {
+  const indexPath = join(aidocsDir, "_AIDocs", "_INDEX.md");
+  const readmePath = join(aidocsDir, "README.md");
+  const techPath = join(aidocsDir, "TECH.md");
+  return [
+    "description: Use when the task involves the Atomic Memory system imported from ~/.claude, including atom formats, Workflow Guardian hooks, V4/V4.1 scope rules, episodic memory, or the _AIDocs knowledge base.",
+    "",
+    "# Atomic Memory",
+    "",
+    "When the user asks about the Atomic Memory system, import/migration from Claude, Workflow Guardian behavior, or asks to apply those rules inside CatClaw/Codex CLI:",
+    "",
+    `1. Read \`${indexPath}\` first for the documentation index.`,
+    `2. For setup and usage overview, read \`${readmePath}\` and \`${techPath}\` if needed.`,
+    "3. Follow the minimal set of referenced documents from _AIDocs rather than loading everything.",
+    "4. Prefer treating those docs as the source of truth for Atomic Memory concepts such as scopes, hooks, episodic memory, conflict review, and wisdom/reflection flows.",
+    "5. If the imported docs are missing, fall back to reading from `~/.claude/_AIDocs/` directly if it exists.",
+    "",
+    "Key references to use selectively:",
+    "- `_AIDocs/Architecture.md`",
+    "- `_AIDocs/Project_File_Tree.md`",
+    "- `_AIDocs/SPEC_ATOM_V4.md`",
+    "- `_AIDocs/V4.1-design-roundtable.md`",
+    "- `_AIDocs/DocIndex-System.md`",
+    "",
+  ].join("\n");
 }
 
 /**
@@ -99,8 +179,24 @@ function parseAtomMeta(filePath: string): { trigger: string; confidence: string 
 // ── 主要函式 ─────────────────────────────────────────────────────────────────
 
 export async function importFromClaude(opts: ImportOptions): Promise<ImportResult> {
-  const { sourcePath, destPath, force = false, dryRun = false } = opts;
-  const result: ImportResult = { copied: [], skipped: [], errors: [], mergedIndexEntries: 0 };
+  const {
+    sourceRoot = join(homedir(), ".claude"),
+    sourcePath,
+    destPath,
+    importAidocs = true,
+    aidocsDestPath = join(resolveCatclawDir(), "aidocs", "claude-atomic-memory"),
+    skillDestDir = join(resolveCatclawDir(), "skills", "atomic-memory"),
+    force = false,
+    dryRun = false,
+  } = opts;
+  const result: ImportResult = {
+    copied: [],
+    skipped: [],
+    errors: [],
+    mergedIndexEntries: 0,
+    aidocsCopied: [],
+    skillWritten: false,
+  };
 
   if (!existsSync(sourcePath)) {
     throw new Error(`來源路徑不存在：${sourcePath}`);
@@ -163,7 +259,46 @@ export async function importFromClaude(opts: ImportOptions): Promise<ImportResul
     }
   }
 
-  log.info(`[import-claude] 完成：複製 ${result.copied.length}，跳過 ${result.skipped.length}，錯誤 ${result.errors.length}`);
+  // ── 3. 匯入 _AIDocs + README/TECH + prompt skill ────────────────────────
+  if (importAidocs) {
+    const sourceAidocsDir = join(sourceRoot, "_AIDocs");
+    if (existsSync(sourceAidocsDir)) {
+      copyTree(sourceAidocsDir, join(aidocsDestPath, "_AIDocs"), result, dryRun, force);
+    }
+
+    for (const file of ["README.md", "TECH.md", "CLAUDE.md"]) {
+      const src = join(sourceRoot, file);
+      const dest = join(aidocsDestPath, file);
+      if (!existsSync(src)) continue;
+      try {
+        if (!dryRun) {
+          mkdirSync(dirname(dest), { recursive: true });
+          if (!existsSync(dest) || force) copyFileSync(src, dest);
+        }
+        if (!existsSync(dest) || force) result.aidocsCopied.push(relative(aidocsDestPath, dest));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        result.errors.push(`${file}: ${msg}`);
+      }
+    }
+
+    const skillPath = join(skillDestDir, "SKILL.md");
+    try {
+      if (!dryRun) {
+        mkdirSync(skillDestDir, { recursive: true });
+        writeFileSync(skillPath, buildAtomicMemorySkill(aidocsDestPath), "utf-8");
+      }
+      result.skillWritten = true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result.errors.push(`SKILL.md: ${msg}`);
+    }
+  }
+
+  log.info(
+    `[import-claude] 完成：記憶 ${result.copied.length}，AIDocs ${result.aidocsCopied.length}，` +
+    `跳過 ${result.skipped.length}，錯誤 ${result.errors.length}`
+  );
   return result;
 }
 
@@ -173,17 +308,25 @@ if (process.argv[1]?.endsWith("import-claude.js") || process.argv[1]?.endsWith("
   const args = process.argv.slice(2);
   const force = args.includes("--force");
   const dryRun = args.includes("--dry-run");
+  const memoryOnly = args.includes("--memory-only");
 
+  const sourceRoot = args.find(a => a.startsWith("--source-root="))?.slice(14)
+    ?? join(homedir(), ".claude");
   const sourcePath = args.find(a => a.startsWith("--source="))?.slice(9)
-    ?? join(homedir(), ".claude", "memory");
+    ?? join(sourceRoot, "memory");
   const destPath = args.find(a => a.startsWith("--dest="))?.slice(7)
-    ?? join(getBootAgentDataDir(), "memory", "global");
+    ?? join(getBootAgentDataDir(), "memory");
 
-  console.log(`[import-claude] source=${sourcePath}  dest=${destPath}  force=${force}  dryRun=${dryRun}`);
+  console.log(
+    `[import-claude] source=${sourcePath}  dest=${destPath}  force=${force}  dryRun=${dryRun}  importAidocs=${!memoryOnly}`
+  );
 
   try {
-    const result = await importFromClaude({ sourcePath, destPath, force, dryRun });
-    console.log(`✅ 完成：複製 ${result.copied.length} 個，跳過 ${result.skipped.length} 個，合併索引 ${result.mergedIndexEntries} 條`);
+    const result = await importFromClaude({ sourceRoot, sourcePath, destPath, importAidocs: !memoryOnly, force, dryRun });
+    console.log(
+      `✅ 完成：記憶 ${result.copied.length} 個，AIDocs ${result.aidocsCopied.length} 個，` +
+      `跳過 ${result.skipped.length} 個，合併索引 ${result.mergedIndexEntries} 條`
+    );
     if (result.errors.length > 0) {
       console.error(`❌ 錯誤 ${result.errors.length} 個：`);
       result.errors.forEach(e => console.error("  ", e));

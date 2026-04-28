@@ -3,7 +3,8 @@
  * @description /migrate 記憶遷移管理 skill（tier=admin）
  *
  * 子命令：
- *   /migrate import [--force] [--dry-run]  — 從 ~/.claude 匯入記憶
+ *   /migrate import [--force] [--dry-run] [--memory-only]
+ *                                          — 從 ~/.claude 匯入記憶，預設連 _AIDocs + Atomic Memory skill 一起帶入
  *   /migrate rebuild [<memoryDir>]          — 重建 MEMORY.md 索引
  *   /migrate seed [--dry-run]              — 將 atom 嵌入至 LanceDB（global）
  *   /migrate vector-resync [--dry-run] [--rebuild]
@@ -26,7 +27,9 @@ import { getBootAgentDataDir } from "../../core/agent-loader.js";
 async function handleImport(args: string): Promise<SkillResult> {
   const force = args.includes("--force");
   const dryRun = args.includes("--dry-run");
+  const memoryOnly = args.includes("--memory-only");
 
+  const sourceRoot = join(homedir(), ".claude");
   const sourcePath = join(homedir(), ".claude", "memory");
   const destPath = join(getBootAgentDataDir(), "memory");
 
@@ -36,17 +39,28 @@ async function handleImport(args: string): Promise<SkillResult> {
 
   try {
     const { importFromClaude } = await import("../../migration/import-claude.js");
-    const result = await importFromClaude({ sourcePath, destPath, force, dryRun });
+    const result = await importFromClaude({
+      sourceRoot,
+      sourcePath,
+      destPath,
+      importAidocs: !memoryOnly,
+      force,
+      dryRun,
+    });
 
     return {
       text: [
         dryRun ? "**[Dry Run] 遷移預覽**" : "**記憶遷移完成**",
         `• 複製：${result.copied.length} 個 atom`,
+        !memoryOnly ? `• AIDocs：${result.aidocsCopied.length} 個檔案` : null,
+        !memoryOnly ? `• Prompt skill：${result.skillWritten ? "已建立" : "未建立"}` : null,
         `• 跳過：${result.skipped.length} 個（已存在）`,
         `• 合併索引：${result.mergedIndexEntries} 條`,
         result.errors.length > 0 ? `• ❌ 錯誤：${result.errors.length} 個` : null,
         `\n來源：\`${sourcePath}\`\n目標：\`${destPath}\``,
+        !memoryOnly ? `Atomic Memory Docs：\`${join(resolveCatclawDir(), "aidocs", "claude-atomic-memory")}\`` : null,
         !force && !dryRun ? "\n提示：加 `--force` 覆寫已存在的 atom" : null,
+        !memoryOnly ? "提示：新 prompt skill 已寫入 `~/.catclaw/skills/atomic-memory/`；若要立即穩定生效，建議重啟 bot/bridge。" : null,
       ].filter(Boolean).join("\n"),
     };
   } catch (err) {
@@ -225,7 +239,7 @@ function handleStatus(): SkillResult {
       "**遷移狀態**",
       `• \`~/.claude/memory/\` → ${src} 個 atom${existsSync(claudeMemory) ? "" : "（路徑不存在）"}`,
       `• \`${catclawMemory}/\` → ${dst} 個 atom${existsSync(catclawMemory) ? "" : "（路徑不存在）"}`,
-      src > dst ? `\n提示：執行 \`/migrate import\` 遷移 ~${src - dst} 個尚未複製的 atom` : null,
+      src > dst ? `\n提示：執行 \`/migrate import\` 遷移 ~${src - dst} 個尚未複製的 atom；預設也會匯入 Atomic Memory _AIDocs` : null,
     ].filter(Boolean).join("\n"),
   };
 }
@@ -289,7 +303,7 @@ export const skill: Skill = {
         return {
           text: [
             "**`/migrate` 子命令**",
-            "• `import [--force] [--dry-run]` — 從 `~/.claude/memory/` 匯入記憶",
+            "• `import [--force] [--dry-run] [--memory-only]` — 從 `~/.claude/memory/` 匯入記憶；預設也匯入 `_AIDocs` 與 Atomic Memory prompt skill",
             "• `rebuild [<memoryDir>] [--dry-run]` — 重建 `MEMORY.md` 索引",
             "• `seed [--dry-run]` — 將記憶目錄 atom 嵌入至 LanceDB（global only）",
             "• `vector-resync [--dry-run] [--rebuild]` — 全層向量 resync；--rebuild 先 dropTable 再 seed（換模型/維度時用）",
