@@ -102,8 +102,8 @@ Discord → 身份解析 → 權限閘門 → prompt-assembler → agent loop（
 | [modules/session-snapshot.md](modules/session-snapshot.md) | `src/core/session-snapshot.ts` | Session 快照與回退 | 2026-04-06 |
 | [modules/tool-log-store.md](modules/tool-log-store.md) | `src/core/tool-log-store.ts` | Tool log 持久化 | 2026-04-06 |
 | [modules/inbound-history.md](modules/inbound-history.md) | `src/discord/inbound-history.ts` | 未處理訊息記錄 | 2026-04-06 |
-| [modules/cron.md](modules/cron.md) | `src/cron.ts` | 排程服務 | 2026-03-22 |
-| [modules/cli-bridge.md](modules/cli-bridge.md) | `src/cli-bridge/` | CLI Bridge 持久 process 模組 | 2026-04-09 |
+| [modules/cron.md](modules/cron.md) | `src/cron.ts` | 排程服務 | 2026-04-29 |
+| [modules/cli-bridge.md](modules/cli-bridge.md) | `src/cli-bridge/` | CLI Bridge 持久 process 模組 | 2026-04-29 |
 | [modules/index.md](modules/index.md) | `src/index.ts` | 進入點 | 2026-03-22 |
 | [modules/logger.md](modules/logger.md) | `src/logger.ts` | Log 系統 | 2026-03-22 |
 | [modules/pm2.md](modules/pm2.md) | `catclaw.js` | PM2 進程管理 | 2026-03-22 |

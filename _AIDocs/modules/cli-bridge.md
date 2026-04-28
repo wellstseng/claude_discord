@@ -46,6 +46,7 @@
 - **discord.ts**：在 Subagent Thread 路由之後、Agent Loop 路由之前，動態 import `getCliBridge` 判斷
 - **index.ts**：`clientReady` 時呼叫 `startAllBridges()`，shutdown 時 `shutdownAllBridges()`
 - **config.ts**：`BridgeConfig.cliBridge?: CliBridgeConfig`
+- **cron.ts**：`cli-bridge` action 透過 `getCliBridgeByLabel()` / `getCliBridge()` 取 bridge → `ensureAlive()` → `bridge.send(task, "cron", { user: "system-cron" })` 注入排程 task 到對應 CLI session（`source` 多了 `"cron"` 來源；`TurnRecord.source` 同步擴充）
 
 ## 設定
 

@@ -3,6 +3,7 @@
 > 知識庫變更紀錄（最新在上，超過 8 筆觸發滾動淘汰）
 
 | 日期 | 變更 | 影響文件 |
+| 2026-04-29 | **feat(cron): 新增 cli-bridge action — 把任務注入指定 bridge 的 stdin** — `CronAction` 加 `cli-bridge` 類別，cron 排程觸發時用 `label`/`channelId` 取已註冊的 CLI Bridge，`ensureAlive()` 後 `bridge.send(task, "cron", ...)` 把 task 直接注入該 bridge 對應的長駐 CLI session（fire-and-forget；`awaitResult=true` 才等 turn 完成）。配套：`bridge.send()`/`wrapWithChannelTag()` 的 `source` 加 `"cron"`，`TurnRecord.source` 同步擴充。比起 `message`+messageCreate 自動注入更直接，不撞 bot-circuit-breaker；比起 `claude-acp` 不另開新進程，沿用現有 bridge session 與工具配置 | src/cron.ts, src/core/config.ts, src/cli-bridge/bridge.ts, src/cli-bridge/types.ts, _AIDocs/modules/cron.md, _AIDocs/modules/cli-bridge.md |
 | 2026-04-26 | **fix(subagent-bridge): 完成通知改分段 reply（多訊息）+ 不再硬切 500 字** — (1) 完成通知不再硬切 500 字，改 1900 字 inline 或 .md 附件；(2) 進一步改為分段 reply（多訊息），不用附件 — 行動裝置可直接讀，無需開附件 | src/core/subagent-discord-bridge.ts |
 | 2026-04-26 | **feat(dashboard-models): 模型快捷依憑證 provider 分組 + 動態抽取** — (1) 模型快捷依 auth profiles 的 provider 動態分組（跟著 auth profile 變動）；(2) 模型面板依 provider 列出 models.json 全部模型；(3) 內建模型清單改從 pi-ai 動態抽取（不再寫死） | src/core/dashboard.ts, models-config.json |
 | 2026-04-26 | **feat(memory-vector): embedding 模型漂移偵測 + 完整重建模式** — (1) 偵測 namespace dim mismatch，dashboard 警示 banner 提示重建索引；(2) `upsert` 自動處理 dim mismatch — drop+rebuild 該 namespace；(3) 完整重建模式（drop + seed），`deleteAtom` 同步清向量 DB | src/vector/, src/memory/{engine,memory-api}.ts, src/core/dashboard.ts |

@@ -18,7 +18,7 @@
 | **帳號權限** | 註冊、identity linking、5 級角色（guest/member/developer/admin/platform-owner）、per-channel 權限閘門 |
 | **Subagent** | 子任務分派 + **Discord thread / 分段 reply bridge** + 追蹤（>1980 字自動分頁帶 `_(i/total)_` 標記） |
 | **Health Monitor** | Component-level fail-loud + 啟動健康總覽（紅綠燈）+ degraded/critical 連續失敗偵測 + Discord 通報 |
-| **排程** | cron / every / at — message、subagent、exec、claude-acp 動作 + `/cron` skill 動態管理 + agent 隔離 |
+| **排程** | cron / every / at — message、subagent、exec、claude-acp、cli-bridge 動作 + `/cron` skill 動態管理 + agent 隔離 |
 | **Discord** | 串流回覆、debounce、thread 繼承、附件處理、crash recovery、bot circuit breaker |
 | **Dashboard** | Web UI（port 8088）— REST API、訊息追蹤視覺化、token 用量、session 管理 |
 

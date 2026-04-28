@@ -18,7 +18,7 @@ Discord-based AI Agent platform with full development capabilities — multi-tur
 | **Accounts** | Registration, identity linking, 5-tier roles (guest/member/developer/admin/platform-owner), per-channel permission gate |
 | **Subagent** | Sub-task dispatch + **Discord thread / paged-reply bridge** + tracking (auto-paginates results > 1980 chars with `_(i/total)_` markers) |
 | **Health Monitor** | Component-level fail-loud + startup health summary (red/green) + degraded/critical streak detection + Discord alerts |
-| **Scheduling** | cron / every / at — message, subagent, exec, claude-acp actions + `/cron` skill + agent isolation |
+| **Scheduling** | cron / every / at — message, subagent, exec, claude-acp, cli-bridge actions + `/cron` skill + agent isolation |
 | **Discord** | Streaming reply, debounce, thread inheritance, attachment handling, crash recovery, bot circuit breaker |
 | **Dashboard** | Web UI at port 8088 — REST API, message trace visualization, token usage, session management |
 

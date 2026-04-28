@@ -148,7 +148,7 @@ interface Skill {
 | `/aidocs-audit` | `/aidocs-audit`, `/aidocs audit` | 審計 _AIDocs 覆蓋率：列出缺失或未覆蓋的模組 | elevated |
 | `/aidocs-update` | `/aidocs-update`, `/aidocs update` | 檢查並顯示指定模組文件與原始碼的差異摘要 | elevated |
 | `/hook` | `/hook` | Hook 系統管理（list / events / remove / help） | standard |
-| `/cron` | `/cron`, `/排程`, `/remind`, `/提醒` | 排程管理（建立、列出、刪除、啟停排程；支援 msg/exec/claude/agent 動作） | standard |
+| `/cron` | `/cron`, `/排程`, `/remind`, `/提醒` | 排程管理（建立、列出、刪除、啟停排程；支援 msg/exec/claude/agent/cli-bridge 動作） | standard |
 | `/subagents` | `/subagents` | 查詢與管理子 agent（list / kill） | standard |
 | `/stop` | `/stop` | 強制中斷當前 turn，自動回退 session 到本次前的狀態 | standard |
 | `/queue` | `/queue` | 查看 TurnQueue 狀態（幾條排隊） | standard |
