@@ -1225,6 +1225,9 @@ export async function* agentLoop(
   let totalOutputTokens = 0;
   let totalCacheRead = 0;
   let totalCacheWrite = 0;
+  // 最後一次 LLM call 的單次 prompt 大小（含 cache_read/cache_write，這兩者也算 prompt token）
+  // — 用於 model context window 用量警告，避免把多輪 tool-use 的累積值誤當成單次 prompt
+  let lastCallPromptTokens = 0;
   let lastModel: string | undefined;
   let lastProviderType: string | undefined;
   let lastEstimated = false;
@@ -1463,6 +1466,7 @@ export async function* agentLoop(
       totalOutputTokens += streamResult.usage.output;
       totalCacheRead += streamResult.usage.cacheRead ?? 0;
       totalCacheWrite += streamResult.usage.cacheWrite ?? 0;
+      lastCallPromptTokens = streamResult.usage.input + (streamResult.usage.cacheRead ?? 0) + (streamResult.usage.cacheWrite ?? 0);
       lastModel = streamResult.usage.model;
       lastProviderType = streamResult.usage.providerType;
       if (streamResult.usage.estimated) lastEstimated = true;
@@ -2230,18 +2234,21 @@ export async function* agentLoop(
     }
 
     // LLM Model context window
+    // 比較對象是「單次 API request 的 prompt 大小」，所以用最後一次 LLM call 的 prompt tokens
+    // （含 cache_read/cache_write — cache hit 仍要把整段送進 request body 比對，算 prompt 總量）
+    // 不能用 totalInputTokens：那是整個 turn 內所有 LLM 呼叫的累積值，多輪 tool-use 會嚴重高估
     const modelWindow = provider.maxContextTokens;
-    if (modelWindow > 0) {
-      const modelUtil = totalInputTokens / modelWindow;
+    if (modelWindow > 0 && lastCallPromptTokens > 0) {
+      const modelUtil = lastCallPromptTokens / modelWindow;
       const modelWarned = session as unknown as { _modelContextWarned?: { high?: boolean; critical?: boolean } };
       modelWarned._modelContextWarned ??= {};
 
       if (modelUtil >= 0.9 && !modelWarned._modelContextWarned.critical) {
         modelWarned._modelContextWarned.critical = true;
-        yield { type: "context_warning", level: "critical", utilization: modelUtil, estimatedTokens: totalInputTokens, contextWindow: modelWindow, source: "model" };
+        yield { type: "context_warning", level: "critical", utilization: modelUtil, estimatedTokens: lastCallPromptTokens, contextWindow: modelWindow, source: "model" };
       } else if (modelUtil >= 0.7 && !modelWarned._modelContextWarned.high) {
         modelWarned._modelContextWarned.high = true;
-        yield { type: "context_warning", level: "high", utilization: modelUtil, estimatedTokens: totalInputTokens, contextWindow: modelWindow, source: "model" };
+        yield { type: "context_warning", level: "high", utilization: modelUtil, estimatedTokens: lastCallPromptTokens, contextWindow: modelWindow, source: "model" };
       }
     }
   }
