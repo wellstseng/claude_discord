@@ -25,6 +25,7 @@ import { config, resolveWorkspaceDir } from "./core/config.js";
 import { MessageTrace } from "./core/message-trace.js";
 import type { CronSchedule, CronAction } from "./core/config.js";
 import { runClaudeTurn } from "./acp.js";
+import { getCliBridge, getCliBridgeByLabel } from "./cli-bridge/index.js";
 import { log } from "./logger.js";
 
 // ── 型別定義 ────────────────────────────────────────────────────────────────
@@ -532,6 +533,64 @@ async function execSubagent(action: {
 }
 
 /**
+ * 執行 cli-bridge action：把 task 注入指定 bridge 的 stdin，由該 CLI session 接手處理。
+ *
+ * 預設 fire-and-forget；awaitResult=true 才等 turn 結束。
+ * Bridge 解析優先序：label → channelId。
+ */
+async function execCliBridge(action: {
+  label?: string;
+  channelId?: string;
+  task: string;
+  awaitResult?: boolean;
+  timeoutMs?: number;
+}): Promise<void> {
+  const bridge = action.label
+    ? getCliBridgeByLabel(action.label)
+    : action.channelId
+      ? getCliBridge(action.channelId)
+      : undefined;
+
+  if (!bridge) {
+    throw new Error(`找不到 CLI Bridge（label=${action.label ?? "-"} channelId=${action.channelId ?? "-"}）`);
+  }
+
+  // 確保 CLI process 還活著（必要時觸發重啟）
+  await bridge.ensureAlive();
+
+  const handle = bridge.send(action.task, "cron", {
+    user: "system-cron",
+    ts: new Date().toISOString(),
+  });
+
+  log.info(`[cron/cli-bridge] 已注入 task 到 bridge=${action.label ?? action.channelId}, turn=${handle.turnId.slice(0, 8)}`);
+
+  if (!action.awaitResult) return;
+
+  // 等 turn 完成
+  const timeoutMs = action.timeoutMs ?? 1_800_000;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+
+  try {
+    for await (const event of handle.events) {
+      if (ac.signal.aborted) {
+        handle.abort();
+        throw new Error(`cli-bridge turn timeout（${Math.round(timeoutMs / 1000)}s）`);
+      }
+      if (event.type === "result") {
+        if (event.is_error) {
+          throw new Error(`cli-bridge turn 失敗：${event.text || "(no error message)"}`);
+        }
+        return;
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * 執行單一 job
  */
 async function runJob(job: CronJobRuntime): Promise<void> {
@@ -547,6 +606,8 @@ async function runJob(job: CronJobRuntime): Promise<void> {
       await execSubagent(entry.action);
     } else if (entry.action.type === "claude-acp") {
       await execClaude(entry.action.channelId, entry.action.prompt, entry.action.timeoutSec);
+    } else if (entry.action.type === "cli-bridge") {
+      await execCliBridge(entry.action);
     } else {
       log.warn(`[cron] 未知 action type：${(entry.action as { type: string }).type}，跳過`);
     }

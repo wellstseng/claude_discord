@@ -84,6 +84,20 @@ export type CronAction =
       timeoutMs?: number;
       /** 完成後通知頻道，格式："discord:ch:{channelId}" */
       notify?: string;
+    }
+  | {
+      /** 注入訊息到 CLI Bridge 的 stdin，由該 bridge 對應的 CLI session 處理任務 */
+      type: "cli-bridge";
+      /** Bridge label（建議；比 channelId 穩定）。label 與 channelId 至少要有一個 */
+      label?: string;
+      /** 或用 channelId 取對應 bridge */
+      channelId?: string;
+      /** 注入給 CLI 的 user message 內容 */
+      task: string;
+      /** true=等 turn 完成；false=fire-and-forget。預設 false */
+      awaitResult?: boolean;
+      /** awaitResult=true 時的 timeout（毫秒），預設 1800000（30 分鐘） */
+      timeoutMs?: number;
     };
 
 export interface CronConfig {

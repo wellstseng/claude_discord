@@ -167,7 +167,7 @@ export interface TurnRecord {
   turnId: string;
   startedAt: string;          // ISO 8601
   completedAt?: string;
-  source: "discord" | "dashboard";
+  source: "discord" | "dashboard" | "cron";
   userInput: string;
   toolCalls: Array<{ name: string; preview: string; durationMs?: number }>;
   assistantReply: string;

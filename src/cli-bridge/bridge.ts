@@ -139,7 +139,7 @@ export class CliBridge {
 
   // ── 送訊息（直送 stdin，不排隊）──────────────────────────────────────────
 
-  send(text: string, source: "discord" | "dashboard", meta?: { user?: string; ts?: string; imageBlocks?: StdinImageBlock[]; sourceChannelId?: string }): TurnHandle {
+  send(text: string, source: "discord" | "dashboard" | "cron", meta?: { user?: string; ts?: string; imageBlocks?: StdinImageBlock[]; sourceChannelId?: string }): TurnHandle {
     this._lastUsedAt = Date.now();
     const turnId = randomUUID();
 
@@ -585,7 +585,7 @@ export class CliBridge {
    */
   private wrapWithChannelTag(
     text: string,
-    source: "discord" | "dashboard",
+    source: "discord" | "dashboard" | "cron",
     meta?: { user?: string; ts?: string; sourceChannelId?: string },
   ): string {
     const ts = meta?.ts ?? new Date().toISOString();
