@@ -57,7 +57,7 @@ import { runMessagePipeline } from "./core/message-pipeline.js";
 import { setDiscordClient, getSubagentThreadBinding } from "./core/subagent-discord-bridge.js";
 import { parseApprovalReply, parseApprovalButtonId, resolveApproval, setApprovalDiscordClient } from "./core/exec-approval.js";
 import { abortRunningTurn } from "./skills/builtin/stop.js";
-import { MessageTrace } from "./core/message-trace.js";
+import { MessageTrace, getTraceStore } from "./core/message-trace.js";
 import { setTaskUiDiscordClient, registerTaskUiListener, handleTaskButtonInteraction } from "./core/task-ui.js";
 
 // ── 訊息去重 ─────────────────────────────────────────────────────────────────
@@ -679,8 +679,11 @@ async function handleMessage(
         const result = await skill.execute(skillCtx);
         await firstMessage.reply(result.text).catch((e) => log.warn(`[discord] skill ${skill.name} reply 失敗：${e instanceof Error ? e.message : String(e)}`));
       } catch (err) {
+        trace.recordError(err instanceof Error ? err.message : String(err));
         log.warn(`[discord] skill ${skill.name} 執行失敗：${err instanceof Error ? err.message : String(err)}`);
         await firstMessage.reply(`❌ ${skill.name} 執行失敗`).catch((e) => log.warn(`[discord] skill error reply 失敗：${e instanceof Error ? e.message : String(e)}`));
+      } finally {
+        getTraceStore()?.append(trace.finalize());
       }
       return;
     }

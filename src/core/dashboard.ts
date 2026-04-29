@@ -1588,6 +1588,7 @@ async function loadCron() {
     const jobs = d.jobs || {};
     const entries = Object.entries(jobs);
     if (!entries.length) { document.getElementById('cron-list').innerHTML = '<p style="color:#888;font-size:0.8rem">無 cron job</p>'; return; }
+    const escHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const rows = entries.map(([id, job]) => {
       const j = job;
       const schedStr = j.schedule.kind === 'cron' ? j.schedule.expr
@@ -1598,23 +1599,38 @@ async function loadCron() {
       const resultBadge = j.lastResult === 'success' ? '<span class="badge badge-done">✓</span>' : j.lastResult === 'error' ? '<span class="badge badge-err">✗</span>' : '-';
       const enCls = j.enabled !== false ? 'badge-done' : 'badge-err';
       const enLabel = j.enabled !== false ? '啟用' : '停用';
-      return \`<tr>
+      const actionType = (j.action && j.action.type) || '-';
+      const actionTag = \`<span class="badge" style="background:#3a4a5a;color:#9cf;font-size:0.7rem;margin-right:4px">\${actionType}</span>\`;
+      const cronId = 'cron-' + id.replace(/[^a-zA-Z0-9]/g, '_');
+      const colCount = 9;
+      const fullIdBlock = \`<div><strong>完整 ID：</strong><code>\${escHtml(id)}</code></div>\`;
+      const retryBlock = \`<div style="margin-top:4px"><strong>重試：</strong>\${j.retryCount ?? 0} / \${j.maxRetries ?? 3}</div>\`;
+      const deleteAfterRunBlock = j.deleteAfterRun ? '<div style="margin-top:4px;color:#fc6">⚠ 一次性 job（執行後自動刪除）</div>' : '';
+      const lastErrorBlock = j.lastError ? \`<div style="color:#f99;margin-top:6px"><strong>上次錯誤：</strong>\${escHtml(j.lastError)}</div>\` : '';
+      const nextIsoBlock = j.nextRunAtMs && j.nextRunAtMs < 9e15 ? \`<div style="margin-top:4px;color:#888;font-size:0.72rem">下次（ISO）：\${new Date(j.nextRunAtMs).toISOString()}</div>\` : '';
+      const actionPretty = JSON.stringify(j.action, null, 2);
+      const actionBlock = \`<div style="margin-top:6px"><strong>Action：</strong></div><pre style="margin:4px 0;padding:8px;background:var(--bg5,#1a1a1a);border-radius:4px;font-size:0.72rem;overflow-x:auto">\${escHtml(actionPretty)}</pre>\`;
+      const expandContent = \`<div style="font-size:0.8rem;color:var(--fg2)">\${fullIdBlock}\${retryBlock}\${deleteAfterRunBlock}\${lastErrorBlock}\${nextIsoBlock}\${actionBlock}</div>\`;
+      const headerHtml = \`<tr data-cronid="\${cronId}" style="cursor:pointer" onclick="toggleCronRow(this,'\${cronId}')">
         <td title="\${id}">\${id.slice(-8)}</td>
         <td>\${j.name||'-'}</td>
         <td style="font-size:0.72rem;color:#aaa">\${j.agentId||'-'}</td>
-        <td style="font-size:0.72rem;font-family:monospace">\${schedStr}</td>
+        <td style="font-size:0.72rem;font-family:monospace">\${actionTag}\${schedStr}</td>
         <td><span class="badge \${enCls}">\${enLabel}</span></td>
         <td style="font-size:0.72rem">\${lastRun}</td>
         <td>\${resultBadge}</td>
         <td style="font-size:0.72rem">\${nextRun}</td>
-        <td style="white-space:nowrap">
+        <td style="white-space:nowrap" onclick="event.stopPropagation()">
           <button class="btn btn-sm btn-green" onclick="triggerCronJob('\${id}')">▶</button>
           <button class="btn btn-sm" onclick="toggleCronJob('\${id}', \${j.enabled === false})">⊘</button>
           <button class="btn btn-sm btn-red" onclick="deleteCronJob('\${id}')">✕</button>
-        </td>\`;
+        </td>
+      </tr>\`;
+      const expandHtml = \`<tr class="cron-expand" id="row-\${cronId}" style="display:none"><td colspan="\${colCount}" style="padding:8px 12px;background:var(--bg4)">\${expandContent}</td></tr>\`;
+      return headerHtml + expandHtml;
     }).join('');
     document.getElementById('cron-list').innerHTML =
-      \`<table class="tbl"><thead><tr><th>ID</th><th>名稱</th><th>Agent</th><th>排程</th><th>狀態</th><th>上次執行</th><th>結果</th><th>下次執行</th><th>操作</th></tr></thead><tbody>\${rows}</tbody></table>\`;
+      \`<table class="tbl"><thead><tr><th>短 ID</th><th>名稱</th><th>所屬 Agent</th><th>排程表達式</th><th>狀態</th><th>上次執行</th><th>上次結果</th><th>下次執行</th><th>操作</th></tr></thead><tbody>\${rows}</tbody></table>\`;
   } catch(e) { document.getElementById('cron-list').innerHTML = '讀取失敗：' + e; }
 }
 
@@ -1654,6 +1670,19 @@ async function toggleCronJob(id, enable) {
     if (d.success) { loadCron(); }
     else showCronMsg('錯誤：' + d.error, false);
   } catch(e) { showCronMsg('失敗：' + e, false); }
+}
+
+function toggleCronRow(headerRow, cronId) {
+  const expandRow = document.getElementById('row-' + cronId);
+  if (!expandRow) return;
+  const isOpen = expandRow.style.display !== 'none';
+  if (isOpen) {
+    expandRow.style.display = 'none';
+    headerRow.style.background = '';
+  } else {
+    expandRow.style.display = '';
+    headerRow.style.background = 'var(--bg3)';
+  }
 }
 
 function showCronMsg(msg, ok) {
