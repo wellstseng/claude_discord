@@ -254,6 +254,23 @@ export function getChannelAccess(
 ### `watchConfig(): void`
 
 啟動 config.json 監聯，變動時自動重載（500ms debounce）。
+若 `config.hotReload.config === false`（預設 true），呼叫時直接 return 不啟動監聽。
+
+### Hot-Reload 粒度開關（2026-04-29 起）
+
+CatClaw 三個設定檔各自的 hot-reload 由 `hotReload` 區塊獨立控制：
+
+```jsonc
+{
+  "hotReload": {
+    "config": true,        // catclaw.json 自身（預設 true）
+    "cron": false,         // cron-jobs.json（預設 false — saveStore 自寫回有 race 風險）
+    "cliBridges": true     // cli-bridges.json（預設 true）
+  }
+}
+```
+
+未設定時套用預設值。`cron` 預設 false 是因為 cron-jobs.json 由 `cron.ts` `saveStore` 自寫回，即便有 `selfWriting` flag 過濾仍偶爾撞 race；`/cron` skill / Dashboard `/api/cron` 已提供動態 CRUD，無需 hot-reload 也能達到相同效果。
 
 ## 完整 Export 列表
 

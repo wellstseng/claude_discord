@@ -278,6 +278,10 @@ function reloadJobs(): void {
  * 監聽 cron-jobs.json 變更，自動 reload（500ms debounce）
  */
 function watchCronJobs(): void {
+  if (config.hotReload?.cron === false) {
+    log.info("[cron] hot-reload 已停用（hotReload.cron=false）");
+    return;
+  }
   if (!existsSync(STORE_PATH)) return;
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;

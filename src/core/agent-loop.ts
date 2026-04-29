@@ -121,6 +121,7 @@ const LOOP_EXTEND_STEP = 10;
 const LOOP_CAP_CEILING = 80;
 const MAX_CONTINUATIONS = 3;  // Output Token Recovery：max_tokens 截斷時最多自動續接次數
 const MAX_DEFERRED_NUDGES = 3;  // Deferred tool 活化後空回應 → 注入續接提示的最大次數
+const MAX_EMPTY_TOOL_USE = 3;  // 連續空 tool_use iteration 上限（stopReason=tool_use 但 toolCalls=[]，防模型死循環）
 const ACTIVATE_PER_ITER_LIMIT = 3;  // 每輪最多活化幾個 deferred tool（防 Anthropic 批次活化空回應 quirk）
 const MAX_SAME_TOOL_PER_TURN = 5;  // 同 tool 在 turn 內最多 5 次（防散彈式重複，trace a1cfb101）
 const ZERO_PROGRESS_BAIL = 5;  // 連續 N iter「0 tool + 短文本」→ 中止 turn（防 11 輪乾打草稿）
@@ -1220,6 +1221,8 @@ export async function* agentLoop(
   let deferredNudgeExhausted = false;         // nudge 用完還在空轉 → 給使用者通知
   let zeroProgressIters = 0;                  // 連續「0 tool + 短文本」iter 計數（防乾打草稿）
   let zeroProgressBailed = false;             // 為 0-progress 中止 → 走 post-loop notice 分支
+  let emptyToolUseCount = 0;                  // stopReason=tool_use 但 toolCalls=[] 的累計次數
+  let emptyToolUseExhausted = false;          // emptyToolUseCount 觸頂 → 走 post-loop notice 分支
   const turnStartMs = Date.now();
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -1567,7 +1570,20 @@ export async function* agentLoop(
       }
 
       if (streamResult.stopReason !== "tool_use") break;
-      if (streamResult.toolCalls.length === 0) break;
+      if (streamResult.toolCalls.length === 0) {
+        // 空 tool_use iteration：模型宣告要用工具但沒給 toolCalls（Claude API 偶見 quirk）
+        // 不直接 break，給模型再一次機會，但累計到 MAX_EMPTY_TOOL_USE 就強制中止避免死循環。
+        // loopCount 仍由 while 條件遞增，loopCap 防護不變。
+        emptyToolUseCount++;
+        log.warn(`[agent-loop] [loop=${loopCount}] 空 tool_use iteration（${emptyToolUseCount}/${MAX_EMPTY_TOOL_USE}）`);
+        if (emptyToolUseCount >= MAX_EMPTY_TOOL_USE) {
+          emptyToolUseExhausted = true;
+          break;
+        }
+        continue;
+      }
+      // 有實際 tool 呼叫 → 重置空回應計數（避免偶發 1 次空回應後永久卡計數）
+      emptyToolUseCount = 0;
 
       // ── 5c. Tool 執行 ──────────────────────────────────────────────────────
       log.debug(`[agent-loop] [loop=${loopCount}] 執行 ${streamResult.toolCalls.length} 個 tool: ${streamResult.toolCalls.map(t => t.name).join(", ")}`);
@@ -2053,11 +2069,21 @@ export async function* agentLoop(
       ? `\n\n⏸️ 本輪被插話中斷（已執行 ${toolsRun} 個工具）。下一輪會接續處理你的新訊息。`
       : `⏸️ 本輪被插話中斷。下一輪會處理你的新訊息。`;
     log.info(`[agent-loop] turn 被中斷：sessionKey=${sessionKey} tools=${toolsRun}`);
+  } else if (emptyToolUseExhausted) {
+    // 模型連續產出「空 tool_use」（stopReason=tool_use 但 toolCalls=[]）→ 強制中止
+    // 先於 maxLoopsReached 判斷：若同時觸頂兩者，emptyToolUseCount 才是真正的根因
+    bailNotice = `\n\n⚠️ 模型連續 ${MAX_EMPTY_TOOL_USE} 次產出空 tool_use（宣告要用工具但 toolCalls 為空），自動中止本輪。若要繼續請回覆「繼續」。`;
+    log.warn(`[agent-loop] empty tool_use 觸頂：sessionKey=${sessionKey} count=${emptyToolUseCount}`);
   } else if (maxLoopsReached) {
     const toolsRun = tracker.toolCalls.length;
     const lastTools = tracker.toolCalls.slice(-3).map(tc => tc.name).join(" → ") || "（無）";
     const extended = loopCap > BASE_LOOPS ? `（已自適應延長到 ${loopCap}）` : "";
-    bailNotice = `\n\n⚠️ 已達工具呼叫上限 ${loopCap} 輪${extended}（執行了 ${toolsRun} 個工具，最後 3 個：${lastTools}），自動中止本輪。任務可能未完成 — 若要繼續請回覆「繼續」或補充指示。`;
+    // 名實分流：toolsRun 真的吃滿 cap → 「工具呼叫上限」；否則是 iteration 被空轉/續接吃掉 → 「對話輪次上限」
+    if (toolsRun >= loopCap) {
+      bailNotice = `\n\n⚠️ 已達工具呼叫上限 ${loopCap} 輪${extended}（執行了 ${toolsRun} 個工具，最後 3 個：${lastTools}），自動中止本輪。任務可能未完成 — 若要繼續請回覆「繼續」或補充指示。`;
+    } else {
+      bailNotice = `\n\n⚠️ 已達對話輪次上限 ${loopCap} 輪${extended}（執行了 ${toolsRun} 個工具，最後 3 個：${lastTools}），自動中止本輪。任務可能未完成 — 若要繼續請回覆「繼續」或補充指示。`;
+    }
     log.warn(`[agent-loop] loop cap 觸頂：sessionKey=${sessionKey} cap=${loopCap} tools=${toolsRun}`);
   } else if (deferredNudgeExhausted) {
     // 不是 loop cap 觸頂，而是 Anthropic API 在 tool_search 後連續空回應 end_turn

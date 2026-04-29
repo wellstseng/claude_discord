@@ -1,6 +1,6 @@
 # CLI Bridge 模組
 
-> 原始碼：`src/cli-bridge/` | 更新：2026-04-21
+> 原始碼：`src/cli-bridge/` | 更新：2026-04-29
 
 ## 定位
 
@@ -34,6 +34,7 @@
 - **Session ID 保活** — `persistSessionId()` 寫入 `cli-bridges.json`，重啟後用 `--resume` 恢復對話
 - **`--resume` 取代 `--session-id`** — `--session-id` 會因 `~/.claude/projects/<cwd>/<uuid>.jsonl` 存在報 "already in use"；`--resume` 直接載入既有 session 不做此檢查
 - **Hot-reload sessionId 排除** — `configSnapshotJson()` 比對設定時排除 sessionId，避免 `persistSessionId()` 觸發不必要的 bridge 重建
+- **Hot-reload 開關** — `watchConfigFile()` 啟動前檢查 `config.hotReload.cliBridges`（預設 true）；設 false 時不啟動 fs.watch，所有變更需重啟才生效
 - **process.lastStderr** — `CliProcess` 記錄最後 stderr 輸出，供 bridge crash 偵測使用
 - **圖片附件（multimodal stdin）** — `reply.ts` `extractAttachments()` 下載支援的圖片（png/jpeg/gif/webp，≤5MB）並 base64 編碼成 `StdinImageBlock[]`；`bridge.send()` 有 `imageBlocks` 時改送 `content: [{type:"text"}, {type:"image", source:{type:"base64", ...}}]` 而非純字串。避免 Claude CLI 把 Discord CDN URL 當 image URL source 傳給 Anthropic API（CDN 權限/過期會導致 "Could not process image" 400）。下載失敗或超過大小限制時降級為 URL 文字描述。
 - **權限審批（D3）** — `dangerouslySkipPermissions` **預設 false**（fail-safe）。`process.ts` spawn 時走互斥分支：

@@ -460,6 +460,16 @@ export interface WorkflowConfig {
   aidocs: { enabled: boolean; contentGate: boolean };
 }
 
+/** Hot-reload 粒度開關（per-config-file） */
+export interface HotReloadConfig {
+  /** catclaw.json 自身 hot-reload（預設 true） */
+  config: boolean;
+  /** cron-jobs.json hot-reload（預設 false — saveStore 自寫回有 race 風險） */
+  cron: boolean;
+  /** cli-bridges.json hot-reload（預設 true） */
+  cliBridges: boolean;
+}
+
 /** File Watcher 單一監聽項 */
 export interface FileWatchEntry {
   /** 識別名（e.g. "obsidian"） */
@@ -701,6 +711,8 @@ export interface BridgeConfig {
   safety?: SafetyConfig;
   /** 工作流設定 */
   workflow?: WorkflowConfig;
+  /** Hot-reload 粒度開關（預設：cron=false，其餘=true） */
+  hotReload?: HotReloadConfig;
   /** File Watcher 設定 */
   fileWatcher?: FileWatcherConfig;
   /** 帳號管理設定 */
@@ -861,6 +873,7 @@ interface RawConfig {
   ollama?: Partial<OllamaConfig> & { primary?: Partial<OllamaConfig["primary"]> };
   safety?: Partial<SafetyConfig>;
   workflow?: Partial<WorkflowConfig>;
+  hotReload?: Partial<HotReloadConfig>;
   fileWatcher?: FileWatcherConfig;
   accounts?: Partial<AccountsConfig>;
   rateLimit?: RateLimitConfig;
@@ -1412,6 +1425,11 @@ function loadConfig(): BridgeConfig {
       wisdomEngine:   raw.workflow?.wisdomEngine   ?? { enabled: true },
       aidocs:         raw.workflow?.aidocs         ?? { enabled: true, contentGate: true },
     },
+    hotReload: {
+      config:     raw.hotReload?.config     ?? true,
+      cron:       raw.hotReload?.cron       ?? false,
+      cliBridges: raw.hotReload?.cliBridges ?? true,
+    },
     fileWatcher: raw.fileWatcher,
     accounts: {
       registrationMode:    (raw.accounts?.registrationMode ?? "invite") as AccountsConfig["registrationMode"],
@@ -1589,6 +1607,10 @@ function reloadConfig(): void {
 }
 
 export function watchConfig(): void {
+  if (config.hotReload?.config === false) {
+    log.info("[config] hot-reload 已停用（hotReload.config=false）");
+    return;
+  }
   const configPath = resolveConfigPath();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 

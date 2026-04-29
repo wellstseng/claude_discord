@@ -1,7 +1,7 @@
 # modules/agent-loop — 核心對話迴圈
 
 > 檔案：`src/core/agent-loop.ts` (~1880 行)
-> 更新日期：2026-04-20
+> 更新日期：2026-04-29
 
 ## 職責
 
@@ -20,9 +20,30 @@
 
 | 常數 | 值 | 說明 |
 |------|-----|------|
-| `MAX_LOOPS` | 20 | 單次 turn 最大 LLM 迴圈數 |
+| `BASE_LOOPS` | 50 | 單次 turn 起始 LLM 迴圈數（自適應可延長至 `LOOP_CAP_CEILING`） |
+| `LOOP_CAP_CEILING` | 80 | 自適應延長的絕對天花板 |
 | `MAX_CONTINUATIONS` | 3 | Output Token Recovery 最大續接次數 |
+| `MAX_DEFERRED_NUDGES` | 3 | Deferred tool 活化後空回應的續接提示上限 |
+| `MAX_EMPTY_TOOL_USE` | 3 | 連續空 tool_use iteration 上限（`stopReason=tool_use` 但 `toolCalls=[]`） |
 | `DEFAULT_RESULT_TOKEN_CAP` | 0 | Tool result 預設不截斷（per-tool resultTokenCap 仍生效）；**error 訊息永遠不截斷** |
+
+### 空 tool_use 防護（2026-04-29 新增）
+
+模型偶爾會產出 `stopReason==="tool_use"` 但 `toolCalls=[]` 的「空 tool_use iteration」（Claude API quirk）。
+舊行為：第一次空 tool_use 直接 `break`，但觸頂訊息一律寫「工具呼叫上限」名實不符。
+新行為：
+- 空 tool_use → `emptyToolUseCount++`、`continue`，給模型再一次機會
+- 累計到 `MAX_EMPTY_TOOL_USE` 則設 `emptyToolUseExhausted=true` 後 break
+- 偵測到實際 tool 呼叫即重置計數
+- `loopCount` 仍由 while 條件遞增，死循環防護不變
+
+### 觸頂訊息分流
+
+`maxLoopsReached` 內部按實際 tool 執行數分流：
+- `toolsRun >= loopCap` → 「已達工具呼叫上限」
+- `toolsRun < loopCap` → 「已達對話輪次上限」（iteration 被空轉/續接吃掉）
+
+`emptyToolUseExhausted` 分支獨立顯示「模型連續 N 次產出空 tool_use」，並排在 `maxLoopsReached` 之前判斷。
 
 ## 主函式
 

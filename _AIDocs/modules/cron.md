@@ -139,6 +139,8 @@ stopCron()                 ← SIGINT/SIGTERM 時呼叫
 - `selfWriting` flag 過濾自己的寫入
 - reload 時保留正在執行中的 job 狀態，用新的定義覆蓋
 
+> **預設關閉**（2026-04-29 起）：`config.hotReload.cron` 預設 `false`。原因：cron-jobs.json 由 `saveStore` 自寫回（更新 `nextRunAtMs` 等），即便有 `selfWriting` flag 仍偶爾撞 race。改靠 `/cron` skill / Dashboard `/api/cron` 動態 CRUD（已實作）即可。要重新開啟把 `catclaw.json` 加 `"hotReload": { "cron": true }` 即可。
+
 ## 公開 CRUD API
 
 供 `/cron` skill 在執行期動態管理排程，不需手動編輯 cron-jobs.json。

@@ -559,6 +559,10 @@ let _watching = false;
 
 function watchConfigFile(): void {
   if (_watching) return;
+  if (config.hotReload?.cliBridges === false) {
+    log.info("[cli-bridge] hot-reload 已停用（hotReload.cliBridges=false）");
+    return;
+  }
   const configPath = getConfigPath();
   _watching = true;
 
