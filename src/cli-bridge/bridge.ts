@@ -301,6 +301,11 @@ export class CliBridge {
     this._status = "restarting";
     this.stopKeepAlive();
 
+    // 救急方案 A：把未完成 turn 的 user input 補進 inbound history，
+    // 重啟後 drainInboundHistoryOnStartup 會重送 → 至少 user 訊息不會掉
+    // （assistant 部分回覆會遺失，是已知 trade-off；治本方案 C 見 _AIDocs/plan/Feature_CLIBridge_Resume.md）
+    await this.savePendingUserInputsToInboundHistory("restart");
+
     // 清理正在等待的 turn
     this.failAllPendingTurns("bridge 重啟中");
 
@@ -400,6 +405,10 @@ export class CliBridge {
         log.info(`[cli-bridge:${this.label}] shutdown: drain 完成 (${Date.now() - start}ms)`);
       }
     }
+
+    // 救急方案 A：drain timeout 後仍 pending 的 turn → 補 user input 進 inbound history
+    // 重啟後 drainInboundHistoryOnStartup 會重送（assistant 部分回覆遺失，是 trade-off）
+    await this.savePendingUserInputsToInboundHistory("shutdown");
 
     // 剩下還沒 done 的 → silent fail（通常已 done 只是 generator 沒消費完）
     this.failAllPendingTurns("bridge 關閉中", true);
@@ -538,6 +547,47 @@ export class CliBridge {
       await applyAutoChannelName(this, this._sender);
     } catch (err) {
       log.debug(`[cli-bridge:${this.label}] auto-name 失敗: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // ── 救急方案 A：把未完成 turn 的 user input 補進 inbound history ─────────
+  //
+  // 用途：bridge restart / shutdown 時，當前正在跑的 turn 會被砍掉。
+  //   把那批 turn 的「使用者原始輸入」補進 inbound history，
+  //   重啟後 drainInboundHistoryOnStartup 會自動重送 → CLI 重新處理。
+  //
+  // 限制：只能保留 user input；assistant 部分回覆 / 已執行 tools 進度會遺失。
+  //   治本方案 C（turn-state.json checkpoint）見 _AIDocs/plan/Feature_CLIBridge_Resume.md。
+  private async savePendingUserInputsToInboundHistory(reason: string): Promise<void> {
+    if (this.pendingTurns.size === 0) return;
+    try {
+      const { getInboundHistoryStore } = await import("../discord/inbound-history.js");
+      const store = getInboundHistoryStore();
+      if (!store) return;
+      const scope = `bridge:${this.label}`;
+      const ts = new Date().toISOString();
+      let saved = 0;
+      for (const [, pending] of this.pendingTurns) {
+        // dashboard / cron 的訊息走別的補處理路徑，這裡只補 discord
+        if (pending.record.source !== "discord") continue;
+        const text = pending.record.userInput;
+        if (!text || !text.trim()) continue;
+        store.append(this.channelId, {
+          ts,
+          platform: "discord",
+          channelId: this.channelId,
+          authorId: "system-pending-turn",
+          authorName: `bridge:${this.label} (${reason} 救援)`,
+          content: text,
+          wasProcessed: false,
+        }, scope);
+        saved++;
+      }
+      if (saved > 0) {
+        log.info(`[cli-bridge:${this.label}] ${reason}：補 ${saved} 筆未完成 user input 到 inbound history（scope=${scope}）`);
+      }
+    } catch (err) {
+      log.warn(`[cli-bridge:${this.label}] savePendingUserInputs 失敗: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
