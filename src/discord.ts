@@ -883,6 +883,10 @@ async function handleMessage(
         const { pushInterruptMessage } = await import("./core/agent-loop.js");
         if (pushInterruptMessage(sessionKey, combinedText)) {
           log.info(`[discord] 插話 soft-inject 到 active turn sessionKey=${sessionKey} text="${combinedText.slice(0, 60)}"`);
+          // 把插話訊息歸入 active trace；當前剛建的 trace 廢棄不持久化（避免孤兒 live trace）
+          const activeTrace = MessageTrace.findActiveBySession(sessionKey);
+          if (activeTrace) activeTrace.recordInsertedInbound(combinedText);
+          trace.discard();
           // 在 user 訊息加 👀 emoji 表示 bot 已收到，不開新 reply
           try { await firstMessage.react("👀"); } catch { /* 失敗忽略 */ }
           return;  // 不走後面的新 turn 流程

@@ -1321,8 +1321,7 @@ export async function* agentLoop(
           `納入並繼續處理，重新評估是否該轉向、補資料或調整方向；除非任務真正完成，否則不要 end_turn。`;
         messages.push({ role: "user", content: block });
         log.info(`[agent-loop] [loop=${loopCount}] 注入 ${pendingInterrupts.length} 則插話訊息到當前 turn`);
-        // 給 Discord 一個視覺提示，模型會在這之後自然接續
-        yield { type: "text_delta", text: `\n\n📥 收到插話，加入當前任務脈絡：${pendingInterrupts.map(s => s.slice(0, 30)).join(" / ")}\n\n` };
+        // 視覺提示由 discord.ts soft-inject 分支對原訊息加 👀 reaction 提供，這裡不再額外 yield text
       }
 
       // ── Background Agent 結果注入 ──────────────────────────────────────────

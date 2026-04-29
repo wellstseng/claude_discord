@@ -338,9 +338,36 @@ export class MessageTrace {
     return trace;
   }
 
+  /** 找出同 sessionKey 的 active trace（_liveTraces 內已 setSessionKey 的最新一筆） */
+  static findActiveBySession(sessionKey: string): MessageTrace | null {
+    let latest: MessageTrace | null = null;
+    for (const t of MessageTrace._liveTraces.values()) {
+      if (t.entry.sessionKey !== sessionKey) continue;
+      if (!latest || t.entry.inbound.receivedAt > latest.entry.inbound.receivedAt) {
+        latest = t;
+      }
+    }
+    return latest;
+  }
+
   /** 設定 sessionKey（agent-loop 開始時注入） */
   setSessionKey(sessionKey: string): void {
     this.entry.sessionKey = sessionKey;
+  }
+
+  /** 廢棄此 trace — 從 _liveTraces 移除，不 finalize 不持久化 */
+  discard(): void {
+    MessageTrace._liveTraces.delete(this.traceId);
+  }
+
+  /** 把「turn 進行中插入」的訊息追加到 active trace（不另起新 trace） */
+  recordInsertedInbound(text: string): void {
+    if (!this.entry.workflowEvents) this.entry.workflowEvents = [];
+    this.entry.workflowEvents.push({
+      ts: Date.now(),
+      type: "inserted_inbound",
+      detail: text.slice(0, 200),
+    });
   }
 
   setParentTraceId(id: string): void { this.entry.parentTraceId = id; }
