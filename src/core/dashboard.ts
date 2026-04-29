@@ -1069,13 +1069,15 @@ async function loadSessions() {
     const d = await authFetch('/api/sessions').then(r => r.json());
     const container = document.getElementById('sessions-list');
     if (!d.sessions?.length) { _safeSetHtml('sessions-list', '<p style="color:#888;font-size:0.8rem">無資料</p>'); return; }
-    const rowsPairs = d.sessions.map(s => {
+    const rowsPairs = d.sessions.map((s, idx) => {
       const last = new Date(s.lastTs).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
       const tok = \`↑\${s.inputTokens.toLocaleString()}/↓\${s.outputTokens.toLocaleString()}\`;
       const cache = fmtCache(s.cacheRead, s.cacheWrite);
       const provs = (s.providers||[]).join(', ') || '-';
       const mdls = (s.models||[]).map(m => m.length>20?m.slice(0,20)+'…':m).join(', ') || '-';
-      const skId = 'sess-' + s.sessionKey.replace(/[^a-zA-Z0-9]/g, '_');
+      // 用 row index 而非 sessionKey replace 後的 hash — 防 sessionKey 在 replace 後 collision
+      // 造成多 row 共用同一個 inner div id（疑似議題 #2026-04-28 Dashboard 展開錯亂的根因之一）
+      const skId = 'sess-' + idx;
       const colCount = 8;
       const sk = s.sessionKey.replace(/'/g, "\\\\'");
       const acts = \`<span style="display:inline-flex;gap:4px"><button class="btn btn-sm" onclick="event.stopPropagation();sessAction('clear','\${sk}')" title="清空訊息">🗑 Clear</button><button class="btn btn-sm" onclick="event.stopPropagation();sessAction('compact','\${sk}')" title="強制 CE 壓縮">📦 Compact</button><button class="btn-danger" onclick="event.stopPropagation();sessAction('delete','\${sk}')" title="刪除 session">✕</button></span>\`;
@@ -1191,6 +1193,8 @@ async function loadSessionTraces(sessionKey, containerId) {
       const statusIcon = isLive ? '⏳' : t.status === 'completed' ? '✅' : t.status === 'aborted' ? '⏹' : '❌';
       const cost = t.estimatedCostUsd ? '$' + t.estimatedCostUsd.toFixed(4) : '-';
       const prev = (t.inbound?.textPreview ?? '').slice(0, 30);
+      // Debug-aid：trace row 開頭顯示 sessionKey 末 16 字，方便重現時肉眼判別 collision
+      const skTag = '[' + (t.sessionKey ? t.sessionKey.slice(-16) : '?') + ']';
       const liveStyle = isLive ? 'background:rgba(255,200,0,0.08);' : '';
       html += '<tr style="' + liveStyle + '">';
       html += '<td>' + ts + '</td>';
@@ -1202,7 +1206,7 @@ async function loadSessionTraces(sessionKey, containerId) {
       html += '<td>' + (t.llmCalls?.length ?? 0) + '</td>';
       html += '<td style="color:var(--warn)">' + cost + '</td>';
       html += '<td>' + statusIcon + '</td>';
-      html += '<td style="color:var(--fg2);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + prev + '</td>';
+      html += '<td style="color:var(--fg2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (t.sessionKey || '') + '"><span style="opacity:0.55;font-family:ui-monospace,monospace;font-size:0.72rem">' + skTag + '</span> ' + prev + '</td>';
       html += '<td><a href="#" style="color:var(--accent);text-decoration:none;font-size:0.78rem" onclick="event.preventDefault();showTraceDetail(\\'' + t.traceId + '\\')">📋 詳情</a></td>';
       html += '</tr>';
     }
