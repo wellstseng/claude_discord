@@ -1590,6 +1590,7 @@ async function loadCron() {
   try {
     const d = await authFetch('/api/cron').then(r => r.json());
     const jobs = d.jobs || {};
+    _cronJobsCache = jobs;  // schema-driven form 編輯模式 lazy 讀取用
     const entries = Object.entries(jobs);
     if (!entries.length) { document.getElementById('cron-list').innerHTML = '<p style="color:#888;font-size:0.8rem">無 cron job</p>'; return; }
     const escHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1631,7 +1632,11 @@ async function loadCron() {
         \`<tr><td style="padding:3px 10px 3px 0;color:#aaa;white-space:nowrap;vertical-align:top;font-size:0.72rem;font-family:monospace">\${escHtml(k)}</td><td style="padding:3px 0;font-size:0.72rem">\${renderActionVal(k, v)}</td></tr>\`
       ).join('');
       const actionBlock = \`<div style="margin-top:6px"><strong>Action：</strong></div><table style="margin:4px 0 0 0;border-collapse:collapse;width:100%">\${actionRows}</table>\`;
-      const expandContent = \`<div style="font-size:0.8rem;color:var(--fg2)">\${fullIdBlock}\${retryBlock}\${deleteAfterRunBlock}\${lastErrorBlock}\${nextIsoBlock}\${actionBlock}</div>\`;
+      // 編輯按鈕（切換 view ↔ edit form）
+      const editToolbar = \`<div style="margin-bottom:8px"><button class="btn btn-sm" onclick="toggleCronEditMode('\${id}')" title="顯示完整 schema 與所有可選欄位（含未填）">📝 編輯</button></div>\`;
+      const viewBlock = \`<div id="cron-view-\${cronId}">\${fullIdBlock}\${retryBlock}\${deleteAfterRunBlock}\${lastErrorBlock}\${nextIsoBlock}\${actionBlock}</div>\`;
+      const editBlock = \`<div id="cron-edit-\${cronId}" style="display:none"></div>\`;
+      const expandContent = \`<div style="font-size:0.8rem;color:var(--fg2)">\${editToolbar}\${viewBlock}\${editBlock}</div>\`;
       const headerHtml = \`<tr data-cronid="\${cronId}" style="cursor:pointer" onclick="toggleCronRow(this,'\${cronId}')">
         <td title="\${id}">\${id.slice(-8)}</td>
         <td>\${j.name||'-'}</td>
@@ -1710,6 +1715,216 @@ function showCronMsg(msg, ok) {
   const el = document.getElementById('cron-msg');
   el.className = 'msg ' + (ok ? 'ok' : 'err');
   el.textContent = msg;
+}
+
+// ── 排程編輯：schema-driven form ────────────────────────────────────────────
+// loadCron 會把 jobs 物件塞進來，編輯時 lazy 從 cache 讀取
+let _cronJobsCache = {};
+
+const _cronSchedSchema = {
+  cron:  [{ k:'expr', t:'text', l:'Cron 運算式', placeholder:'0 9 * * *', req:true }],
+  every: [{ k:'everyMs', t:'num', l:'間隔（毫秒）', req:true }],
+  at:    [{ k:'at', t:'text', l:'執行時間 ISO', placeholder:'2026-05-01T09:00:00.000Z', req:true }],
+};
+const _cronActionSchema = {
+  message:      [{ k:'channelId', t:'text', l:'Channel ID', req:true }, { k:'text', t:'textarea', l:'訊息內容', req:true }],
+  'claude-acp': [{ k:'channelId', t:'text', l:'Channel ID', req:true }, { k:'prompt', t:'textarea', l:'Prompt', req:true }, { k:'timeoutSec', t:'num', l:'Timeout（秒）' }],
+  exec:         [{ k:'command', t:'textarea', l:'執行指令', req:true }, { k:'channelId', t:'text', l:'回報頻道 ID' }, { k:'silent', t:'bool', l:'靜默（成功不回報）' }, { k:'timeoutSec', t:'num', l:'Timeout（秒）' }, { k:'shell', t:'text', l:'Shell（預設 sh）' }, { k:'background', t:'bool', l:'背景執行' }],
+  subagent:     [{ k:'task', t:'textarea', l:'任務描述', req:true }, { k:'provider', t:'text', l:'Provider ID' }, { k:'timeoutMs', t:'num', l:'Timeout（毫秒）' }, { k:'notify', t:'text', l:'通知頻道', placeholder:'discord:ch:CHANNEL_ID' }],
+  'cli-bridge': [{ k:'label', t:'text', l:'Bridge Label' }, { k:'channelId', t:'text', l:'Channel ID（label/channelId 至少一個）' }, { k:'task', t:'textarea', l:'注入訊息', req:true }, { k:'awaitResult', t:'bool', l:'等待 turn 完成' }, { k:'timeoutMs', t:'num', l:'awaitResult Timeout（毫秒）' }],
+};
+const _cronCommonSchema = [
+  { k:'name', t:'text', l:'名稱', req:true },
+  { k:'agentId', t:'text', l:'所屬 Agent ID' },
+  { k:'enabled', t:'bool', l:'啟用' },
+  { k:'maxRetries', t:'num', l:'最大重試次數（預設 3）' },
+  { k:'deleteAfterRun', t:'bool', l:'一次性 job（執行後自動刪除）' },
+];
+
+function _cronField(id, schema, value) {
+  const escAttr = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const sid = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const ph = schema.placeholder ? \`placeholder="\${escAttr(schema.placeholder)}"\` : '';
+  let inp = '';
+  if (schema.t === 'bool') {
+    inp = \`<input type="checkbox" id="\${sid}" data-cron-field="\${schema.k}" data-cron-type="bool" \${value ? 'checked' : ''} style="margin-left:8px;width:18px;height:18px">\`;
+  } else if (schema.t === 'num') {
+    inp = \`<input type="number" id="\${sid}" data-cron-field="\${schema.k}" data-cron-type="num" value="\${value == null ? '' : escAttr(value)}" \${ph} style="flex:1;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem">\`;
+  } else if (schema.t === 'textarea') {
+    inp = \`<textarea id="\${sid}" data-cron-field="\${schema.k}" data-cron-type="text" rows="4" \${ph} style="flex:1;padding:6px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.78rem;font-family:ui-monospace,monospace;resize:vertical">\${escAttr(value)}</textarea>\`;
+  } else {
+    inp = \`<input type="text" id="\${sid}" data-cron-field="\${schema.k}" data-cron-type="text" value="\${escAttr(value)}" \${ph} style="flex:1;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem">\`;
+  }
+  const reqMark = schema.req ? '<span style="color:#f99;margin-left:2px">*</span>' : '';
+  return \`<div style="display:flex;align-items:flex-start;gap:8px;margin:5px 0;flex-wrap:wrap"><label style="min-width:140px;max-width:180px;font-size:0.78rem;color:var(--fg2);padding-top:5px"><code style="font-family:ui-monospace,monospace;font-size:0.74rem;background:transparent">\${schema.k}</code><br><span style="font-size:0.72rem;opacity:0.7">\${schema.l}\${reqMark}</span></label>\${inp}</div>\`;
+}
+
+function renderCronJobForm(jobId) {
+  const job = _cronJobsCache[jobId];
+  if (!job) return '<div style="color:#f99">job 不存在或 cache 未就緒，請重新展開</div>';
+  const formId = 'cron-form-' + jobId.replace(/[^a-zA-Z0-9]/g, '_');
+  const schedKind = (job.schedule && job.schedule.kind) || 'cron';
+  const actionType = (job.action && job.action.type) || 'message';
+
+  // 共通欄位
+  let html = \`<div id="\${formId}" data-cron-job-id="\${jobId}">\`;
+  html += '<div style="font-size:0.78rem;color:#fc6;margin-bottom:8px">⚠ 編輯後按「儲存」會寫入 cron-jobs.json，cron 會自動 hot-reload。</div>';
+  html += '<div style="margin-bottom:10px"><strong style="color:var(--fg)">基本</strong></div>';
+  for (const f of _cronCommonSchema) {
+    html += _cronField(formId + '-common-' + f.k, f, job[f.k]);
+  }
+
+  // Schedule 區
+  html += '<div style="margin:14px 0 8px 0;padding-top:10px;border-top:1px dashed var(--border)"><strong style="color:var(--fg)">Schedule（排程）</strong></div>';
+  const schedKinds = Object.keys(_cronSchedSchema);
+  const kindOpts = schedKinds.map(k => \`<option value="\${k}" \${k === schedKind ? 'selected' : ''}>\${k}</option>\`).join('');
+  html += \`<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><label style="min-width:140px;font-size:0.78rem;color:var(--fg2)"><code>kind</code><br><span style="font-size:0.72rem;opacity:0.7">類型<span style="color:#f99">*</span></span></label><select id="\${formId}-sched-kind" data-cron-field="kind" onchange="reRenderCronSchedule('\${jobId}')" style="flex:1;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem">\${kindOpts}</select></div>\`;
+  html += \`<div id="\${formId}-sched-fields">\`;
+  for (const f of _cronSchedSchema[schedKind]) {
+    html += _cronField(formId + '-sched-' + f.k, f, job.schedule && job.schedule[f.k]);
+  }
+  html += '</div>';
+
+  // Action 區
+  html += '<div style="margin:14px 0 8px 0;padding-top:10px;border-top:1px dashed var(--border)"><strong style="color:var(--fg)">Action（動作）</strong></div>';
+  const actionTypes = Object.keys(_cronActionSchema);
+  const typeOpts = actionTypes.map(t => \`<option value="\${t}" \${t === actionType ? 'selected' : ''}>\${t}</option>\`).join('');
+  html += \`<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><label style="min-width:140px;font-size:0.78rem;color:var(--fg2)"><code>type</code><br><span style="font-size:0.72rem;opacity:0.7">類型<span style="color:#f99">*</span></span></label><select id="\${formId}-action-type" data-cron-field="type" onchange="reRenderCronAction('\${jobId}')" style="flex:1;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:0.82rem">\${typeOpts}</select></div>\`;
+  html += \`<div id="\${formId}-action-fields">\`;
+  for (const f of _cronActionSchema[actionType]) {
+    html += _cronField(formId + '-action-' + f.k, f, job.action && job.action[f.k]);
+  }
+  html += '</div>';
+
+  // 操作列
+  html += \`<div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--border);display:flex;gap:8px"><button class="btn btn-sm btn-green" onclick="saveCronJob('\${jobId}')">💾 儲存</button><button class="btn btn-sm" onclick="toggleCronEditMode('\${jobId}')">取消</button><span id="\${formId}-msg" style="font-size:0.78rem;align-self:center"></span></div>\`;
+
+  html += '</div>';
+  return html;
+}
+
+function reRenderCronSchedule(jobId) {
+  const formId = 'cron-form-' + jobId.replace(/[^a-zA-Z0-9]/g, '_');
+  const kindSel = document.getElementById(formId + '-sched-kind');
+  const container = document.getElementById(formId + '-sched-fields');
+  if (!kindSel || !container) return;
+  const kind = kindSel.value;
+  const job = _cronJobsCache[jobId] || {};
+  let html = '';
+  for (const f of _cronSchedSchema[kind] || []) {
+    // 切換 kind 時用空值（因為新 kind 沒對應欄位資料），保留舊 kind 的資料無意義
+    html += _cronField(formId + '-sched-' + f.k, f, undefined);
+  }
+  container.innerHTML = html;
+}
+
+function reRenderCronAction(jobId) {
+  const formId = 'cron-form-' + jobId.replace(/[^a-zA-Z0-9]/g, '_');
+  const typeSel = document.getElementById(formId + '-action-type');
+  const container = document.getElementById(formId + '-action-fields');
+  if (!typeSel || !container) return;
+  const type = typeSel.value;
+  const job = _cronJobsCache[jobId] || {};
+  // 同 type 時保留現值；不同 type 時切空值（共用 channelId 等欄位由 schema 各自宣告，不跨 type 帶值）
+  const sameType = (job.action && job.action.type) === type;
+  let html = '';
+  for (const f of _cronActionSchema[type] || []) {
+    html += _cronField(formId + '-action-' + f.k, f, sameType ? (job.action && job.action[f.k]) : undefined);
+  }
+  container.innerHTML = html;
+}
+
+function toggleCronEditMode(jobId) {
+  const cronId = 'cron-' + jobId.replace(/[^a-zA-Z0-9]/g, '_');
+  const viewEl = document.getElementById('cron-view-' + cronId);
+  const editEl = document.getElementById('cron-edit-' + cronId);
+  if (!viewEl || !editEl) return;
+  const isEditing = editEl.style.display !== 'none';
+  if (isEditing) {
+    viewEl.style.display = '';
+    editEl.style.display = 'none';
+  } else {
+    editEl.innerHTML = renderCronJobForm(jobId);
+    viewEl.style.display = 'none';
+    editEl.style.display = '';
+  }
+}
+
+async function saveCronJob(jobId) {
+  const formId = 'cron-form-' + jobId.replace(/[^a-zA-Z0-9]/g, '_');
+  const formEl = document.getElementById(formId);
+  if (!formEl) { showCronMsg('form 不存在', false); return; }
+  const msgEl = document.getElementById(formId + '-msg');
+  const setMsg = (txt, ok) => { if (msgEl) { msgEl.style.color = ok ? '#9c9' : '#f99'; msgEl.textContent = txt; } };
+
+  // 收集共通欄位
+  const job = {};
+  for (const f of _cronCommonSchema) {
+    const el = document.getElementById((formId + '-common-' + f.k).replace(/[^a-zA-Z0-9_-]/g, '_'));
+    if (!el) continue;
+    if (f.t === 'bool') job[f.k] = !!el.checked;
+    else if (f.t === 'num') {
+      const v = el.value.trim();
+      if (v) job[f.k] = Number(v);
+    } else {
+      const v = el.value.trim();
+      if (v) job[f.k] = v;
+    }
+  }
+  if (!job.name) { setMsg('name 必填', false); return; }
+
+  // schedule
+  const kindSel = document.getElementById(formId + '-sched-kind');
+  if (!kindSel) { setMsg('schedule kind 元素遺失', false); return; }
+  const schedKind = kindSel.value;
+  const sched = { kind: schedKind };
+  for (const f of _cronSchedSchema[schedKind] || []) {
+    const el = document.getElementById((formId + '-sched-' + f.k).replace(/[^a-zA-Z0-9_-]/g, '_'));
+    if (!el) continue;
+    if (f.t === 'num') {
+      const v = el.value.trim();
+      if (v) sched[f.k] = Number(v);
+    } else {
+      const v = el.value.trim();
+      if (v) sched[f.k] = v;
+    }
+    if (f.req && (sched[f.k] == null || sched[f.k] === '')) { setMsg(\`schedule.\${f.k} 必填\`, false); return; }
+  }
+  job.schedule = sched;
+
+  // action
+  const typeSel = document.getElementById(formId + '-action-type');
+  if (!typeSel) { setMsg('action type 元素遺失', false); return; }
+  const actType = typeSel.value;
+  const act = { type: actType };
+  for (const f of _cronActionSchema[actType] || []) {
+    const el = document.getElementById((formId + '-action-' + f.k).replace(/[^a-zA-Z0-9_-]/g, '_'));
+    if (!el) continue;
+    if (f.t === 'bool') {
+      // bool 一律寫入（false 也保留，避免「關掉 silent」變成 schema 沒 silent key）
+      act[f.k] = !!el.checked;
+    } else if (f.t === 'num') {
+      const v = el.value.trim();
+      if (v) act[f.k] = Number(v);
+    } else {
+      const v = el.value.trim();
+      if (v) act[f.k] = v;
+    }
+    if (f.req && (act[f.k] == null || act[f.k] === '')) { setMsg(\`action.\${f.k} 必填\`, false); return; }
+  }
+  job.action = act;
+
+  // 送 update API
+  setMsg('儲存中…', true);
+  try {
+    const r = await authFetch('/api/cron/update', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: jobId, job }) }).then(r => r.json());
+    if (!r.success) { setMsg('失敗：' + (r.error || '未知'), false); return; }
+    setMsg('✓ 已儲存（cron 自動 reload）', true);
+    // 重 load + 自動展開該 row + 切回 view 模式
+    setTimeout(() => loadCron(), 400);
+  } catch (e) {
+    setMsg('失敗：' + e, false);
+  }
 }
 
 // ── Config GUI ───────────────────────────────────────────────────────────────
@@ -4966,6 +5181,18 @@ export class DashboardServer {
                 // create
                 const id = `job-${Date.now()}`;
                 jobs[id] = body as Record<string, unknown>;
+              } else if (url === "/api/cron/update") {
+                // edit：保留 runtime 狀態欄位（lastRunAtMs / lastResult / lastError / nextRunAtMs / retryCount）
+                const id = String(body["id"] ?? "");
+                const job = body["job"] as Record<string, unknown> | undefined;
+                if (!jobs[id]) throw new Error(`Job not found: ${id}`);
+                if (!job || typeof job !== "object") throw new Error("missing job body");
+                const runtimeKeys = ["lastRunAtMs", "lastResult", "lastError", "nextRunAtMs", "retryCount"];
+                const merged: Record<string, unknown> = { ...job };
+                for (const k of runtimeKeys) {
+                  if (jobs[id]![k] !== undefined) merged[k] = jobs[id]![k];
+                }
+                jobs[id] = merged;
               } else if (url === "/api/cron/delete") {
                 const id = String(body["id"] ?? "");
                 if (!jobs[id]) throw new Error(`Job not found: ${id}`);
