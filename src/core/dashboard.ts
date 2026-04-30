@@ -1612,8 +1612,25 @@ async function loadCron() {
       const deleteAfterRunBlock = j.deleteAfterRun ? '<div style="margin-top:4px;color:#fc6">⚠ 一次性 job（執行後自動刪除）</div>' : '';
       const lastErrorBlock = j.lastError ? \`<div style="color:#f99;margin-top:6px"><strong>上次錯誤：</strong>\${escHtml(j.lastError)}</div>\` : '';
       const nextIsoBlock = j.nextRunAtMs && j.nextRunAtMs < 9e15 ? \`<div style="margin-top:4px;color:#888;font-size:0.72rem">下次（ISO）：\${new Date(j.nextRunAtMs).toISOString()}</div>\` : '';
-      const actionPretty = JSON.stringify(j.action, null, 2);
-      const actionBlock = \`<div style="margin-top:6px"><strong>Action：</strong></div><pre style="margin:4px 0;padding:8px;background:var(--bg5,#1a1a1a);border-radius:4px;font-size:0.72rem;overflow-x:auto">\${escHtml(actionPretty)}</pre>\`;
+      // Action 欄位列表（取代原本的 JSON pretty-print），把每個屬性獨立成列
+      const longTextKeys = new Set(['command', 'text', 'task', 'prompt']);
+      const renderActionVal = (k, v) => {
+        if (k === 'type') return \`<span class="badge" style="background:#3a4a5a;color:#9cf;font-size:0.7rem">\${escHtml(String(v))}</span>\`;
+        if (typeof v === 'boolean') return \`<code style="color:\${v ? '#9c9' : '#c99'}">\${v}</code>\`;
+        if (typeof v === 'number') return \`<code>\${v.toLocaleString()}</code>\`;
+        if (v == null) return '<span style="color:#888">—</span>';
+        if (typeof v === 'object') return \`<pre style="margin:0;padding:6px 8px;background:var(--bg5,#1a1a1a);border-radius:4px;font-size:0.72rem;white-space:pre-wrap;word-break:break-all">\${escHtml(JSON.stringify(v, null, 2))}</pre>\`;
+        const s = String(v);
+        if (longTextKeys.has(k) && s.length > 40) {
+          return \`<pre style="margin:0;padding:6px 8px;background:var(--bg5,#1a1a1a);border-radius:4px;font-size:0.72rem;white-space:pre-wrap;word-break:break-all">\${escHtml(s)}</pre>\`;
+        }
+        return \`<code style="word-break:break-all">\${escHtml(s)}</code>\`;
+      };
+      const actionEntries = Object.entries(j.action || {});
+      const actionRows = actionEntries.map(([k, v]) =>
+        \`<tr><td style="padding:3px 10px 3px 0;color:#aaa;white-space:nowrap;vertical-align:top;font-size:0.72rem;font-family:monospace">\${escHtml(k)}</td><td style="padding:3px 0;font-size:0.72rem">\${renderActionVal(k, v)}</td></tr>\`
+      ).join('');
+      const actionBlock = \`<div style="margin-top:6px"><strong>Action：</strong></div><table style="margin:4px 0 0 0;border-collapse:collapse;width:100%">\${actionRows}</table>\`;
       const expandContent = \`<div style="font-size:0.8rem;color:var(--fg2)">\${fullIdBlock}\${retryBlock}\${deleteAfterRunBlock}\${lastErrorBlock}\${nextIsoBlock}\${actionBlock}</div>\`;
       const headerHtml = \`<tr data-cronid="\${cronId}" style="cursor:pointer" onclick="toggleCronRow(this,'\${cronId}')">
         <td title="\${id}">\${id.slice(-8)}</td>
