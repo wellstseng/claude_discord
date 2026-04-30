@@ -123,7 +123,7 @@ const MAX_CONTINUATIONS = 3;  // Output Token Recovery：max_tokens 截斷時最
 const MAX_DEFERRED_NUDGES = 3;  // Deferred tool 活化後空回應 → 注入續接提示的最大次數
 const MAX_EMPTY_TOOL_USE = 3;  // 連續空 tool_use iteration 上限（stopReason=tool_use 但 toolCalls=[]，防模型死循環）
 const ACTIVATE_PER_ITER_LIMIT = 3;  // 每輪最多活化幾個 deferred tool（防 Anthropic 批次活化空回應 quirk）
-const MAX_SAME_TOOL_PER_TURN = 5;  // 同 tool 在 turn 內最多 5 次（防散彈式重複，trace a1cfb101）
+const MAX_SAME_TOOL_PER_TURN = 5;  // 同 tool 連續呼叫最多 5 次（中間穿插別 tool 即清零；防散彈式重複，trace a1cfb101）
 const ZERO_PROGRESS_BAIL = 5;  // 連續 N iter「0 tool + 短文本」→ 中止 turn（防 11 輪乾打草稿）
 const ZERO_PROGRESS_TEXT_THRESHOLD = 50;  // 一個 iter 的 output 字元少於此即視為「沒進展」
 const DEFAULT_RESULT_TOKEN_CAP = 0;   // 0 = 不截斷（讓上游/per-tool 自行控制）
@@ -693,12 +693,17 @@ async function runBeforeToolCall(
     }
   }
 
-  // 4c. 散彈式重複：同 tool 在本 turn 內被叫過 ≥ MAX_SAME_TOOL_PER_TURN 次（不論連續、不論成功）
-  // 補上面三層的盲點：trace a1cfb101 內 mcp_playwright_browser_close 被穿插呼叫 6 次都成功，
-  // 沒一條 detection 接得住。對話類 turn 不該對同 tool 反覆使用。
-  const sameNameTotal = ctx.recentCalls.filter(c => c.name === call.name).length;
-  if (sameNameTotal >= MAX_SAME_TOOL_PER_TURN) {
-    return { blocked: true, reason: `${call.name} 在本輪已呼叫 ${sameNameTotal} 次（上限 ${MAX_SAME_TOOL_PER_TURN}），疑似散彈式重複，請改用其他方式或回覆使用者` };
+  // 4c. 散彈式重複：同 tool 從 recentCalls 末尾往前連續呼叫 ≥ MAX_SAME_TOOL_PER_TURN 次
+  // 改為「連續」計數（中間穿插別 tool 即清零）— 補上面三層盲點，同時放行批次性質的多檔搬移。
+  // 原始 trace a1cfb101 是 mcp_playwright_browser_close 連續穿插呼叫 6 次都成功；
+  // 連續計數仍能擋住「卡死在同一工具」的真實 buggy 樣態，誤傷批次操作的機率大幅下降。
+  let consecutiveSame = 0;
+  for (let i = ctx.recentCalls.length - 1; i >= 0; i--) {
+    if (ctx.recentCalls[i].name === call.name) consecutiveSame++;
+    else break;
+  }
+  if (consecutiveSame >= MAX_SAME_TOOL_PER_TURN) {
+    return { blocked: true, reason: `${call.name} 已連續呼叫 ${consecutiveSame} 次（上限 ${MAX_SAME_TOOL_PER_TURN}），疑似卡死在同一工具，請改用其他方式或回覆使用者` };
   }
 
   // 5. Reversibility Assessment
