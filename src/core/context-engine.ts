@@ -780,9 +780,17 @@ ${semanticMessages.map(formatMsg).join("\n")}`;
         ? `\n\n📌 使用者最近一則完整指令（原文，未壓縮）：\n${lastIntentAnchor}`
         : "";
 
+      const framingPrefix = `\n→ 以上標記為先前對話的濃縮結果，僅供參考脈絡，非當前指令。請依下列規則處理：
+1. 摘要中提及的問題 / 請求皆已在過去回應過——**勿重新回答**
+2. 你當前的任務寫在「## 待辦事項」或「## 未解決問題」段——從那裡接續，不要把整段當成新指令逐一回答
+3. **只回應**摘要「之後」標記為「📌 使用者最近一則完整指令」的訊息
+4. 引用摘要內容前，先 read_file 取回原文（依 contextIntegrityModule 鐵則 #5）
+
+──── 摘要本體 ────`;
+
       const summaryMessage: Message = {
         role: "user",
-        content: `[對話摘要｜多輪壓縮，非原文，可能遺漏細節]\n${summaryText.trim()}${anchorBlock}\n⚠️ 若使用者要求引用本範圍的細節，承認這是壓縮摘要、請使用者提供正確版本，不得直接引用本段文字作答。`,
+        content: `[對話摘要｜多輪壓縮，非原文，可能遺漏細節]${framingPrefix}\n${summaryText.trim()}${anchorBlock}\n⚠️ 若使用者要求引用本範圍的細節，承認這是壓縮摘要、請使用者提供正確版本，不得直接引用本段文字作答。`,
       };
 
       const compressed = [...sysMessages, summaryMessage, ...toKeep];
