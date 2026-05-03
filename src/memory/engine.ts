@@ -21,6 +21,8 @@ export type { PromotionCandidate, ArchiveCandidate, ConsolidateResult } from "./
 export type { SessionStats, RutWarning } from "./episodic.js";
 export type { ContextPayload } from "./context-builder.js";
 export type { WriteGateResult } from "./write-gate.js";
+export type { MemoryProvider } from "./memory-provider.js";
+export { BuiltinMemoryProvider } from "./builtin-memory-provider.js";
 
 // ── 路徑解析 ──────────────────────────────────────────────────────────────────
 
