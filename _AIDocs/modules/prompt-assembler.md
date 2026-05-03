@@ -1,11 +1,38 @@
 # modules/prompt-assembler — 模組化 System Prompt 組裝
 
 > 檔案：`src/core/prompt-assembler.ts`
-> 更新日期：2026-04-18
+> 更新日期：2026-05-03
 
 ## 職責
 
 將 system prompt 拆成可組合的模組，按 mode + 角色 + intent 動態組裝。
+
+## Frozen Snapshot for Prompt Cache（2026-05-03 落地）
+
+### 機制
+
+`PromptContext` 加 `frozenMaterials?: FrozenPromptMaterials` 欄位（從 `session-snapshot.ts` import）。下列 6 個 module 的 `build(ctx)` 開頭判 `ctx.frozenMaterials`：有值即直接讀凍結值短路返回；無值（session 開場第一個 turn）走原邏輯。
+
+| 模組 | 凍結來源 | 原邏輯（cache killer） |
+|------|---------|---------------------|
+| `date-time` | `ctx.frozenMaterials.dateTimeText` | `new Date().toLocaleString()` 每 turn 變 |
+| `catclaw-md` | `ctx.frozenMaterials.catclawMdText` | `readFileSync(CATCLAW.md)` 每 turn 讀 |
+| `coding-rules` | `ctx.frozenMaterials.codingRulesText` | precision 模式 `readFileSync(coding-discipline.md)` |
+| `tool-summary` | `ctx.frozenMaterials.toolSummaryText` | 讀全域 `_toolSummaryText`（mid-session setter 改） |
+| `skill-summary` | `ctx.frozenMaterials.skillSummaryText` | 讀全域 `_skillSummaryText` |
+| `failure-recall` | `ctx.frozenMaterials.failureRecallText` | 讀全域 `_failureRecallCache` |
+
+### `prepareFrozenMaterials(opts)` export
+
+由 `session-snapshot.ts::prepareSessionSnapshot()` 在 SessionStart hook 內呼叫：用 `frozenMaterials = undefined` 的 `ctx` 跑各 module `build()` 一次，把回傳值打包成 `FrozenPromptMaterials` 的前 6 個欄位。
+
+### identity module 變動
+
+`identityModule` 移除每 turn 變動的 speakerDisplay 段（搬到 user message `[meta]` 前綴）；保留群組頻道一般說明。
+
+詳見 `_AIDocs/modules/session-snapshot.md` Part B。
+
+
 
 ## 內建模組
 
