@@ -7,9 +7,11 @@
  * Q4: Prompt Injection 過濾
  */
 
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { log } from "../logger.js";
 
-// ── Prompt Injection 過濾（Q4） ───────────────────────────────────────────────
+// ── Threat Pattern 分類偵測（擴充自原 INJECTION） ─────────────────────────────
 
 const INJECTION_PATTERNS = [
   /ignore\s+(previous|all|above|prior)\s+instructions?/i,
@@ -24,8 +26,59 @@ const INJECTION_PATTERNS = [
   /###\s+(Human|Assistant|System):/,
 ];
 
+const EXFILTRATION_PATTERNS = [
+  /curl\s+[^\n]*[\$\{]\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)/i,
+  /wget\s+[^\n]*[\$\{]\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)/i,
+  /cat\s+[^\n]*(\.env|credentials|\.netrc|\.pgpass|\.npmrc|\.pypirc)/i,
+  /cat\s+[^\n]*(~|\$HOME)\/\.(ssh|aws|gnupg|kube|docker|azure)/i,
+];
+
+const PERSISTENCE_PATTERNS = [
+  /authorized_keys/i,
+  /(~|\$HOME)\/\.ssh(\/|$)/i,
+  /(~|\$HOME)\/\.catclaw\/\.env/i,
+  /\.(zshrc|bashrc|profile|bash_profile|zprofile)/i,
+  /crontab\s+-e|\/etc\/cron/i,
+];
+
+const SECRET_PATTERNS = [
+  /\bsk-[a-zA-Z0-9]{32,}\b/,
+  /\bsk-ant-[a-zA-Z0-9_-]{32,}\b/,
+  /BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY/,
+  /\b[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b/,
+  /\bgh[ps]_[a-zA-Z0-9]{36,}\b/,
+  /\bxox[bpsa]-[a-zA-Z0-9-]{10,}\b/,
+];
+
+export type ThreatCategory = "prompt_injection" | "exfiltration" | "persistence" | "secret";
+
+export interface ThreatMatch {
+  category: ThreatCategory;
+  patternIndex: number;
+  snippet: string;
+}
+
+/** 掃描文字，回傳所有命中的威脅 pattern。 */
+export function scanThreats(text: string): ThreatMatch[] {
+  const matches: ThreatMatch[] = [];
+  const groups: Array<[ThreatCategory, RegExp[]]> = [
+    ["prompt_injection", INJECTION_PATTERNS],
+    ["exfiltration", EXFILTRATION_PATTERNS],
+    ["persistence", PERSISTENCE_PATTERNS],
+    ["secret", SECRET_PATTERNS],
+  ];
+  for (const [cat, pats] of groups) {
+    for (let i = 0; i < pats.length; i++) {
+      const m = text.match(pats[i]!);
+      if (m) matches.push({ category: cat, patternIndex: i, snippet: m[0].slice(0, 80) });
+    }
+  }
+  return matches;
+}
+
+/** 向後相容 — 舊呼叫端仍可用。內部走新 scanThreats。 */
 export function hasInjectionPattern(text: string): boolean {
-  return INJECTION_PATTERNS.some(pat => pat.test(text));
+  return scanThreats(text).some(t => t.category === "prompt_injection");
 }
 
 // ── 主要 Write Gate 邏輯 ──────────────────────────────────────────────────────
@@ -41,8 +94,10 @@ export interface WriteGateOpts {
 
 export interface WriteGateResult {
   allowed: boolean;
-  reason: "bypass" | "injection" | "duplicate" | "ok";
+  reason: "bypass" | "injection" | "duplicate" | "ok" | "quarantine";
   similarity?: number;
+  /** 偵測到的威脅清單（reason=injection / quarantine 時帶） */
+  threats?: ThreatMatch[];
 }
 
 /**
@@ -65,10 +120,21 @@ export async function checkWriteGate(
     return { allowed: true, reason: "bypass" };
   }
 
-  // ── Q4: Prompt Injection 過濾 ──
-  if (hasInjectionPattern(content)) {
-    log.warn("[write-gate] 阻擋疑似 prompt injection");
-    return { allowed: false, reason: "injection" };
+  // ── Q4: Threat Pattern 分類偵測 ──
+  const threats = scanThreats(content);
+  if (threats.length > 0) {
+    // 嚴重類別 → reject（reason=injection 維持向後相容）
+    const reject = threats.filter(t => t.category === "prompt_injection" || t.category === "secret");
+    if (reject.length > 0) {
+      log.warn(`[write-gate] reject: ${[...new Set(reject.map(t => t.category))].join(", ")}`);
+      return { allowed: false, reason: "injection", threats };
+    }
+    // 中等類別 → quarantine（caller 可選擇 writeQuarantine 落檔審核）
+    const quarantine = threats.filter(t => t.category === "exfiltration" || t.category === "persistence");
+    if (quarantine.length > 0) {
+      log.warn(`[write-gate] quarantine: ${[...new Set(quarantine.map(t => t.category))].join(", ")}`);
+      return { allowed: false, reason: "quarantine", threats };
+    }
   }
 
   // ── Q1: 向量相似度 dedup ──
@@ -92,4 +158,54 @@ export async function checkWriteGate(
   }
 
   return { allowed: true, reason: "ok" };
+}
+
+// ── Quarantine 寫入 ──────────────────────────────────────────────────────────
+
+export interface QuarantineCtx {
+  /** workspace 根目錄（用於決定 _staging/quarantine/ 位置） */
+  workspaceDir: string;
+  /** 觸發的 agent ID（記錄用） */
+  agentId?: string;
+  /** 額外說明（記錄用） */
+  reason?: string;
+}
+
+/**
+ * 把疑似威脅內容寫入 _staging/quarantine/，標 requires_review 等待 /memory-review 審核。
+ *
+ * @returns 寫入的絕對路徑
+ */
+export async function writeQuarantine(
+  content: string,
+  threats: ThreatMatch[],
+  ctx: QuarantineCtx,
+): Promise<string> {
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const cat = threats[0]?.category ?? "unknown";
+  const dir = join(ctx.workspaceDir, "_staging", "quarantine");
+  await mkdir(dir, { recursive: true });
+  const filename = `${ts}-${cat}.md`;
+  const path = join(dir, filename);
+  const categories = [...new Set(threats.map(t => t.category))];
+  const body = [
+    `---`,
+    `quarantined_at: ${new Date().toISOString()}`,
+    `agent_id: ${ctx.agentId ?? "unknown"}`,
+    `categories: [${categories.join(", ")}]`,
+    `reason: ${ctx.reason ?? "auto-detected threat patterns"}`,
+    `requires_review: true`,
+    `---`,
+    ``,
+    `## Threats Detected`,
+    ...threats.map(t => `- [${t.category}] pattern[${t.patternIndex}] snippet: \`${t.snippet}\``),
+    ``,
+    `## Original Content`,
+    ``,
+    content,
+    ``,
+  ].join("\n");
+  await writeFile(path, body, "utf-8");
+  log.info(`[write-gate] quarantined to ${path}`);
+  return path;
 }
