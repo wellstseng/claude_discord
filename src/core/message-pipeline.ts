@@ -22,6 +22,7 @@ import { log } from "../logger.js";
 import { MessageTrace, type TraceCategory } from "./message-trace.js";
 import { assembleSystemPrompt, detectIntent, getModulesForIntent, type AssembleTraceOutput } from "./prompt-assembler.js";
 import { getPlatformMemoryEngine, getPlatformMemoryRoot } from "./platform.js";
+import { sanitizeMemoryText } from "../memory/context-builder.js";
 import { config, type ModePreset, type BridgeConfig } from "./config.js";
 import type { LLMProvider } from "../providers/base.js";
 import type { MessageTrace as MessageTraceType } from "./message-trace.js";
@@ -158,7 +159,7 @@ const PLATFORM_TRACE_CATEGORY: Record<string, TraceCategory> = {
 
 export async function runMessagePipeline(input: PipelineInput): Promise<PipelineResult> {
   const {
-    prompt,
+    prompt: rawPrompt,
     platform,
     channelId,
     accountId,
@@ -177,6 +178,10 @@ export async function runMessagePipeline(input: PipelineInput): Promise<Pipeline
     channelOverride,
     additionalExtraBlocks,
   } = input;
+
+  // Memory Fence：使用者訊息進入 pipeline 時砍假冒 <memory-context> 標籤
+  // 防止下游組裝後 LLM 把假 fence 內容當系統檢索結果處理
+  const prompt = sanitizeMemoryText(rawPrompt);
 
   const traceCategory = input.traceCategory ?? PLATFORM_TRACE_CATEGORY[platform] ?? "api";
   const logPrefix = `[${platform}]`;
