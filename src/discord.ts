@@ -954,6 +954,7 @@ async function handleMessage(
           return {
             ...(thinking ? { thinking } : {}),
             modePreset,
+            modeName: getChannelMode(firstMessage.channelId),
           };
         })(),
         trace: pipeline.trace,

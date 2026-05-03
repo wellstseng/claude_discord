@@ -191,8 +191,28 @@ export async function runMessagePipeline(input: PipelineInput): Promise<Pipeline
   trace.recordContextStart();
 
   // ── 2. Memory Recall ───────────────────────────────────────────────────────
+  // 先看 session-level frozen snapshot（preparedAt session 開場時）。命中即用，保 prompt cache。
+  // session 開場第一個 turn 在 SessionStart hook 內已先建立 snapshot；後續 turn 直接讀。
+  // 若 snapshot 不存在（罕見：snapshot 失敗 / 子 agent / API 直連無 session）→ fallback 跑 live recall。
   let systemPromptFromMemory = "";
-  if (enableMemoryRecall) {
+  const sessionKey = `${platform}:ch:${channelId}`;
+  const { getFrozenMaterials } = await import("./session-snapshot.js");
+  const frozenForSession = getFrozenMaterials(sessionKey);
+  if (frozenForSession?.memoryContextBlock) {
+    systemPromptFromMemory = frozenForSession.memoryContextBlock;
+    trace.recordMemoryRecall({
+      durationMs: 0,
+      fragmentCount: 0,        // snapshot 內已不分 fragment（已組為 block）
+      atomNames: [],
+      injectedTokens: Math.ceil(systemPromptFromMemory.length / 4),
+      vectorSearch: false,
+      degraded: false,
+      blindSpot: false,
+      hits: [],
+      source: "frozen-snapshot",
+    });
+    log.debug(`${logPrefix} 記憶從 frozen snapshot 注入（preparedAt=${frozenForSession.preparedAt}）`);
+  } else if (enableMemoryRecall) {
     const memEngine = getPlatformMemoryEngine();
     if (memEngine) {
       const recallStartMs = Date.now();
@@ -220,6 +240,7 @@ export async function runMessagePipeline(input: PipelineInput): Promise<Pipeline
               score: Math.round(f.score * 1000) / 1000,
               matchedBy: f.matchedBy,
             })),
+            source: "live",
           });
         } else {
           trace.recordMemoryRecall({
@@ -231,6 +252,7 @@ export async function runMessagePipeline(input: PipelineInput): Promise<Pipeline
             degraded: recallResult.degraded,
             blindSpot: recallResult.blindSpot,
             hits: [],
+            source: "live",
           });
         }
       } catch (err) {
@@ -295,6 +317,9 @@ export async function runMessagePipeline(input: PipelineInput): Promise<Pipeline
     extraBlockNames,
     moduleFilter,
     traceOutput: assemblerTrace,
+    // Frozen Snapshot for Prompt Cache：後續 turn 各 module 短路讀凍結值，
+    // 第一個 turn frozenForSession 為 null → 走原邏輯（同時當作 snapshot 種子）。
+    frozenMaterials: frozenForSession ?? undefined,
   });
 
   // ── 6. Trace: Prompt Assembly ──────────────────────────────────────────────

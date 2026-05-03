@@ -145,3 +145,98 @@ export function initSessionSnapshotStore(dataDir: string): SessionSnapshotStore 
 export function getSessionSnapshotStore(): SessionSnapshotStore | null {
   return _snapshotStore;
 }
+
+// ── Frozen Prompt Materials (session-level) ──────────────────────────────────
+//
+// session 開場時凍結 prompt-assembler 各 module 的「session 內穩定」內容，
+// 讓 system prompt 跨 turn byte-wise 相同 → Anthropic prompt cache 命中。
+//
+// 與上方 SessionSnapshotStore（turn-level CE rollback）職責分離：
+// - SessionSnapshotStore：每 turn 前快照 messages（持久化、CE 觸發時 48h TTL）
+// - FrozenPromptMaterials：session 開場凍結 prompt 材料（in-memory、session 結束丟棄）
+
+export interface FrozenPromptMaterials {
+  // 從 prompt-assembler.ts module 凍結
+  dateTimeText: string;
+  catclawMdText: string;
+  codingRulesText: string;
+  toolSummaryText: string;
+  skillSummaryText: string;
+  failureRecallText: string;
+  // 從 memory engine 凍結
+  memoryContextBlock: string;
+  // metadata
+  preparedAt: string;
+  sessionKey: string;
+  accountId: string;
+  channelId: string;
+  agentId?: string;
+}
+
+const _frozenMaterialsMap = new Map<string, FrozenPromptMaterials>();
+
+export function getFrozenMaterials(sessionKey: string): FrozenPromptMaterials | null {
+  return _frozenMaterialsMap.get(sessionKey) ?? null;
+}
+
+export function setFrozenMaterials(sessionKey: string, materials: FrozenPromptMaterials): void {
+  _frozenMaterialsMap.set(sessionKey, materials);
+}
+
+export function clearFrozenMaterials(sessionKey: string): void {
+  _frozenMaterialsMap.delete(sessionKey);
+}
+
+/**
+ * 在 session 開場（agent-loop SessionStart hook 內 turnCount === 0 時）呼叫。
+ * 凍結 prompt-assembler 6 個 module 的輸出 + 執行一次 memory recall，組成 FrozenPromptMaterials。
+ */
+export async function prepareSessionSnapshot(opts: {
+  sessionKey: string;
+  accountId: string;
+  channelId: string;
+  agentId?: string;
+  modeName?: string;
+  workspaceDir?: string;
+  initialPrompt?: string;
+}): Promise<FrozenPromptMaterials> {
+  // 1. 凍結 prompt-assembler module 輸出（先 refresh failure recall 全域 cache）
+  const { prepareFrozenMaterials, refreshFailureRecallCache } = await import("./prompt-assembler.js");
+  await refreshFailureRecallCache();
+
+  const moduleFrozen = prepareFrozenMaterials({
+    modeName: opts.modeName ?? "normal",
+    workspaceDir: opts.workspaceDir,
+  });
+
+  // 2. session 開場 memory recall（以首則 user message 為 query）
+  let memoryContextBlock = "";
+  if (opts.initialPrompt) {
+    try {
+      const { getPlatformMemoryEngine } = await import("./platform.js");
+      const memEngine = getPlatformMemoryEngine();
+      if (memEngine) {
+        const recall = await memEngine.recall(opts.initialPrompt, {
+          accountId: opts.accountId,
+          channelId: opts.channelId,
+        });
+        if (recall.fragments.length > 0) {
+          const ctx = memEngine.buildContext(recall.fragments, opts.initialPrompt, recall.blindSpot);
+          memoryContextBlock = ctx.text;
+        }
+      }
+    } catch (err) {
+      log.debug(`[session-snapshot] memory recall 失敗（snapshot memoryContextBlock 留空）：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return {
+    ...moduleFrozen,
+    memoryContextBlock,
+    preparedAt: new Date().toISOString(),
+    sessionKey: opts.sessionKey,
+    accountId: opts.accountId,
+    channelId: opts.channelId,
+    agentId: opts.agentId,
+  };
+}

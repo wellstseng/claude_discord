@@ -166,6 +166,8 @@ export class SessionManager {
     this.sessions.delete(sessionKey);
     const filePath = this.sessionPath(sessionKey);
     try { if (existsSync(filePath)) unlinkSync(filePath); } catch { /* 靜默 */ }
+    // 清理 frozen prompt materials（in-memory map，避免 leak）
+    void import("./session-snapshot.js").then(m => m.clearFrozenMaterials(sessionKey)).catch(() => { /* 靜默 */ });
     log.debug(`[session] 刪除 ${sessionKey}`);
     this.eventBus?.emit("session:end", sessionKey);
   }
@@ -177,6 +179,8 @@ export class SessionManager {
     const count = session.messages.length;
     session.messages = [];
     session.turnCount = 0;
+    // 清空訊息 = 邏輯重啟 session → 強制下個 turn SessionStart hook 重建 frozen snapshot
+    void import("./session-snapshot.js").then(m => m.clearFrozenMaterials(sessionKey)).catch(() => { /* 靜默 */ });
     this.persist(session);
     log.info(`[session] clearMessages ${sessionKey}：${count} 條`);
     return count;

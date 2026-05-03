@@ -40,6 +40,8 @@ export interface TraceRecall {
   blindSpot?: boolean;
   /** per-atom 命中明細 */
   hits?: TraceRecallHit[];
+  /** recall 來源：live = 本 turn 即時 recall；frozen-snapshot = session 開場凍結快照 */
+  source?: "live" | "frozen-snapshot";
 }
 
 /** Inbound History 追蹤 */

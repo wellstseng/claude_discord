@@ -388,6 +388,8 @@ export interface AgentLoopOpts {
   thinking?: "minimal" | "low" | "medium" | "high" | "xhigh";
   /** 當前模式 preset（由 /mode 或 config 決定，影響 CE、tool budget、prompt extras） */
   modePreset?: import("./config.js").ModePreset;
+  /** 模式名稱（normal / precision，影響 prompt-assembler.codingRulesModule） */
+  modeName?: string;
   /**
    * 執行指令前 DM 確認設定。
    * 啟用時，run_command 執行前會送 DM 給指定使用者等待確認。
@@ -819,6 +821,25 @@ export async function* agentLoop(
     if (hookReg && hookReg.count("SessionStart", opts.agentId) > 0) {
       await hookReg.runSessionStart({ event: "SessionStart", sessionKey, accountId, channelId, agentId: opts.agentId });
     }
+    // Frozen Snapshot for Prompt Cache：凍結 prompt-assembler 各 module 輸出 + 開場 memory recall。
+    // 下個 turn 起 message-pipeline 與本檔 memory-recall 段都會讀此 snapshot → system prompt cache 命中。
+    try {
+      const { prepareSessionSnapshot, setFrozenMaterials } = await import("./session-snapshot.js");
+      const { resolveWorkspaceDir } = await import("./config.js");
+      let workspaceDir: string | undefined;
+      try { workspaceDir = resolveWorkspaceDir(); } catch { /* 取不到工作目錄就讓 module 自己 fallback */ }
+      const materials = await prepareSessionSnapshot({
+        sessionKey, accountId, channelId,
+        agentId: opts.agentId,
+        modeName: opts.modeName,
+        workspaceDir,
+        initialPrompt: prompt,
+      });
+      setFrozenMaterials(sessionKey, materials);
+      log.debug(`[agent-loop] frozen snapshot 已建立 sessionKey=${sessionKey.slice(-8)} memoryBlock=${materials.memoryContextBlock.length}b`);
+    } catch (err) {
+      log.warn(`[agent-loop] frozen snapshot 失敗（繼續，本 session 不享 prompt cache 命中）：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // UserPromptSubmit hook（可 block / 改寫 prompt）
@@ -914,10 +935,24 @@ export async function* agentLoop(
     return;
   }
 
+  // 當前 turn user message 的 [meta] 前綴：ts + speaker（替代從 system prompt 移出的部分）。
+  // user message 本來就 per-turn 不一樣，加在這裡不影響 prompt cache。
+  const userMetaPrefix = (() => {
+    const ts = new Date().toISOString();
+    const parts = [`ts=${ts}`];
+    if (opts.isGroupChannel && opts.speakerDisplay) {
+      parts.push(`speaker=${opts.speakerDisplay} (${accountId}/${opts.speakerRole ?? "member"})`);
+    } else if (opts.speakerDisplay) {
+      parts.push(`speaker=${opts.speakerDisplay}`);
+    }
+    return `[meta] ${parts.join(" ")}`;
+  })();
+  const promptForLLM = `${userMetaPrefix}\n${prompt}`;
+
   // 若有圖片附件，建立混合 content blocks（文字 + 圖片）
   const firstUserContent: string | ContentBlock[] = (() => {
-    if (!opts.imageAttachments?.length) return prompt;
-    const blocks: ContentBlock[] = [{ type: "text", text: prompt }];
+    if (!opts.imageAttachments?.length) return promptForLLM;
+    const blocks: ContentBlock[] = [{ type: "text", text: promptForLLM }];
     for (const img of opts.imageAttachments) {
       blocks.push({ type: "image", data: img.data, mimeType: img.mimeType } satisfies ImageBlock);
     }
@@ -963,8 +998,20 @@ export async function* agentLoop(
   const protectedToolNames = new Set(eagerDefs.map(d => d.name));
 
   // ── 3b. Memory Recall（可選，供子 agent 等無前置 recall 的情境使用）──────────
+  // 先看 frozen snapshot；命中即用，未命中再 fallback live recall（仍保留原行為）。
   let memoryContextBlock = "";
-  if (opts.memoryRecall?.enabled && deps.memoryEngine) {
+  const { getFrozenMaterials: _getFrozenForRecall } = await import("./session-snapshot.js");
+  const _frozenForRecall = _getFrozenForRecall(sessionKey);
+  if (_frozenForRecall?.memoryContextBlock) {
+    memoryContextBlock = _frozenForRecall.memoryContextBlock;
+    trace?.recordMemoryRecall({
+      durationMs: 0, fragmentCount: 0, atomNames: [],
+      injectedTokens: Math.ceil(memoryContextBlock.length / 4),
+      vectorSearch: false, degraded: false, blindSpot: false, hits: [],
+      source: "frozen-snapshot",
+    });
+    log.debug(`[agent-loop] memory recall 從 frozen snapshot 命中`);
+  } else if (opts.memoryRecall?.enabled && deps.memoryEngine) {
     const recallStartMs = Date.now();
     try {
       const recallResult = await deps.memoryEngine.recall(
@@ -990,6 +1037,7 @@ export async function* agentLoop(
             score: Math.round(f.score * 1000) / 1000,
             matchedBy: f.matchedBy,
           })),
+          source: "live",
         });
       }
     } catch (err) {
@@ -997,15 +1045,13 @@ export async function* agentLoop(
     }
   }
 
-  // ── 4. System prompt + 群組多人聲明 ────────────────────────────────────────
+  // ── 4. System prompt ──────────────────────────────────────────────────────
+  // 注：群組多人聲明（speakerDisplay）已移到 user message [meta] 前綴（見上方 firstUserContent 構造）。
+  // 原本注入 system prompt 會每 turn 變動 → Anthropic prompt cache 失效。
   let systemPrompt = opts.systemPrompt ?? "";
   // memory context 前置到 system prompt
   if (memoryContextBlock) {
     systemPrompt = memoryContextBlock + (systemPrompt ? `\n\n${systemPrompt}` : "");
-  }
-  if (opts.isGroupChannel && opts.speakerDisplay) {
-    const isolation = `[多人頻道] 當前說話者：${opts.speakerDisplay}（${accountId}/${opts.speakerRole ?? "member"}）`;
-    systemPrompt = systemPrompt ? `${systemPrompt}\n\n${isolation}` : isolation;
   }
   // Plan Mode：注入行為約束到 system prompt
   if (planActive) {

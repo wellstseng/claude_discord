@@ -16,6 +16,7 @@ import { log } from "../logger.js";
 import type { Role } from "../accounts/registry.js";
 import type { ModePreset } from "./config.js";
 import { config, resolveWorkspaceDir } from "./config.js";
+import type { FrozenPromptMaterials } from "./session-snapshot.js";
 
 // ── Prompt Module 介面 ──────────────────────────────────────────────────────
 
@@ -52,6 +53,9 @@ export interface PromptContext {
   /** 對話場景標籤（比照 OpenClaw ConversationLabel）
    *  例："Guild名 #頻道名 channel id:頻道ID" */
   conversationLabel?: string;
+  /** Session 開場凍結的 prompt 材料。各 module build() 偵測到此欄位即直接讀凍結值，
+   *  不再執行 readFileSync / new Date / 全域變數讀取等變動操作（保 prompt cache 命中）。 */
+  frozenMaterials?: FrozenPromptMaterials;
 }
 
 // ── Context-aware Intent Detection ──────────────────────────────────────────
@@ -91,11 +95,13 @@ export function getModulesForIntent(intent: PromptIntent): string[] | undefined 
 const dateTimeModule: PromptModule = {
   name: "date-time",
   priority: 5,
-  build: () => {
+  build: (ctx) => {
+    if (ctx.frozenMaterials) return ctx.frozenMaterials.dateTimeText;
     const now = new Date();
     const dateStr = now.toLocaleDateString("zh-TW", { timeZone: "Asia/Taipei", year: "numeric", month: "long", day: "numeric", weekday: "long" });
     const timeStr = now.toLocaleTimeString("zh-TW", { timeZone: "Asia/Taipei", hour12: false });
-    return `[系統時鐘] 今天是 ${dateStr}，現在時間 ${timeStr}（Asia/Taipei）。使用者說「今天」「昨天」「這週」等相對時間時，以此日期為基準。`;
+    // session 凍結時刻；user message 前綴每 turn 帶當下 ts，LLM 仍能拿到精確時間
+    return `[系統時鐘] 今天是 ${dateStr}，session 開始時間 ${timeStr}（Asia/Taipei）。使用者每則訊息會在 [meta] 前綴帶當下 ts；說「今天」「昨天」「這週」時以該 ts 為基準。`;
   },
 };
 
@@ -110,9 +116,11 @@ const identityModule: PromptModule = {
     if (ctx.conversationLabel) {
       parts.push(`\n[Conversation] ${ctx.conversationLabel}`);
     }
-    if (ctx.isGroupChannel && ctx.speakerDisplay) {
-      parts.push(`[多人頻道] 當前說話者：${ctx.speakerDisplay}（${ctx.accountId ?? "unknown"}/${ctx.speakerRole ?? "member"}）`);
+    if (ctx.isGroupChannel) {
+      parts.push("[多人頻道] 此頻道有多名使用者；每則 user 訊息會在 [meta] 前綴帶當下說話者，請按該前綴區分。");
     }
+    // 注：speakerDisplay / accountId 不在此處注入（per-turn 變動會炸 prompt cache）。
+    // 改由 agent-loop.ts 在每則 user message 前綴加 [meta] ts=... speaker=...
     return parts.join("\n");
   },
 };
@@ -166,6 +174,7 @@ const codingRulesModule: PromptModule = {
   name: "coding-rules",
   priority: 30,
   build: (ctx) => {
+    if (ctx.frozenMaterials) return ctx.frozenMaterials.codingRulesText;
     // 精密模式從 workspace/prompts/coding-discipline.md 載入
     if (ctx.modeName === "precision" && ctx.workspaceDir) {
       const p = join(ctx.workspaceDir, "prompts", "coding-discipline.md");
@@ -244,7 +253,10 @@ export function setToolSummary(tools: Array<{ name: string; description: string 
 const toolSummaryModule: PromptModule = {
   name: "tool-summary",
   priority: 56,
-  build: () => _toolSummaryText,
+  build: (ctx) => {
+    if (ctx.frozenMaterials) return ctx.frozenMaterials.toolSummaryText;
+    return _toolSummaryText;
+  },
 };
 
 /** Skill 摘要（由 platform.ts 初始化後注入） */
@@ -266,7 +278,10 @@ export function setSkillSummary(skills: Array<{ name: string; description: strin
 const skillSummaryModule: PromptModule = {
   name: "skill-summary",
   priority: 57,
-  build: () => _skillSummaryText,
+  build: (ctx) => {
+    if (ctx.frozenMaterials) return ctx.frozenMaterials.skillSummaryText;
+    return _skillSummaryText;
+  },
 };
 
 const memoryRulesModule: PromptModule = {
@@ -320,6 +335,7 @@ const claudeMdModule: PromptModule = {
   name: "catclaw-md",
   priority: 15, // after identity (10), before tools-usage (20)
   build: (ctx) => {
+    if (ctx.frozenMaterials) return ctx.frozenMaterials.catclawMdText;
     const wsDir = ctx.workspaceDir ?? (() => { try { return resolveWorkspaceDir(); } catch { return ""; } })();
     if (!wsDir) return "";
 
@@ -386,7 +402,10 @@ export async function refreshFailureRecallCache(): Promise<void> {
 const failureRecallModule: PromptModule = {
   name: "failure-recall",
   priority: 55, // after coding-rules (40), before memory-rules (60)
-  build: () => _failureRecallCache,
+  build: (ctx) => {
+    if (ctx.frozenMaterials) return ctx.frozenMaterials.failureRecallText;
+    return _failureRecallCache;
+  },
 };
 
 // ── Module Registry ──────────────────────────────────────────────────────────
@@ -501,4 +520,44 @@ export function listPromptModules(): Array<{ name: string; priority: number }> {
   return [...builtinModules, ...customModules]
     .sort((a, b) => a.priority - b.priority)
     .map(m => ({ name: m.name, priority: m.priority }));
+}
+
+/**
+ * Session 開場時凍結各 module 的「session 內穩定」輸出，供後續 turn 讀同一份。
+ * 由 session-snapshot.ts 的 prepareSessionSnapshot() 呼叫。
+ *
+ * 凍結的 6 個 module 對應 cache killer 來源：
+ * - dateTime（new Date 每 turn 變）
+ * - catclaw-md（readFileSync）
+ * - coding-rules（readFileSync）
+ * - tool-summary / skill-summary（讀全域 mutable cache）
+ * - failure-recall（讀全域 mutable cache，本函式呼叫前需先 await refreshFailureRecallCache()）
+ *
+ * 注意：呼叫時 ctx.frozenMaterials 必須為 undefined，否則會導致 build() 短路成空字串。
+ */
+export function prepareFrozenMaterials(opts: {
+  modeName: string;
+  workspaceDir?: string;
+}): {
+  dateTimeText: string;
+  catclawMdText: string;
+  codingRulesText: string;
+  toolSummaryText: string;
+  skillSummaryText: string;
+  failureRecallText: string;
+} {
+  const ctx: PromptContext = {
+    role: "admin" as Role,        // 凍結的 6 個 module 都不讀 role
+    mode: {} as ModePreset,       // 同上不讀 mode
+    modeName: opts.modeName,
+    workspaceDir: opts.workspaceDir,
+  };
+  return {
+    dateTimeText: dateTimeModule.build(ctx),
+    catclawMdText: claudeMdModule.build(ctx),
+    codingRulesText: codingRulesModule.build(ctx),
+    toolSummaryText: toolSummaryModule.build(ctx),
+    skillSummaryText: skillSummaryModule.build(ctx),
+    failureRecallText: failureRecallModule.build(ctx),
+  };
 }
